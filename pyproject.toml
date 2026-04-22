@@ -1,0 +1,25 @@
+[project]
+name = "coming-data"
+version = "0.1.0"
+description = "Jpop 아티스트 및 내한공연 수집 파이프라인"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "apscheduler>=3.10",
+    "rapidfuzz>=3.0",
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
