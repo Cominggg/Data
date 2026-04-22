@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(gh issue *)",
+      "Bash(gh pr *)",
+      "Bash(gh repo *)",
+      "Bash(gh api *)",
+      "Bash(python3 *)",
+      "Bash(pip *)",
+      "Bash(pip3 *)",
+      "Bash(ruff check *)",
+      "Bash(ruff format *)",
+      "Bash(ruff *)",
+      "WebSearch",
+      "WebFetch(domain:musicbrainz.org)",
+      "WebFetch(domain:api.setlist.fm)",
+      "WebFetch(domain:coverartarchive.org)",
+      "WebFetch(domain:kopis.or.kr)",
+      "WebFetch(domain:openapi.kopis.or.kr)",
+      "WebFetch(domain:wiki.musicbrainz.org)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -q '\\.py$'; then ruff check --fix \"$CLAUDE_TOOL_INPUT_FILE_PATH\" 2>/dev/null; ruff format \"$CLAUDE_TOOL_INPUT_FILE_PATH\" 2>/dev/null; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
