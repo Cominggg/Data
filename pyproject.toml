@@ -21,7 +21,11 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --cov=collectors --cov=db --cov=matchers --cov-report=term-missing"
+addopts = "-v --cov=collectors --cov=db --cov=matchers --cov-report=term-missing -m 'not integration'"
+markers = [
+    "unit: 외부 의존성 없는 순수 단위 테스트",
+    "integration: 실제 DB·외부 API 연결이 필요한 통합 테스트 (기본 실행에서 제외)",
+]
 
 [tool.coverage.run]
 source = ["collectors", "db", "matchers"]

@@ -158,3 +158,24 @@ class TestCollectArtists:
         result = collect_artists()
         assert result == []
         mock_search.assert_called_once()
+
+    @patch("collectors.musicbrainz._MAX_ARTISTS", 1)
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    @patch("collectors.musicbrainz._search_artists")
+    def test_stops_at_max_artists_limit(self, mock_search, mock_detail):
+        """_MAX_ARTISTS 상한 도달 시 다음 페이지를 요청하지 않고 중단해야 한다."""
+        mock_search.return_value = {
+            "artists": [{"id": "mbid-1", "name": "Artist1"}],
+            "count": 10_000,
+        }
+        mock_detail.return_value = {
+            "id": "mbid-1",
+            "name": "Artist1",
+            "sort-name": "Artist1",
+            "aliases": [],
+            "relations": [],
+            "life-span": {},
+        }
+        result = collect_artists()
+        assert len(result) == 1
+        mock_search.assert_called_once()
