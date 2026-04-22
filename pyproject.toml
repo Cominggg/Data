@@ -1,8 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["collectors*", "db*", "matchers*"]
+
 [project]
 name = "coming-data"
 version = "0.1.0"
 description = "Jpop 아티스트 및 내한공연 수집 파이프라인"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "sqlalchemy>=2.0",
     "psycopg2-binary>=2.9",
@@ -15,7 +22,21 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "ruff>=0.4",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --cov=collectors --cov=db --cov=matchers --cov-report=term-missing -m 'not integration'"
+markers = [
+    "unit: 외부 의존성 없는 순수 단위 테스트",
+    "integration: 실제 DB·외부 API 연결이 필요한 통합 테스트 (기본 실행에서 제외)",
+]
+
+[tool.coverage.run]
+source = ["collectors", "db", "matchers"]
+omit = ["tests/*"]
 
 [tool.ruff]
 line-length = 100
