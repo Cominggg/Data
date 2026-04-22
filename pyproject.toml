@@ -1,8 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["collectors*", "db*", "matchers*"]
+
 [project]
 name = "coming-data"
 version = "0.1.0"
 description = "Jpop 아티스트 및 내한공연 수집 파이프라인"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "sqlalchemy>=2.0",
     "psycopg2-binary>=2.9",
