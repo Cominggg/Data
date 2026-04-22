@@ -73,6 +73,21 @@ jpop-concert-collector/
 - 대상: `prfstate=공연완료`
 - 데이터 미존재 시 빈 상태 유지
 
+## 개발 워크플로우
+
+### 서브에이전트 패턴
+
+새 기능 구현 시 두 에이전트를 병렬로 사용한다:
+- **Agent A**: 기능 구현 (`collectors/`, `matchers/`, `db/`)
+- **Agent B**: 대응 테스트 파일 작성 (`tests/`)
+
+```
+/start → Agent A(구현) + Agent B(테스트) 병렬 실행
+       → PostToolUse 훅: .py 저장 시 pytest 자동 실행
+       → /test: 결과 요약 및 실패 분석
+       → /commit → /pr
+```
+
 ## 공연-아티스트 관계 (concert_artist 테이블)
 
 | 컬럼 | 설명 |

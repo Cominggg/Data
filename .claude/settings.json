@@ -7,6 +7,7 @@
       "Bash(gh repo *)",
       "Bash(gh api *)",
       "Bash(python3 *)",
+      "Bash(python -m pytest *)",
       "Bash(pip *)",
       "Bash(pip3 *)",
       "Bash(ruff check *)",
@@ -28,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -q '\\.py$'; then ruff check --fix \"$CLAUDE_TOOL_INPUT_FILE_PATH\" 2>/dev/null; ruff format \"$CLAUDE_TOOL_INPUT_FILE_PATH\" 2>/dev/null; fi"
+            "command": "if echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -q '\\.py$'; then ruff check --fix \"$CLAUDE_TOOL_INPUT_FILE_PATH\" 2>/dev/null; ruff format \"$CLAUDE_TOOL_INPUT_FILE_PATH\" 2>/dev/null; FILE_DIR=$(dirname \"$CLAUDE_TOOL_INPUT_FILE_PATH\"); PROJ=$(git -C \"$FILE_DIR\" rev-parse --show-toplevel 2>/dev/null); BASENAME=$(basename \"$CLAUDE_TOOL_INPUT_FILE_PATH\" .py); TEST_FILE=\"$PROJ/tests/test_${BASENAME}.py\"; if [ -n \"$PROJ\" ] && [ -f \"$TEST_FILE\" ]; then cd \"$PROJ\" && python -m pytest \"$TEST_FILE\" -q --no-header 2>&1 | tail -5; fi; fi"
           }
         ]
       }
