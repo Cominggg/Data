@@ -19,6 +19,7 @@ _HEADERS = {
 }
 _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
+_MAX_ARTISTS = 10_000
 
 
 def _get(path: str, params: dict) -> dict:
@@ -128,7 +129,9 @@ def collect_artists() -> list[dict]:
         offset += len(batch)
         logger.info("진행: %d / %d", offset, total)
 
-        if offset >= total:
+        if offset >= total or offset >= _MAX_ARTISTS:
+            if offset >= _MAX_ARTISTS:
+                logger.warning("최대 수집 한도(%d)에 도달해 수집을 중단합니다.", _MAX_ARTISTS)
             break
 
     logger.info("MusicBrainz 아티스트 수집 완료: 총 %d건", len(artists))
