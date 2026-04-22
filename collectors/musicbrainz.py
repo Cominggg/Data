@@ -1,13 +1,20 @@
 import logging
+import os
 import time
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://musicbrainz.org/ws/2"
+_USER_AGENT = os.environ.get("MUSICBRAINZ_USER_AGENT")
+if not _USER_AGENT:
+    raise ValueError("MUSICBRAINZ_USER_AGENT 환경변수가 설정되지 않았습니다.")
 _HEADERS = {
-    "User-Agent": "coming-data/0.1.0 (dbgur3315@gmail.com)",
+    "User-Agent": _USER_AGENT,
     "Accept": "application/json",
 }
 _RATE_LIMIT_SLEEP = 1.1
