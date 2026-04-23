@@ -44,6 +44,29 @@ def _fetch_release_groups(artist_mbid: str, offset: int) -> dict:
     )
 
 
+def _fetch_tracks(release_mbid: str) -> dict:
+    return _get(
+        f"/release/{release_mbid}",
+        {"inc": "recordings", "fmt": "json"},
+    )
+
+
+def _parse_tracks(release_data: dict) -> list[dict]:
+    tracks = []
+    for medium in release_data.get("media", []):
+        for track in medium.get("tracks", []):
+            recording = track.get("recording", {})
+            tracks.append(
+                {
+                    "mbid": recording.get("id"),
+                    "title": track.get("title"),
+                    "position": track.get("position"),
+                    "length_ms": track.get("length"),
+                }
+            )
+    return tracks
+
+
 def _get_representative_release_mbid(release_group: dict) -> str | None:
     releases = release_group.get("releases", [])
     if not releases:
@@ -72,6 +95,13 @@ def collect_releases(artist_mbid: str) -> list[dict]:
 
         for rg in batch:
             release_mbid = _get_representative_release_mbid(rg)
+            tracks = []
+            if release_mbid:
+                try:
+                    release_data = _fetch_tracks(release_mbid)
+                    tracks = _parse_tracks(release_data)
+                except requests.HTTPError as e:
+                    logger.warning("트랙 수집 실패 release_mbid=%s: %s", release_mbid, e)
             results.append(
                 {
                     "release_group_mbid": rg.get("id"),
@@ -80,6 +110,7 @@ def collect_releases(artist_mbid: str) -> list[dict]:
                     "type": rg.get("primary-type"),
                     "first_release_date": rg.get("first-release-date") or None,
                     "representative_release_mbid": release_mbid,
+                    "tracks": tracks,
                 }
             )
 
