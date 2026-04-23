@@ -186,10 +186,10 @@ class TestReleaseCollect:
         insert_sqls = [
             str(c.args[0])
             for c in mock_session.execute.call_args_list
-            if "ON CONFLICT" in str(c.args[0])
+            if "INSERT" in str(c.args[0])
         ]
         assert len(insert_sqls) >= 1
-        assert all("DO NOTHING" in sql for sql in insert_sqls)
+        assert all("ON CONFLICT" in sql for sql in insert_sqls)
 
     @patch("collectors.release._fetch_cover_art_url")
     @patch("collectors.release._fetch_tracks")

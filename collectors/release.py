@@ -78,7 +78,6 @@ def _fetch_cover_art_url(release_group_mbid: str) -> Optional[str]:
     if response.status_code == 404:
         return None
     response.raise_for_status()
-    return None
 
 
 def _get_representative_release_mbid(release_group: dict) -> Optional[str]:
