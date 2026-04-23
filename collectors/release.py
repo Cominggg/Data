@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from typing import Optional
 
 import requests
 from dotenv import load_dotenv
@@ -68,7 +69,7 @@ def _parse_tracks(release_data: dict) -> list[dict]:
     return tracks
 
 
-def _fetch_cover_art_url(release_group_mbid: str) -> str | None:
+def _fetch_cover_art_url(release_group_mbid: str) -> Optional[str]:
     time.sleep(_RATE_LIMIT_SLEEP)
     url = f"{_CAA_BASE_URL}/release-group/{release_group_mbid}/front"
     response = requests.get(url, allow_redirects=False, timeout=30)
@@ -80,7 +81,7 @@ def _fetch_cover_art_url(release_group_mbid: str) -> str | None:
     return None
 
 
-def _get_representative_release_mbid(release_group: dict) -> str | None:
+def _get_representative_release_mbid(release_group: dict) -> Optional[str]:
     releases = release_group.get("releases", [])
     if not releases:
         return None
