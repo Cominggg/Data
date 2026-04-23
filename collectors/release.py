@@ -20,6 +20,7 @@ _HEADERS = {
 _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
 _RELEASE_TYPES = "Album|Single|EP"
+_CAA_BASE_URL = "https://coverartarchive.org"
 
 
 def _get(path: str, params: dict) -> dict:
@@ -67,6 +68,18 @@ def _parse_tracks(release_data: dict) -> list[dict]:
     return tracks
 
 
+def _fetch_cover_art_url(release_group_mbid: str) -> str | None:
+    time.sleep(_RATE_LIMIT_SLEEP)
+    url = f"{_CAA_BASE_URL}/release-group/{release_group_mbid}/front"
+    response = requests.get(url, allow_redirects=False, timeout=30)
+    if response.status_code in (301, 302, 307, 308):
+        return response.headers.get("Location")
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return None
+
+
 def _get_representative_release_mbid(release_group: dict) -> str | None:
     releases = release_group.get("releases", [])
     if not releases:
@@ -94,7 +107,9 @@ def collect_releases(artist_mbid: str) -> list[dict]:
             break
 
         for rg in batch:
+            rg_mbid = rg.get("id")
             release_mbid = _get_representative_release_mbid(rg)
+
             tracks = []
             if release_mbid:
                 try:
@@ -102,14 +117,23 @@ def collect_releases(artist_mbid: str) -> list[dict]:
                     tracks = _parse_tracks(release_data)
                 except requests.HTTPError as e:
                     logger.warning("트랙 수집 실패 release_mbid=%s: %s", release_mbid, e)
+
+            cover_url = None
+            if rg_mbid:
+                try:
+                    cover_url = _fetch_cover_art_url(rg_mbid)
+                except requests.HTTPError as e:
+                    logger.warning("커버 아트 수집 실패 release_group_mbid=%s: %s", rg_mbid, e)
+
             results.append(
                 {
-                    "release_group_mbid": rg.get("id"),
+                    "release_group_mbid": rg_mbid,
                     "artist_mbid": artist_mbid,
                     "title": rg.get("title"),
                     "type": rg.get("primary-type"),
                     "first_release_date": rg.get("first-release-date") or None,
                     "representative_release_mbid": release_mbid,
+                    "cover_url": cover_url,
                     "tracks": tracks,
                 }
             )
