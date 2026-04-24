@@ -45,7 +45,7 @@ def _search_artists(offset: int) -> dict:
 def _fetch_artist_detail(mbid: str) -> dict:
     return _get(
         f"/artist/{mbid}",
-        {"inc": "aliases+url-rels+artist-rels", "fmt": "json"},
+        {"inc": "aliases+url-rels", "fmt": "json"},
     )
 
 
@@ -68,23 +68,6 @@ def _parse_url_rels(relations: list) -> list[dict]:
     ]
 
 
-def _parse_members(relations: list) -> list[dict]:
-    members = []
-    for rel in relations:
-        if rel.get("type") != "member of band":
-            continue
-        artist = rel.get("artist", {})
-        members.append(
-            {
-                "mbid": artist.get("id"),
-                "name": artist.get("name"),
-                "sort_name": artist.get("sort-name"),
-                "is_current": not rel.get("ended", False),
-            }
-        )
-    return members
-
-
 def _parse_artist(detail: dict) -> dict:
     relations = detail.get("relations", [])
     life_span = detail.get("life-span", {})
@@ -95,7 +78,6 @@ def _parse_artist(detail: dict) -> dict:
         "sort_name": detail.get("sort-name"),
         "aliases": _parse_aliases(detail.get("aliases", [])),
         "url_rels": _parse_url_rels(relations),
-        "members": _parse_members(relations),
         "debut_date": life_span.get("begin"),
     }
 
