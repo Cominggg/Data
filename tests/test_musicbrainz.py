@@ -6,7 +6,6 @@ import requests
 from collectors.musicbrainz import (
     _parse_aliases,
     _parse_artist,
-    _parse_members,
     _parse_url_rels,
     collect_artists,
 )
@@ -53,38 +52,6 @@ class TestParseUrlRels:
 
     def test_returns_empty_for_empty_input(self):
         assert _parse_url_rels([]) == []
-
-
-class TestParseMembers:
-    def test_extracts_current_member(self):
-        relations = [
-            {
-                "type": "member of band",
-                "ended": False,
-                "artist": {"id": "mbid-1", "name": "Member A", "sort-name": "A, Member"},
-            }
-        ]
-        result = _parse_members(relations)
-        assert len(result) == 1
-        assert result[0]["mbid"] == "mbid-1"
-        assert result[0]["is_current"] is True
-
-    def test_former_member_is_not_current(self):
-        relations = [
-            {
-                "type": "member of band",
-                "ended": True,
-                "artist": {"id": "mbid-2", "name": "Former", "sort-name": "Former"},
-            }
-        ]
-        assert _parse_members(relations)[0]["is_current"] is False
-
-    def test_ignores_non_member_relations(self):
-        relations = [{"type": "supporting musician", "artist": {"id": "mbid-3"}}]
-        assert _parse_members(relations) == []
-
-    def test_returns_empty_for_empty_input(self):
-        assert _parse_members([]) == []
 
 
 class TestParseArtist:
