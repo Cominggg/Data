@@ -147,19 +147,21 @@ def save_setlists(setlists: list[dict]) -> None:
                 continue
 
             setlist_id = row[0]
-            for track in item["tracks"]:
-                session.execute(
-                    text("""
-                        INSERT INTO setlist_track (setlist_id, position, song_name, info)
-                        VALUES (:setlist_id, :position, :song_name, :info)
-                    """),
+            session.execute(
+                text("""
+                    INSERT INTO setlist_track (setlist_id, position, song_name, info)
+                    VALUES (:setlist_id, :position, :song_name, :info)
+                """),
+                [
                     {
                         "setlist_id": setlist_id,
                         "position": track["position"],
                         "song_name": track["song_name"],
                         "info": track.get("info"),
-                    },
-                )
+                    }
+                    for track in item["tracks"]
+                ],
+            )
 
     logger.info("셋리스트 저장 완료: %d건 처리", len(setlists))
 

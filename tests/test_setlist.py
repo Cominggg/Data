@@ -101,6 +101,34 @@ class TestSetlistCollect:
 
         assert result == []
 
+    def test_fallback_to_second_artist_when_first_returns_no_match(self):
+        """첫 번째 아티스트 검색 실패 시 두 번째 아티스트 MBID로 폴백해야 한다."""
+        http_err = requests.HTTPError()
+        http_err.response = MagicMock(status_code=404)
+
+        miss_response = MagicMock()
+        miss_response.raise_for_status.side_effect = http_err
+
+        hit_response = MagicMock()
+        hit_response.raise_for_status = MagicMock()
+        hit_response.json.return_value = _make_api_response([_sample_setlist(id="hit-setlist")])
+
+        concerts = [
+            _sample_concert(concert_id=1, artist_mbid="artist-miss"),
+            _sample_concert(concert_id=1, artist_mbid="artist-hit"),
+        ]
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=concerts):
+            with patch(
+                "collectors.setlist.requests.get",
+                side_effect=[miss_response, hit_response],
+            ):
+                result = collect()
+
+        assert len(result) == 1
+        assert result[0]["concert_id"] == 1
+        assert result[0]["setlist_fm_id"] == "hit-setlist"
+
     def test_request_includes_required_headers(self):
         """x-api-key, Accept: application/json 헤더가 포함되어야 한다."""
         mock_response = MagicMock()
