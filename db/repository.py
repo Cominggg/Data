@@ -102,6 +102,68 @@ def save_concerts(concerts: list[dict]) -> None:
     logger.info("공연 저장 완료: %d건 처리", len(concerts))
 
 
+def get_completed_concerts() -> list[dict]:
+    """setlist 미수집 공연완료 건을 아티스트 MBID와 함께 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT DISTINCT c.id AS concert_id, c.prfnm, c.prfpdfrom, c.prfpdto,
+                                a.mbid AS artist_mbid
+                FROM concert c
+                JOIN concert_artist ca ON ca.concert_id = c.id AND ca.approved = true
+                JOIN artist a ON a.id = ca.artist_id
+                LEFT JOIN setlist s ON s.concert_id = c.id
+                WHERE c.prfstate = '공연완료'
+                  AND s.id IS NULL
+            """)
+        ).fetchall()
+    return [
+        {
+            "concert_id": row[0],
+            "prfnm": row[1],
+            "prfpdfrom": str(row[2]) if row[2] else None,
+            "prfpdto": str(row[3]) if row[3] else None,
+            "artist_mbid": row[4],
+        }
+        for row in rows
+    ]
+
+
+def save_setlists(setlists: list[dict]) -> None:
+    """수집된 셋리스트를 setlist·setlist_track 테이블에 저장한다. 중복 시 무시."""
+    with get_session() as session:
+        for item in setlists:
+            row = session.execute(
+                text("""
+                    INSERT INTO setlist (concert_id, setlist_fm_id, collected_at)
+                    VALUES (:concert_id, :setlist_fm_id, NOW())
+                    ON CONFLICT (setlist_fm_id) DO NOTHING
+                    RETURNING id
+                """),
+                {"concert_id": item["concert_id"], "setlist_fm_id": item["setlist_fm_id"]},
+            ).fetchone()
+
+            if not row or not item.get("tracks"):
+                continue
+
+            setlist_id = row[0]
+            for track in item["tracks"]:
+                session.execute(
+                    text("""
+                        INSERT INTO setlist_track (setlist_id, position, song_name, info)
+                        VALUES (:setlist_id, :position, :song_name, :info)
+                    """),
+                    {
+                        "setlist_id": setlist_id,
+                        "position": track["position"],
+                        "song_name": track["song_name"],
+                        "info": track.get("info"),
+                    },
+                )
+
+    logger.info("셋리스트 저장 완료: %d건 처리", len(setlists))
+
+
 def update_concert_status(concerts: list[dict]) -> None:
     """updatedate 변화 감지 시 prfstate와 updatedate를 갱신한다."""
     updated = 0
