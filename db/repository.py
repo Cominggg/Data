@@ -1,3 +1,4 @@
+import json
 import logging
 
 from sqlalchemy import text
@@ -70,3 +71,63 @@ def save_releases(releases: list[dict]) -> None:
                 )
 
         logger.info("릴리즈 저장 완료: %d건 처리", len(releases))
+
+
+def save_concerts(concerts: list[dict]) -> None:
+    """수집된 공연 목록을 concert 테이블에 저장한다. kopis_id 중복 시 무시."""
+    with get_session() as session:
+        for concert in concerts:
+            session.execute(
+                text("""
+                    INSERT INTO concert
+                        (kopis_id, prfnm, prfcast, prfpdfrom, prfpdto,
+                         fcltynm, prfstate, updatedate, relates)
+                    VALUES
+                        (:kopis_id, :prfnm, :prfcast, :prfpdfrom, :prfpdto,
+                         :fcltynm, :prfstate, :updatedate, :relates)
+                    ON CONFLICT (kopis_id) DO NOTHING
+                """),
+                {
+                    "kopis_id": concert["kopis_id"],
+                    "prfnm": concert["prfnm"],
+                    "prfcast": concert["prfcast"],
+                    "prfpdfrom": concert["prfpdfrom"],
+                    "prfpdto": concert["prfpdto"],
+                    "fcltynm": concert["fcltynm"],
+                    "prfstate": concert["prfstate"],
+                    "updatedate": concert["updatedate"],
+                    "relates": json.dumps(concert["relates"], ensure_ascii=False),
+                },
+            )
+    logger.info("공연 저장 완료: %d건 처리", len(concerts))
+
+
+def update_concert_status(concerts: list[dict]) -> None:
+    """updatedate 변화 감지 시 prfstate와 updatedate를 갱신한다."""
+    updated = 0
+    with get_session() as session:
+        for concert in concerts:
+            row = session.execute(
+                text("SELECT updatedate FROM concert WHERE kopis_id = :kopis_id"),
+                {"kopis_id": concert["kopis_id"]},
+            ).fetchone()
+
+            if row is None:
+                continue
+
+            if row[0] != concert["updatedate"]:
+                session.execute(
+                    text("""
+                        UPDATE concert
+                        SET prfstate = :prfstate, updatedate = :updatedate
+                        WHERE kopis_id = :kopis_id
+                    """),
+                    {
+                        "prfstate": concert["prfstate"],
+                        "updatedate": concert["updatedate"],
+                        "kopis_id": concert["kopis_id"],
+                    },
+                )
+                updated += 1
+
+    logger.info("공연 상태 갱신 완료: %d건 변경", updated)
