@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime
+from typing import Optional
 
 import requests
 from dotenv import load_dotenv
@@ -42,7 +43,7 @@ def _parse_tracks(sets_data: dict) -> list[dict]:
     return tracks
 
 
-def _event_date_in_range(event_date_str: str, prfpdfrom: str | None, prfpdto: str | None) -> bool:
+def _event_date_in_range(event_date_str: str, prfpdfrom: Optional[str], prfpdto: Optional[str]) -> bool:
     """eventDate (dd-MM-yyyy) 가 공연 기간 (yyyy-MM-dd) 안에 포함되는지 확인."""
     try:
         event_dt = datetime.strptime(event_date_str, "%d-%m-%Y")

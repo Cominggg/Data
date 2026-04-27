@@ -14,7 +14,7 @@ _TEST_ENV = {
     "DB_NAME": "test_db",
     "MUSICBRAINZ_USER_AGENT": "coming-data-test/1.0 (test@example.com)",
     "KOPIS_API_KEY": "test_kopis_key",
-    "SETLIST_API_KEY": "test_setlist_key",
+    "SETLISTFM_API_KEY": "test_setlist_key",
 }
 
 for _key, _val in _TEST_ENV.items():
