@@ -83,7 +83,7 @@ def collect() -> list[dict]:
 
         for item in data.get("setlist", []):
             event_date = item.get("eventDate", "")
-            if not _event_date_in_range(event_date, concert["prfpdfrom"], concert["prfpdto"]):
+            if not _event_date_in_range(event_date, concert["start_date"], concert["end_date"]):
                 continue
 
             tracks = _parse_tracks(item.get("sets", {}))

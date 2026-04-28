@@ -123,22 +123,22 @@ def get_completed_concerts() -> list[dict]:
     with get_session() as session:
         rows = session.execute(
             text("""
-                SELECT DISTINCT c.id AS concert_id, c.prfnm, c.prfpdfrom, c.prfpdto,
+                SELECT DISTINCT c.id AS concert_id, c.title, c.start_date, c.end_date,
                                 a.mbid AS artist_mbid
                 FROM concert c
                 JOIN concert_artist ca ON ca.concert_id = c.id AND ca.approved = true
                 JOIN artist a ON a.id = ca.artist_id
                 LEFT JOIN setlist s ON s.concert_id = c.id
-                WHERE c.prfstate = '공연완료'
+                WHERE c.status = '공연완료'
                   AND s.id IS NULL
             """)
         ).fetchall()
     return [
         {
             "concert_id": row[0],
-            "prfnm": row[1],
-            "prfpdfrom": str(row[2]) if row[2] else None,
-            "prfpdto": str(row[3]) if row[3] else None,
+            "title": row[1],
+            "start_date": str(row[2]) if row[2] else None,
+            "end_date": str(row[3]) if row[3] else None,
             "artist_mbid": row[4],
         }
         for row in rows
