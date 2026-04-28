@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -26,6 +27,7 @@ _HEADERS = {
 def _get(path: str, params: dict) -> dict:
     response = requests.get(f"{_BASE_URL}{path}", headers=_HEADERS, params=params, timeout=30)
     response.raise_for_status()
+    time.sleep(1.0)
     return response.json()
 
 
@@ -83,7 +85,7 @@ def collect() -> list[dict]:
 
         for item in data.get("setlist", []):
             event_date = item.get("eventDate", "")
-            if not _event_date_in_range(event_date, concert["prfpdfrom"], concert["prfpdto"]):
+            if not _event_date_in_range(event_date, concert["start_date"], concert["end_date"]):
                 continue
 
             tracks = _parse_tracks(item.get("sets", {}))

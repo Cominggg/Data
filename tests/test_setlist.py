@@ -32,9 +32,9 @@ def _sample_setlist(**kwargs) -> dict:
 def _sample_concert(**kwargs) -> dict:
     base = {
         "concert_id": 1,
-        "prfnm": "공연명",
-        "prfpdfrom": "2024-04-28",
-        "prfpdto": "2024-04-28",
+        "title": "공연명",
+        "start_date": "2024-04-28",
+        "end_date": "2024-04-28",
         "artist_mbid": "some-mbid-1234",
     }
     base.update(kwargs)
@@ -139,8 +139,7 @@ class TestSetlistCollect:
             with patch("collectors.setlist.requests.get", return_value=mock_response) as mock_get:
                 collect()
 
-        call_kwargs = mock_get.call_args
-        headers = call_kwargs[1].get("headers") or call_kwargs[0][1]
+        headers = mock_get.call_args.kwargs.get("headers")
         assert "x-api-key" in headers
         assert headers.get("Accept") == "application/json"
 

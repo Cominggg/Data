@@ -1,4 +1,3 @@
-import json
 import logging
 
 from sqlalchemy import text
@@ -77,28 +76,45 @@ def save_concerts(concerts: list[dict]) -> None:
     """수집된 공연 목록을 concert 테이블에 저장한다. kopis_id 중복 시 무시."""
     with get_session() as session:
         for concert in concerts:
-            session.execute(
+            row = session.execute(
                 text("""
                     INSERT INTO concert
-                        (kopis_id, prfnm, prfcast, prfpdfrom, prfpdto,
-                         fcltynm, prfstate, updatedate, relates)
+                        (kopis_id, title, cast, start_date, end_date,
+                         venue_name, status, kopis_update_date)
                     VALUES
-                        (:kopis_id, :prfnm, :prfcast, :prfpdfrom, :prfpdto,
-                         :fcltynm, :prfstate, :updatedate, :relates)
+                        (:kopis_id, :title, :cast, :start_date, :end_date,
+                         :venue_name, :status, :kopis_update_date)
                     ON CONFLICT (kopis_id) DO NOTHING
+                    RETURNING id
                 """),
                 {
                     "kopis_id": concert["kopis_id"],
-                    "prfnm": concert["prfnm"],
-                    "prfcast": concert["prfcast"],
-                    "prfpdfrom": concert["prfpdfrom"],
-                    "prfpdto": concert["prfpdto"],
-                    "fcltynm": concert["fcltynm"],
-                    "prfstate": concert["prfstate"],
-                    "updatedate": concert["updatedate"],
-                    "relates": json.dumps(concert["relates"], ensure_ascii=False),
+                    "title": concert["prfnm"],
+                    "cast": concert["prfcast"],
+                    "start_date": concert["prfpdfrom"],
+                    "end_date": concert["prfpdto"],
+                    "venue_name": concert["fcltynm"],
+                    "status": concert["prfstate"],
+                    "kopis_update_date": concert["updatedate"],
                 },
-            )
+            ).fetchone()
+
+            if not row or not concert.get("relates"):
+                continue
+
+            concert_id = row[0]
+            for link in concert["relates"]:
+                session.execute(
+                    text("""
+                        INSERT INTO concert_booking_link (concert_id, name, url)
+                        VALUES (:concert_id, :name, :url)
+                    """),
+                    {
+                        "concert_id": concert_id,
+                        "name": link["relatenm"],
+                        "url": link["relateurl"],
+                    },
+                )
     logger.info("공연 저장 완료: %d건 처리", len(concerts))
 
 
@@ -107,22 +123,22 @@ def get_completed_concerts() -> list[dict]:
     with get_session() as session:
         rows = session.execute(
             text("""
-                SELECT DISTINCT c.id AS concert_id, c.prfnm, c.prfpdfrom, c.prfpdto,
+                SELECT DISTINCT c.id AS concert_id, c.title, c.start_date, c.end_date,
                                 a.mbid AS artist_mbid
                 FROM concert c
                 JOIN concert_artist ca ON ca.concert_id = c.id AND ca.approved = true
                 JOIN artist a ON a.id = ca.artist_id
                 LEFT JOIN setlist s ON s.concert_id = c.id
-                WHERE c.prfstate = '공연완료'
+                WHERE c.status = '공연완료'
                   AND s.id IS NULL
             """)
         ).fetchall()
     return [
         {
             "concert_id": row[0],
-            "prfnm": row[1],
-            "prfpdfrom": str(row[2]) if row[2] else None,
-            "prfpdto": str(row[3]) if row[3] else None,
+            "title": row[1],
+            "start_date": str(row[2]) if row[2] else None,
+            "end_date": str(row[3]) if row[3] else None,
             "artist_mbid": row[4],
         }
         for row in rows
@@ -167,12 +183,12 @@ def save_setlists(setlists: list[dict]) -> None:
 
 
 def update_concert_status(concerts: list[dict]) -> None:
-    """updatedate 변화 감지 시 prfstate와 updatedate를 갱신한다."""
+    """updatedate 변화 감지 시 status와 kopis_update_date를 갱신한다."""
     updated = 0
     with get_session() as session:
         for concert in concerts:
             row = session.execute(
-                text("SELECT updatedate FROM concert WHERE kopis_id = :kopis_id"),
+                text("SELECT kopis_update_date FROM concert WHERE kopis_id = :kopis_id"),
                 {"kopis_id": concert["kopis_id"]},
             ).fetchone()
 
@@ -183,12 +199,12 @@ def update_concert_status(concerts: list[dict]) -> None:
                 session.execute(
                     text("""
                         UPDATE concert
-                        SET prfstate = :prfstate, updatedate = :updatedate
+                        SET status = :status, kopis_update_date = :kopis_update_date
                         WHERE kopis_id = :kopis_id
                     """),
                     {
-                        "prfstate": concert["prfstate"],
-                        "updatedate": concert["updatedate"],
+                        "status": concert["prfstate"],
+                        "kopis_update_date": concert["updatedate"],
                         "kopis_id": concert["kopis_id"],
                     },
                 )
