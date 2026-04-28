@@ -92,7 +92,10 @@ def collect() -> list[dict]:
             break
 
         for item in batch:
-            results.append(_parse_concert(item))
+            concert = _parse_concert(item)
+            detail = _fetch_detail(concert["kopis_id"])
+            concert.update(detail)
+            results.append(concert)
 
         logger.info("KOPIS 수집 중: cpage=%d, 누적 %d건", cpage, len(results))
         cpage += 1
