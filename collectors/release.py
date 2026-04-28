@@ -119,10 +119,12 @@ def collect_releases(artist_mbid: str) -> list[dict]:
             release_mbid = _get_representative_release_mbid(rg)
 
             tracks = []
+            label = None
             if release_mbid:
                 try:
                     release_data = _fetch_tracks(release_mbid)
                     tracks = _parse_tracks(release_data)
+                    label = _parse_label(release_data)
                 except requests.HTTPError as e:
                     logger.warning("트랙 수집 실패 release_mbid=%s: %s", release_mbid, e)
 
@@ -142,6 +144,7 @@ def collect_releases(artist_mbid: str) -> list[dict]:
                     "first_release_date": rg.get("first-release-date") or None,
                     "representative_release_mbid": release_mbid,
                     "cover_url": cover_url,
+                    "label": label,
                     "tracks": tracks,
                 }
             )
