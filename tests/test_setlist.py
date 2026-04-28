@@ -32,9 +32,9 @@ def _sample_setlist(**kwargs) -> dict:
 def _sample_concert(**kwargs) -> dict:
     base = {
         "concert_id": 1,
-        "prfnm": "공연명",
-        "prfpdfrom": "2024-04-28",
-        "prfpdto": "2024-04-28",
+        "title": "공연명",
+        "start_date": "2024-04-28",
+        "end_date": "2024-04-28",
         "artist_mbid": "some-mbid-1234",
     }
     base.update(kwargs)

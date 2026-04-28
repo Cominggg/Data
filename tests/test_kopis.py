@@ -172,9 +172,10 @@ class TestSaveConcerts:
         assert len(insert_sqls) == 1
         assert "ON CONFLICT" in insert_sqls[0]
 
-    def test_relates_serialized_as_json(self):
-        """relates 필드가 JSON 문자열로 직렬화되어 저장되어야 한다."""
+    def test_booking_links_inserted_for_new_concert(self):
+        """신규 공연 저장 시 relates가 concert_booking_link 테이블에 별도 INSERT되어야 한다."""
         mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (1,)
 
         concerts = [
             {
@@ -195,11 +196,14 @@ class TestSaveConcerts:
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
             save_concerts(concerts)
 
-        execute_params = mock_session.execute.call_args_list[0].args[1]
-        import json
-
-        parsed = json.loads(execute_params["relates"])
-        assert parsed[0]["relatenm"] == "예스24"
+        booking_link_inserts = [
+            c for c in mock_session.execute.call_args_list
+            if "concert_booking_link" in str(c.args[0])
+        ]
+        assert len(booking_link_inserts) == 1
+        params = booking_link_inserts[0].args[1]
+        assert params["name"] == "예스24"
+        assert params["url"] == "https://yes24.com"
 
 
 class TestUpdateConcertStatus:
@@ -256,8 +260,8 @@ class TestUpdateConcertStatus:
         assert len(update_calls) == 1
 
         update_params = update_calls[0].args[1]
-        assert update_params["prfstate"] == "공연완료"
-        assert update_params["updatedate"] == "2024.01.20 12:00:00"
+        assert update_params["status"] == "공연완료"
+        assert update_params["kopis_update_date"] == "2024.01.20 12:00:00"
 
 
 class TestKopisHttpErrors:
