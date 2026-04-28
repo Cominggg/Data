@@ -31,9 +31,9 @@ def save_releases(releases: list[dict]) -> None:
             rg_row = session.execute(
                 text("""
                     INSERT INTO release_group
-                        (mbid, artist_id, title, type, first_release_date, cover_url)
+                        (mbid, artist_id, title, type, first_release_date, cover_url, label)
                     VALUES
-                        (:mbid, :artist_id, :title, :type, :first_release_date, :cover_url)
+                        (:mbid, :artist_id, :title, :type, :first_release_date, :cover_url, :label)
                     ON CONFLICT (mbid) DO UPDATE SET mbid = EXCLUDED.mbid
                     RETURNING id
                 """),
@@ -44,6 +44,7 @@ def save_releases(releases: list[dict]) -> None:
                     "type": release["type"],
                     "first_release_date": release["first_release_date"],
                     "cover_url": release["cover_url"],
+                    "label": release.get("label"),
                 },
             ).fetchone()
 
