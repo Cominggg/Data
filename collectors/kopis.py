@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 from typing import Optional
@@ -20,6 +21,7 @@ _DEFAULT_PARAMS = {
     "genrenm": "GGGA",
     "rows": 100,
     "outfmt": "json",
+    "stdate": "20200101",
 }
 
 
@@ -61,10 +63,11 @@ def collect() -> list[dict]:
     logger.info("KOPIS 공연 수집 시작")
     results = []
     cpage = 1
+    eddate = datetime.date.today().strftime("%Y%m%d")
 
     while True:
         logger.debug("KOPIS 페이지 조회: cpage=%d", cpage)
-        params = {**_DEFAULT_PARAMS, "cpage": cpage}
+        params = {**_DEFAULT_PARAMS, "cpage": cpage, "eddate": eddate}
         data = _get(params)
 
         batch: Optional[list] = data.get("dbs", {}).get("db")
