@@ -7,6 +7,7 @@ from collectors.release import (
     _fetch_cover_art_url,
     _fetch_tracks,
     _get_representative_release_mbid,
+    _parse_label,
     _parse_tracks,
     collect_releases,
 )
@@ -256,6 +257,57 @@ class TestReleaseCollect:
     @patch("collectors.release._fetch_cover_art_url")
     @patch("collectors.release._fetch_tracks")
     @patch("collectors.release._fetch_release_groups")
+    def test_collect_includes_label_field(self, mock_fetch_rg, mock_fetch_tracks, mock_cover):
+        """collect_releases() 반환값에 label 필드가 포함되어야 한다."""
+        mock_fetch_rg.return_value = {
+            "release-groups": [
+                {
+                    "id": "rg-1",
+                    "title": "Album A",
+                    "primary-type": "Album",
+                    "first-release-date": "2020-01-01",
+                    "releases": [{"id": "rel-1", "date": "2020-01-01"}],
+                }
+            ],
+            "release-group-count": 1,
+        }
+        mock_fetch_tracks.return_value = {
+            "media": [],
+            "label-info": [{"label": {"name": "SME Records"}}],
+        }
+        mock_cover.return_value = None
+
+        result = collect_releases("artist-mbid")
+
+        assert result[0]["label"] == "SME Records"
+
+    @patch("collectors.release._fetch_cover_art_url")
+    @patch("collectors.release._fetch_tracks")
+    @patch("collectors.release._fetch_release_groups")
+    def test_label_is_none_when_label_info_absent(self, mock_fetch_rg, mock_fetch_tracks, mock_cover):
+        """label-info가 없으면 label이 None이어야 한다."""
+        mock_fetch_rg.return_value = {
+            "release-groups": [
+                {
+                    "id": "rg-1",
+                    "title": "Album A",
+                    "primary-type": "Album",
+                    "first-release-date": "2020-01-01",
+                    "releases": [{"id": "rel-1", "date": "2020-01-01"}],
+                }
+            ],
+            "release-group-count": 1,
+        }
+        mock_fetch_tracks.return_value = {"media": []}
+        mock_cover.return_value = None
+
+        result = collect_releases("artist-mbid")
+
+        assert result[0]["label"] is None
+
+    @patch("collectors.release._fetch_cover_art_url")
+    @patch("collectors.release._fetch_tracks")
+    @patch("collectors.release._fetch_release_groups")
     def test_continues_when_cover_art_fetch_fails(self, mock_fetch_rg, mock_fetch_tracks, mock_cover):
         """커버 아트 수집 HTTP 에러 시 cover_url이 None으로 결과에 포함되어야 한다."""
         mock_fetch_rg.return_value = {
@@ -278,15 +330,46 @@ class TestReleaseCollect:
         assert result[0]["cover_url"] is None
 
 
+class TestParseLabel:
+    def test_returns_label_name(self):
+        release_data = {
+            "label-info": [{"label": {"name": "SME Records"}}]
+        }
+        assert _parse_label(release_data) == "SME Records"
+
+    def test_returns_none_when_label_info_empty(self):
+        assert _parse_label({"label-info": []}) is None
+
+    def test_returns_none_when_label_info_absent(self):
+        assert _parse_label({}) is None
+
+    def test_returns_none_when_label_key_missing(self):
+        release_data = {"label-info": [{}]}
+        assert _parse_label(release_data) is None
+
+    def test_returns_none_when_label_name_missing(self):
+        release_data = {"label-info": [{"label": {}}]}
+        assert _parse_label(release_data) is None
+
+    def test_uses_first_label_info_entry(self):
+        release_data = {
+            "label-info": [
+                {"label": {"name": "First Label"}},
+                {"label": {"name": "Second Label"}},
+            ]
+        }
+        assert _parse_label(release_data) == "First Label"
+
+
 class TestFetchTracks:
     @patch("collectors.release._get")
-    def test_requests_recordings_for_release(self, mock_get):
+    def test_requests_recordings_and_labels_for_release(self, mock_get):
         mock_get.return_value = {"media": []}
 
         result = _fetch_tracks("release-mbid-1")
 
         mock_get.assert_called_once_with(
-            "/release/release-mbid-1", {"inc": "recordings", "fmt": "json"}
+            "/release/release-mbid-1", {"inc": "recordings+labels", "fmt": "json"}
         )
         assert result == {"media": []}
 
@@ -319,6 +402,93 @@ class TestSaveReleases:
             if "INSERT" in str(c.args[0])
         ]
         assert len(insert_calls) == 0
+
+    def test_insert_sql_includes_label_column(self):
+        """release_group INSERT SQL에 label 컬럼이 포함되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (1,)
+
+        releases = [
+            {
+                "release_group_mbid": "rg-1",
+                "artist_mbid": "artist-1",
+                "title": "Album",
+                "type": "Album",
+                "first_release_date": "2020-01-01",
+                "cover_url": None,
+                "label": "SME Records",
+                "tracks": [],
+            }
+        ]
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_releases(releases)
+
+        insert_sql = next(
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
+            if "INSERT INTO release_group" in str(c.args[0])
+        )
+        assert "label" in insert_sql
+
+    def test_label_param_passed_to_insert(self):
+        """save_releases() INSERT 파라미터에 label 값이 전달되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (1,)
+
+        releases = [
+            {
+                "release_group_mbid": "rg-1",
+                "artist_mbid": "artist-1",
+                "title": "Album",
+                "type": "Album",
+                "first_release_date": "2020-01-01",
+                "cover_url": None,
+                "label": "SME Records",
+                "tracks": [],
+            }
+        ]
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_releases(releases)
+
+        insert_call = next(
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO release_group" in str(c.args[0])
+        )
+        assert insert_call.args[1]["label"] == "SME Records"
+
+    def test_label_none_when_key_absent(self):
+        """release dict에 label 키가 없어도 INSERT가 정상 실행되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (1,)
+
+        releases = [
+            {
+                "release_group_mbid": "rg-1",
+                "artist_mbid": "artist-1",
+                "title": "Album",
+                "type": "Album",
+                "first_release_date": "2020-01-01",
+                "cover_url": None,
+                "tracks": [],
+            }
+        ]
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_releases(releases)
+
+        insert_call = next(
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO release_group" in str(c.args[0])
+        )
+        assert insert_call.args[1]["label"] is None
 
     def test_saves_tracks_when_present(self):
         """트랙이 있는 릴리즈는 track 테이블에도 INSERT되어야 한다."""
