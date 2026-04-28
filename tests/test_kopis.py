@@ -1,14 +1,31 @@
-from unittest.mock import MagicMock, call, patch
+from typing import Optional
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from collectors.kopis import _parse_concert, _parse_relates, collect
+from collectors.kopis import _fetch_detail, _parse_concert, _parse_relates, collect
 from db.repository import save_concerts, update_concert_status
 
 
 def _make_api_response(items: list[dict]) -> dict:
     return {"dbs": {"db": items}}
+
+
+def _make_detail_response(
+    kopis_id: str,
+    poster: Optional[str] = None,
+    adres: Optional[str] = None,
+    relates: object = None,
+) -> dict:
+    db = {"mt20id": kopis_id}
+    if poster is not None:
+        db["poster"] = poster
+    if adres is not None:
+        db["adres"] = adres
+    if relates is not None:
+        db["relates"] = relates
+    return {"dbs": {"db": db}}
 
 
 def _sample_item(**kwargs) -> dict:
@@ -29,19 +46,55 @@ def _sample_item(**kwargs) -> dict:
     return base
 
 
+def _make_mock_get(list_response: dict, detail_responses: dict[str, dict]):
+    """URL 기반으로 목록/상세 응답을 분기하는 mock requests.get."""
+    def _mock_get(url, params=None, **kwargs):
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        kopis_id = url.split("/")[-1] if url != "http://kopis.or.kr/openApi/restful/pblprfr" else None
+        if kopis_id and kopis_id in detail_responses:
+            response.json.return_value = detail_responses[kopis_id]
+        else:
+            response.json.return_value = list_response
+        return response
+    return _mock_get
+
+
 class TestKopisCollect:
     def test_collect_returns_list(self):
         """collect() 호출 결과가 리스트여야 한다."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = _make_api_response([_sample_item()])
-        mock_response.raise_for_status = MagicMock()
+        item = _sample_item()
+        list_resp = _make_api_response([item])
+        detail_resp = _make_detail_response("PF123456", poster="http://poster.jpg", adres="서울")
 
-        with patch("collectors.kopis.requests.get", return_value=mock_response):
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_make_mock_get(list_resp, {"PF123456": detail_resp}),
+        ):
             result = collect()
 
         assert isinstance(result, list)
         assert len(result) == 1
         assert result[0]["kopis_id"] == "PF123456"
+
+    def test_collect_merges_detail_fields(self):
+        """collect() 결과에 poster_url, venue_address가 포함되어야 한다."""
+        item = _sample_item()
+        list_resp = _make_api_response([item])
+        detail_resp = _make_detail_response(
+            "PF123456",
+            poster="http://poster.jpg",
+            adres="서울특별시 강남구",
+        )
+
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_make_mock_get(list_resp, {"PF123456": detail_resp}),
+        ):
+            result = collect()
+
+        assert result[0]["poster_url"] == "http://poster.jpg"
+        assert result[0]["venue_address"] == "서울특별시 강남구"
 
     def test_filters_visit_concerts_only(self):
         """요청 파라미터에 visit=Y가 포함되어야 한다."""
@@ -69,18 +122,52 @@ class TestKopisCollect:
         params = call_kwargs[1].get("params") or call_kwargs[0][1]
         assert params.get("genrenm") == "GGGA"
 
+    def test_includes_stdate_param(self):
+        """요청 파라미터에 stdate=20200101이 포함되어야 한다."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"dbs": {}}
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response) as mock_get:
+            collect()
+
+        call_kwargs = mock_get.call_args
+        params = call_kwargs[1].get("params") or call_kwargs[0][1]
+        assert params.get("stdate") == "20200101"
+
+    def test_includes_eddate_param(self):
+        """요청 파라미터에 eddate가 YYYYMMDD 형식으로 포함되어야 한다."""
+        import datetime
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"dbs": {}}
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response) as mock_get:
+            collect()
+
+        call_kwargs = mock_get.call_args
+        params = call_kwargs[1].get("params") or call_kwargs[0][1]
+        eddate = params.get("eddate")
+        assert eddate is not None
+        assert eddate == datetime.date.today().strftime("%Y%m%d")
+
     def test_stores_booking_links(self):
         """relates 있을 때 파싱되고 없으면 빈 배열이어야 한다."""
         item_with_relates = _sample_item()
         item_no_relates = _sample_item(mt20id="PF999999", relates="")
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = _make_api_response(
-            [item_with_relates, item_no_relates]
+        list_resp = _make_api_response([item_with_relates, item_no_relates])
+        detail_with = _make_detail_response(
+            "PF123456",
+            relates={"relate": [{"relatenm": "예스24", "relateurl": "https://yes24.com"}]},
         )
+        detail_without = _make_detail_response("PF999999")
 
-        with patch("collectors.kopis.requests.get", return_value=mock_response):
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_make_mock_get(
+                list_resp, {"PF123456": detail_with, "PF999999": detail_without}
+            ),
+        ):
             result = collect()
 
         assert result[0]["relates"] == [
@@ -115,6 +202,100 @@ class TestKopisCollect:
         assert len(update_calls) == 1
 
 
+class TestFetchDetail:
+    def test_returns_poster_url(self):
+        """상세 API 응답에서 poster_url을 파싱해야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_detail_response(
+            "PF123456", poster="http://poster.jpg"
+        )
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response):
+            result = _fetch_detail("PF123456")
+
+        assert result["poster_url"] == "http://poster.jpg"
+
+    def test_returns_venue_address(self):
+        """상세 API 응답에서 venue_address(adres)를 파싱해야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_detail_response(
+            "PF123456", adres="서울특별시 강남구 테헤란로"
+        )
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response):
+            result = _fetch_detail("PF123456")
+
+        assert result["venue_address"] == "서울특별시 강남구 테헤란로"
+
+    def test_returns_relates(self):
+        """상세 API 응답에서 relates를 파싱해야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_detail_response(
+            "PF123456",
+            relates={"relate": [{"relatenm": "예스24", "relateurl": "https://yes24.com"}]},
+        )
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response):
+            result = _fetch_detail("PF123456")
+
+        assert result["relates"] == [{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
+
+    def test_returns_none_when_fields_missing(self):
+        """상세 API 응답에 필드가 없으면 poster_url, venue_address는 None이어야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_detail_response("PF123456")
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response):
+            result = _fetch_detail("PF123456")
+
+        assert result["poster_url"] is None
+        assert result["venue_address"] is None
+        assert result["relates"] == []
+
+    def test_normalizes_list_db_response(self):
+        """db 응답이 리스트일 경우 첫 번째 요소를 사용해야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "dbs": {
+                "db": [
+                    {"mt20id": "PF123456", "poster": "http://poster.jpg"},
+                    {"mt20id": "PF999999", "poster": "http://other.jpg"},
+                ]
+            }
+        }
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response):
+            result = _fetch_detail("PF123456")
+
+        assert result["poster_url"] == "http://poster.jpg"
+
+    def test_calls_correct_detail_url(self):
+        """상세 API 호출 시 kopis_id를 포함한 URL을 사용해야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_detail_response("PF123456")
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response) as mock_get:
+            _fetch_detail("PF123456")
+
+        called_url = mock_get.call_args[0][0]
+        assert called_url.endswith("/PF123456")
+
+    def test_propagates_http_error(self):
+        """상세 API 4xx/5xx 응답 시 HTTPError를 전파해야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = requests.HTTPError("404 Not Found")
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response):
+            with pytest.raises(requests.HTTPError):
+                _fetch_detail("PF123456")
+
+
 class TestParseRelates:
     def test_parses_relate_list(self):
         raw = {
@@ -141,28 +322,31 @@ class TestParseRelates:
 
 
 class TestSaveConcerts:
+    def _make_concert(self, **kwargs) -> dict:
+        base = {
+            "kopis_id": "PF123456",
+            "prfnm": "공연명",
+            "prfcast": "아티스트명",
+            "prfpdfrom": "2024.01.01",
+            "prfpdto": "2024.01.31",
+            "fcltynm": "장소명",
+            "prfstate": "공연예정",
+            "updatedate": "2024.01.15 12:00:00",
+            "poster_url": None,
+            "venue_address": None,
+            "relates": [],
+        }
+        base.update(kwargs)
+        return base
+
     def test_insert_sql_contains_on_conflict(self):
         """INSERT SQL에 ON CONFLICT가 포함되어야 한다."""
         mock_session = MagicMock()
 
-        concerts = [
-            {
-                "kopis_id": "PF123456",
-                "prfnm": "공연명",
-                "prfcast": "아티스트명",
-                "prfpdfrom": "2024.01.01",
-                "prfpdto": "2024.01.31",
-                "fcltynm": "장소명",
-                "prfstate": "공연예정",
-                "updatedate": "2024.01.15 12:00:00",
-                "relates": [],
-            }
-        ]
-
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts(concerts)
+            save_concerts([self._make_concert()])
 
         insert_sqls = [
             str(c.args[0])
@@ -172,29 +356,57 @@ class TestSaveConcerts:
         assert len(insert_sqls) == 1
         assert "ON CONFLICT" in insert_sqls[0]
 
+    def test_insert_sql_includes_poster_and_address(self):
+        """INSERT SQL에 poster_url, venue_address 컬럼이 포함되어야 한다."""
+        mock_session = MagicMock()
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([self._make_concert(
+                poster_url="http://poster.jpg",
+                venue_address="서울특별시 강남구",
+            )])
+
+        insert_sqls = [
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
+            if "INSERT" in str(c.args[0])
+        ]
+        assert "poster_url" in insert_sqls[0]
+        assert "venue_address" in insert_sqls[0]
+
+    def test_poster_and_address_params_passed(self):
+        """INSERT 파라미터에 poster_url, venue_address 값이 전달되어야 한다."""
+        mock_session = MagicMock()
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([self._make_concert(
+                poster_url="http://poster.jpg",
+                venue_address="서울특별시 강남구",
+            )])
+
+        insert_call = [
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO concert" in str(c.args[0])
+        ][0]
+        params = insert_call.args[1]
+        assert params["poster_url"] == "http://poster.jpg"
+        assert params["venue_address"] == "서울특별시 강남구"
+
     def test_booking_links_inserted_for_new_concert(self):
         """신규 공연 저장 시 relates가 concert_booking_link 테이블에 별도 INSERT되어야 한다."""
         mock_session = MagicMock()
         mock_session.execute.return_value.fetchone.return_value = (1,)
 
-        concerts = [
-            {
-                "kopis_id": "PF123456",
-                "prfnm": "공연명",
-                "prfcast": "아티스트명",
-                "prfpdfrom": "2024.01.01",
-                "prfpdto": "2024.01.31",
-                "fcltynm": "장소명",
-                "prfstate": "공연예정",
-                "updatedate": "2024.01.15 12:00:00",
-                "relates": [{"relatenm": "예스24", "relateurl": "https://yes24.com"}],
-            }
-        ]
-
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts(concerts)
+            save_concerts([self._make_concert(
+                relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
+            )])
 
         booking_link_inserts = [
             c for c in mock_session.execute.call_args_list
