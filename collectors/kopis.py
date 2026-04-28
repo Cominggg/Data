@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 from typing import Optional
@@ -20,6 +21,7 @@ _DEFAULT_PARAMS = {
     "genrenm": "GGGA",
     "rows": 100,
     "outfmt": "json",
+    "stdate": "20200101",
 }
 
 
@@ -42,6 +44,22 @@ def _parse_relates(raw: object) -> list[dict]:
     return [{"relatenm": r.get("relatenm"), "relateurl": r.get("relateurl")} for r in relate]
 
 
+def _fetch_detail(kopis_id: str) -> dict:
+    """단건 상세 API를 호출해 poster_url, venue_address, relates를 반환한다."""
+    url = f"{_BASE_URL}/{kopis_id}"
+    response = requests.get(url, params={"service": _API_KEY, "outfmt": "json"}, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+    db = data.get("dbs", {}).get("db", {})
+    if isinstance(db, list):
+        db = db[0] if db else {}
+    return {
+        "poster_url": db.get("poster"),
+        "venue_address": db.get("adres"),
+        "relates": _parse_relates(db.get("relates")),
+    }
+
+
 def _parse_concert(item: dict) -> dict:
     return {
         "kopis_id": item.get("mt20id"),
@@ -61,10 +79,11 @@ def collect() -> list[dict]:
     logger.info("KOPIS 공연 수집 시작")
     results = []
     cpage = 1
+    eddate = datetime.date.today().strftime("%Y%m%d")
 
     while True:
         logger.debug("KOPIS 페이지 조회: cpage=%d", cpage)
-        params = {**_DEFAULT_PARAMS, "cpage": cpage}
+        params = {**_DEFAULT_PARAMS, "cpage": cpage, "eddate": eddate}
         data = _get(params)
 
         batch: Optional[list] = data.get("dbs", {}).get("db")
@@ -73,7 +92,14 @@ def collect() -> list[dict]:
             break
 
         for item in batch:
-            results.append(_parse_concert(item))
+            concert = _parse_concert(item)
+            try:
+                detail = _fetch_detail(concert["kopis_id"])
+                concert.update(detail)
+            except Exception:
+                logger.warning("상세 API 실패 — 건너뜀: kopis_id=%s", concert["kopis_id"])
+                concert.update({"poster_url": None, "venue_address": None})
+            results.append(concert)
 
         logger.info("KOPIS 수집 중: cpage=%d, 누적 %d건", cpage, len(results))
         cpage += 1
