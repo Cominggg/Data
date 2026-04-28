@@ -49,8 +49,16 @@ def _fetch_release_groups(artist_mbid: str, offset: int) -> dict:
 def _fetch_tracks(release_mbid: str) -> dict:
     return _get(
         f"/release/{release_mbid}",
-        {"inc": "recordings", "fmt": "json"},
+        {"inc": "recordings+labels", "fmt": "json"},
     )
+
+
+def _parse_label(release_data: dict) -> Optional[str]:
+    label_info = release_data.get("label-info", [])
+    if not label_info:
+        return None
+    label = label_info[0].get("label") or {}
+    return label.get("name")
 
 
 def _parse_tracks(release_data: dict) -> list[dict]:
