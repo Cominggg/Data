@@ -44,6 +44,22 @@ def _parse_relates(raw: object) -> list[dict]:
     return [{"relatenm": r.get("relatenm"), "relateurl": r.get("relateurl")} for r in relate]
 
 
+def _fetch_detail(kopis_id: str) -> dict:
+    """단건 상세 API를 호출해 poster_url, venue_address, relates를 반환한다."""
+    url = f"{_BASE_URL}/{kopis_id}"
+    response = requests.get(url, params={"service": _API_KEY, "outfmt": "json"}, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+    db = data.get("dbs", {}).get("db", {})
+    if isinstance(db, list):
+        db = db[0] if db else {}
+    return {
+        "poster_url": db.get("poster"),
+        "venue_address": db.get("adres"),
+        "relates": _parse_relates(db.get("relates")),
+    }
+
+
 def _parse_concert(item: dict) -> dict:
     return {
         "kopis_id": item.get("mt20id"),
