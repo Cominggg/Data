@@ -183,12 +183,12 @@ def save_setlists(setlists: list[dict]) -> None:
 
 
 def update_concert_status(concerts: list[dict]) -> None:
-    """updatedate 변화 감지 시 prfstate와 updatedate를 갱신한다."""
+    """updatedate 변화 감지 시 status와 kopis_update_date를 갱신한다."""
     updated = 0
     with get_session() as session:
         for concert in concerts:
             row = session.execute(
-                text("SELECT updatedate FROM concert WHERE kopis_id = :kopis_id"),
+                text("SELECT kopis_update_date FROM concert WHERE kopis_id = :kopis_id"),
                 {"kopis_id": concert["kopis_id"]},
             ).fetchone()
 
@@ -199,12 +199,12 @@ def update_concert_status(concerts: list[dict]) -> None:
                 session.execute(
                     text("""
                         UPDATE concert
-                        SET prfstate = :prfstate, updatedate = :updatedate
+                        SET status = :status, kopis_update_date = :kopis_update_date
                         WHERE kopis_id = :kopis_id
                     """),
                     {
-                        "prfstate": concert["prfstate"],
-                        "updatedate": concert["updatedate"],
+                        "status": concert["prfstate"],
+                        "kopis_update_date": concert["updatedate"],
                         "kopis_id": concert["kopis_id"],
                     },
                 )
