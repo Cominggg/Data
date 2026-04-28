@@ -93,8 +93,12 @@ def collect() -> list[dict]:
 
         for item in batch:
             concert = _parse_concert(item)
-            detail = _fetch_detail(concert["kopis_id"])
-            concert.update(detail)
+            try:
+                detail = _fetch_detail(concert["kopis_id"])
+                concert.update(detail)
+            except Exception:
+                logger.warning("상세 API 실패 — 건너뜀: kopis_id=%s", concert["kopis_id"])
+                concert.update({"poster_url": None, "venue_address": None})
             results.append(concert)
 
         logger.info("KOPIS 수집 중: cpage=%d, 누적 %d건", cpage, len(results))

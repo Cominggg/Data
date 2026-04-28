@@ -175,6 +175,28 @@ class TestKopisCollect:
         ]
         assert result[1]["relates"] == []
 
+    def test_skips_item_on_detail_api_failure(self):
+        """상세 API 실패 시 해당 건을 건너뛰고 나머지 수집을 계속해야 한다."""
+        item = _sample_item()
+        list_resp = _make_api_response([item])
+
+        def failing_get(url, params=None, **kwargs):
+            response = MagicMock()
+            response.raise_for_status = MagicMock()
+            if url == "http://kopis.or.kr/openApi/restful/pblprfr":
+                response.json.return_value = list_resp
+            else:
+                response.raise_for_status.side_effect = requests.HTTPError("500")
+            return response
+
+        with patch("collectors.kopis.requests.get", side_effect=failing_get):
+            result = collect()
+
+        assert len(result) == 1
+        assert result[0]["kopis_id"] == "PF123456"
+        assert result[0]["poster_url"] is None
+        assert result[0]["venue_address"] is None
+
     def test_detects_status_change_by_updatedate(self):
         """update_concert_status가 호출되면 updatedate 변화를 감지해 prfstate를 갱신한다."""
         mock_session = MagicMock()
