@@ -139,8 +139,7 @@ class TestSetlistCollect:
             with patch("collectors.setlist.requests.get", return_value=mock_response) as mock_get:
                 collect()
 
-        call_kwargs = mock_get.call_args
-        headers = call_kwargs[1].get("headers") or call_kwargs[0][1]
+        headers = mock_get.call_args.kwargs.get("headers")
         assert "x-api-key" in headers
         assert headers.get("Accept") == "application/json"
 
