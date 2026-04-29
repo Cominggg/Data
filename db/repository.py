@@ -156,6 +156,12 @@ def save_concerts(concerts: list[dict]) -> None:
                 },
             ).fetchone()
 
+            if row is None:
+                row = session.execute(
+                    text("SELECT id FROM concert WHERE kopis_id = :kopis_id"),
+                    {"kopis_id": concert["kopis_id"]},
+                ).fetchone()
+
             if not row or not concert.get("relates"):
                 continue
 
@@ -165,6 +171,7 @@ def save_concerts(concerts: list[dict]) -> None:
                     text("""
                         INSERT INTO concert_booking_link (concert_id, name, url)
                         VALUES (:concert_id, :name, :url)
+                        ON CONFLICT (concert_id, url) DO NOTHING
                     """),
                     {
                         "concert_id": concert_id,

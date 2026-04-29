@@ -439,6 +439,46 @@ class TestSaveConcerts:
         assert params["name"] == "예스24"
         assert params["url"] == "https://yes24.com"
 
+    def test_booking_links_inserted_for_existing_concert(self):
+        """기존 공연(INSERT DO NOTHING)도 SELECT fallback으로 booking_link가 INSERT되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, (5,)]
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([self._make_concert(
+                relates=[{"relatenm": "인터파크", "relateurl": "https://interpark.com"}]
+            )])
+
+        booking_link_inserts = [
+            c for c in mock_session.execute.call_args_list
+            if "concert_booking_link" in str(c.args[0])
+        ]
+        assert len(booking_link_inserts) == 1
+        params = booking_link_inserts[0].args[1]
+        assert params["concert_id"] == 5
+
+    def test_booking_link_insert_has_on_conflict(self):
+        """concert_booking_link INSERT에 ON CONFLICT DO NOTHING이 포함되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (1,)
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([self._make_concert(
+                relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
+            )])
+
+        booking_link_sqls = [
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
+            if "concert_booking_link" in str(c.args[0])
+        ]
+        assert len(booking_link_sqls) == 1
+        assert "ON CONFLICT" in booking_link_sqls[0]
+
 
 class TestUpdateConcertStatus:
     def test_no_update_when_updatedate_unchanged(self):
