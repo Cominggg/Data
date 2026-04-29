@@ -19,12 +19,13 @@ class TestAliasExactMatch:
         assert matches[0]["confidence"] == "HIGH"
 
     def test_exact_match_does_not_require_approval(self):
-        """HIGH 매칭은 matched_by=prfcast이어야 한다."""
+        """HIGH 매칭은 matched_by=prfcast이고 approved=True이어야 한다."""
         concert = {"concert_id": 10, "title": "콘서트", "cast": "아이유"}
         matches, _ = match_concert(concert, _ALIASES)
 
         assert matches[0]["matched_by"] == "prfcast"
         assert matches[0]["artist_id"] == 1
+        assert matches[0]["approved"] is True
 
     def test_multi_artist_cast_matched_individually(self):
         """prfcast에 ',' 또는 '·' 구분자로 여러 아티스트가 있을 때 각각 개별 매칭되어야 한다."""
@@ -55,12 +56,13 @@ class TestAliasExactMatch:
 
 class TestFuzzyMatch:
     def test_partial_ratio_above_threshold_returns_low_confidence(self):
-        """rapidfuzz partial_ratio >= 85이면 confidence=LOW를 반환해야 한다."""
+        """rapidfuzz partial_ratio >= 85이면 confidence=LOW, approved=False를 반환해야 한다."""
         concert = {"concert_id": 20, "title": "BTS World Tour 콘서트", "cast": ""}
         matches, failures = match_concert(concert, _ALIASES)
 
         assert len(matches) == 1
         assert matches[0]["confidence"] == "LOW"
+        assert matches[0]["approved"] is False
 
     def test_partial_ratio_below_threshold_returns_none(self):
         """partial_ratio < 85이면 매칭 실패로 failures에 등록되어야 한다."""
