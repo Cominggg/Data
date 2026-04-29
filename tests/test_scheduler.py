@@ -182,6 +182,22 @@ class TestRunStatusUpdate:
 
         mock_update.assert_called_once_with()
 
+    def test_does_not_use_alias_based_artist_filter(self):
+        """run_status_update는 get_all_aliases로 아티스트를 필터링하지 않아야 한다.
+
+        alias 미등록 아티스트가 is_coming 갱신에서 누락되지 않도록
+        update_artist_is_coming() 내부 SQL이 concert_artist 전체를 커버한다.
+        """
+        with (
+            patch("scheduler.kopis.collect", return_value=[]),
+            patch("scheduler.update_concert_status"),
+            patch("scheduler.update_artist_is_coming"),
+            patch("scheduler.get_all_aliases") as mock_aliases,
+        ):
+            run_status_update()
+
+        mock_aliases.assert_not_called()
+
 
 class TestRunReleaseUpdate:
     def test_collects_releases_for_all_mbids(self):
