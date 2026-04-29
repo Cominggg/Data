@@ -57,6 +57,7 @@ def _fetch_detail(kopis_id: str) -> dict:
         "poster_url": db.get("poster"),
         "venue_address": db.get("adres"),
         "relates": _parse_relates(db.get("relates")),
+        "price": db.get("pcseguidance"),
     }
 
 

@@ -135,10 +135,10 @@ def save_concerts(concerts: list[dict]) -> None:
                 text("""
                     INSERT INTO concert
                         (kopis_id, title, cast, start_date, end_date,
-                         venue_name, venue_address, poster_url, status, kopis_update_date)
+                         venue_name, venue_address, poster_url, price, status, kopis_update_date)
                     VALUES
                         (:kopis_id, :title, :cast, :start_date, :end_date,
-                         :venue_name, :venue_address, :poster_url, :status, :kopis_update_date)
+                         :venue_name, :venue_address, :poster_url, :price, :status, :kopis_update_date)
                     ON CONFLICT (kopis_id) DO NOTHING
                     RETURNING id
                 """),
@@ -151,10 +151,17 @@ def save_concerts(concerts: list[dict]) -> None:
                     "venue_name": concert["fcltynm"],
                     "venue_address": concert.get("venue_address"),
                     "poster_url": concert.get("poster_url"),
+                    "price": concert.get("price"),
                     "status": concert["prfstate"],
                     "kopis_update_date": concert["updatedate"],
                 },
             ).fetchone()
+
+            if row is None:
+                row = session.execute(
+                    text("SELECT id FROM concert WHERE kopis_id = :kopis_id"),
+                    {"kopis_id": concert["kopis_id"]},
+                ).fetchone()
 
             if not row or not concert.get("relates"):
                 continue
@@ -165,6 +172,7 @@ def save_concerts(concerts: list[dict]) -> None:
                     text("""
                         INSERT INTO concert_booking_link (concert_id, name, url)
                         VALUES (:concert_id, :name, :url)
+                        ON CONFLICT (concert_id, url) DO NOTHING
                     """),
                     {
                         "concert_id": concert_id,
@@ -286,7 +294,7 @@ def save_concert_artists(matches: list[dict]) -> None:
                     "artist_id": match["artist_id"],
                     "confidence": match["confidence"],
                     "matched_by": match["matched_by"],
-                    "approved": match["confidence"] == "HIGH",
+                    "approved": match["approved"],
                 },
             )
     logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))

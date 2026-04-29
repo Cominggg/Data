@@ -156,6 +156,75 @@ class TestSetlistCollect:
         params = mock_get.call_args.kwargs.get("params")
         assert params.get("countryCode") == "KR"
 
+    def test_paginates_until_date_match_found(self):
+        """1페이지에 날짜 범위 밖 결과만 있으면 2페이지에서 매칭을 찾아야 한다."""
+        page1_response = MagicMock()
+        page1_response.raise_for_status = MagicMock()
+        page1_response.json.return_value = {
+            "setlist": [_sample_setlist(eventDate="01-01-2025")],
+            "total": 25,
+            "itemsPerPage": 20,
+        }
+
+        page2_response = MagicMock()
+        page2_response.raise_for_status = MagicMock()
+        page2_response.json.return_value = {
+            "setlist": [_sample_setlist(id="page2-setlist", eventDate="28-04-2024")],
+            "total": 25,
+            "itemsPerPage": 20,
+        }
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch(
+                "collectors.setlist.requests.get",
+                side_effect=[page1_response, page2_response],
+            ):
+                result = collect()
+
+        assert len(result) == 1
+        assert result[0]["setlist_fm_id"] == "page2-setlist"
+
+    def test_stops_pagination_when_no_more_pages(self):
+        """total 범위를 초과하면 추가 페이지를 요청하지 않아야 한다."""
+        no_match_response = MagicMock()
+        no_match_response.raise_for_status = MagicMock()
+        no_match_response.json.return_value = {
+            "setlist": [_sample_setlist(eventDate="01-01-2025")],
+            "total": 1,
+            "itemsPerPage": 20,
+        }
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch(
+                "collectors.setlist.requests.get",
+                return_value=no_match_response,
+            ) as mock_get:
+                result = collect()
+
+        assert result == []
+        assert mock_get.call_count == 1
+
+    def test_stops_pagination_at_max_pages(self):
+        """_MAX_PAGES 상한에 도달하면 추가 페이지를 요청하지 않아야 한다."""
+        no_match_response = MagicMock()
+        no_match_response.raise_for_status = MagicMock()
+        no_match_response.json.return_value = {
+            "setlist": [_sample_setlist(eventDate="01-01-2025")],
+            "total": 9999,
+            "itemsPerPage": 1,
+        }
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist._MAX_PAGES", 3):
+                with patch(
+                    "collectors.setlist.requests.get",
+                    return_value=no_match_response,
+                ) as mock_get:
+                    result = collect()
+
+        assert result == []
+        assert mock_get.call_count == 3
+
 
 class TestParseTracks:
     def test_parses_songs_in_order(self):

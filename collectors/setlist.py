@@ -23,6 +23,8 @@ _HEADERS = {
     "Accept": "application/json",
 }
 
+_MAX_PAGES = 10
+
 
 def _get(path: str, params: dict) -> dict:
     response = requests.get(f"{_BASE_URL}{path}", headers=_HEADERS, params=params, timeout=30)
@@ -74,32 +76,49 @@ def collect() -> list[dict]:
 
         logger.debug("셋리스트 조회: concert_id=%d, artist_mbid=%s", concert_id, artist_mbid)
 
-        try:
-            data = _get("/search/setlists", {"artistMbid": artist_mbid, "countryCode": "KR", "p": 1})
-        except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 404:
-                logger.debug("셋리스트 없음 — 건너뜀: concert_id=%d", concert_id)
-            else:
-                logger.warning("setlist.fm API 오류: concert_id=%d, %s", concert_id, e)
-            continue
+        page = 1
+        while True:
+            try:
+                data = _get("/search/setlists", {"artistMbid": artist_mbid, "countryCode": "KR", "p": page})
+            except requests.HTTPError as e:
+                if e.response is not None and e.response.status_code == 404:
+                    logger.debug("셋리스트 없음 — 건너뜀: concert_id=%d, page=%d", concert_id, page)
+                else:
+                    logger.warning("setlist.fm API 오류: concert_id=%d, page=%d, %s", concert_id, page, e)
+                break
 
-        for item in data.get("setlist", []):
-            event_date = item.get("eventDate", "")
-            if not _event_date_in_range(event_date, concert["start_date"], concert["end_date"]):
-                continue
+            setlist_items = data.get("setlist", [])
+            if not setlist_items:
+                break
 
-            tracks = _parse_tracks(item.get("sets", {}))
-            results.append({
-                "concert_id": concert_id,
-                "setlist_fm_id": item.get("id"),
-                "tracks": tracks,
-            })
-            seen_concert_ids.add(concert_id)
-            logger.info(
-                "셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
-                concert_id, item.get("id"), len(tracks),
-            )
-            break
+            matched = False
+            for item in setlist_items:
+                event_date = item.get("eventDate", "")
+                if not _event_date_in_range(event_date, concert["start_date"], concert["end_date"]):
+                    continue
+
+                tracks = _parse_tracks(item.get("sets", {}))
+                results.append({
+                    "concert_id": concert_id,
+                    "setlist_fm_id": item.get("id"),
+                    "tracks": tracks,
+                })
+                seen_concert_ids.add(concert_id)
+                logger.info(
+                    "셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
+                    concert_id, item.get("id"), len(tracks),
+                )
+                matched = True
+                break
+
+            if matched:
+                break
+
+            total = int(data.get("total", 0))
+            items_per_page = int(data.get("itemsPerPage", 20))
+            if page * items_per_page >= total or page >= _MAX_PAGES:
+                break
+            page += 1
 
     logger.info("setlist.fm 수집 완료: 총 %d건", len(results))
     return results

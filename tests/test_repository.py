@@ -153,7 +153,7 @@ class TestSaveConcertArtists:
         """매칭 결과가 concert_artist 테이블에 INSERT되어야 한다."""
         mock_session = MagicMock()
         self._run(
-            [{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}],
+            [{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True}],
             mock_session,
         )
 
@@ -164,7 +164,7 @@ class TestSaveConcertArtists:
         """confidence=HIGH이면 approved=true로 저장되어야 한다."""
         mock_session = MagicMock()
         self._run(
-            [{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}],
+            [{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True}],
             mock_session,
         )
 
@@ -175,7 +175,7 @@ class TestSaveConcertArtists:
         """confidence=LOW이면 approved=false로 저장되어야 한다."""
         mock_session = MagicMock()
         self._run(
-            [{"concert_id": 1, "artist_id": 10, "confidence": "LOW", "matched_by": "prfnm"}],
+            [{"concert_id": 1, "artist_id": 10, "confidence": "LOW", "matched_by": "prfnm", "approved": False}],
             mock_session,
         )
 
@@ -186,7 +186,7 @@ class TestSaveConcertArtists:
         """중복 매칭 방지를 위해 ON CONFLICT DO NOTHING이 포함되어야 한다."""
         mock_session = MagicMock()
         self._run(
-            [{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}],
+            [{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True}],
             mock_session,
         )
 
@@ -197,8 +197,8 @@ class TestSaveConcertArtists:
         """복수 매칭 결과가 모두 INSERT되어야 한다."""
         mock_session = MagicMock()
         matches = [
-            {"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"},
-            {"concert_id": 2, "artist_id": 20, "confidence": "LOW", "matched_by": "prfnm"},
+            {"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True},
+            {"concert_id": 2, "artist_id": 20, "confidence": "LOW", "matched_by": "prfnm", "approved": False},
         ]
         self._run(matches, mock_session)
 
