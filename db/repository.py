@@ -239,6 +239,30 @@ def save_setlists(setlists: list[dict]) -> None:
     logger.info("셋리스트 저장 완료: %d건 처리", len(setlists))
 
 
+def save_concert_artists(matches: list[dict]) -> None:
+    """매칭 결과를 concert_artist 테이블에 저장한다. HIGH confidence는 즉시 승인."""
+    with get_session() as session:
+        for match in matches:
+            approved = match["confidence"] == "HIGH"
+            session.execute(
+                text("""
+                    INSERT INTO concert_artist
+                        (concert_id, artist_id, confidence, matched_by, approved)
+                    VALUES
+                        (:concert_id, :artist_id, :confidence, :matched_by, :approved)
+                    ON CONFLICT (concert_id, artist_id) DO NOTHING
+                """),
+                {
+                    "concert_id": match["concert_id"],
+                    "artist_id": match["artist_id"],
+                    "confidence": match["confidence"],
+                    "matched_by": match["matched_by"],
+                    "approved": approved,
+                },
+            )
+    logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
+
+
 def update_concert_status(concerts: list[dict]) -> None:
     """updatedate 변화 감지 시 status와 kopis_update_date를 갱신한다."""
     updated = 0
