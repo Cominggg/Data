@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -9,6 +9,7 @@ from collectors.musicbrainz import (
     _parse_url_rels,
     collect_artists,
 )
+from db.repository import save_artists
 
 
 class TestParseAliases:
@@ -146,3 +147,136 @@ class TestCollectArtists:
         result = collect_artists()
         assert len(result) == 1
         mock_search.assert_called_once()
+
+
+class TestSaveArtists:
+    def _make_session_mock(self, insert_returns_id=True):
+        mock_session = MagicMock()
+        if insert_returns_id:
+            mock_session.execute.return_value.fetchone.return_value = (1,)
+        else:
+            mock_session.execute.return_value.fetchone.side_effect = [None, (1,)]
+        return mock_session
+
+    def _run(self, artists, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_artists(artists)
+
+    def test_artist_insert_uses_on_conflict_do_nothing(self):
+        """artist INSERT에 ON CONFLICT (mbid) DO NOTHING이 포함되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run([{"mbid": "m1", "name": "A", "sort_name": "A", "aliases": [], "url_rels": []}], mock_session)
+
+        artist_insert_sql = next(
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
+            if "INSERT INTO artist" in str(c.args[0])
+        )
+        assert "ON CONFLICT (mbid) DO NOTHING" in artist_insert_sql
+
+    def test_inserts_aliases_for_artist(self):
+        """alias 목록이 artist_alias 테이블에 INSERT되어야 한다."""
+        mock_session = self._make_session_mock()
+        artist = {
+            "mbid": "m1",
+            "name": "Artist",
+            "sort_name": "Artist",
+            "aliases": [
+                {"name": "아티스트", "locale": "ko"},
+                {"name": "Artist", "locale": "en"},
+            ],
+            "url_rels": [],
+        }
+        self._run([artist], mock_session)
+
+        alias_inserts = [
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO artist_alias" in str(c.args[0])
+        ]
+        assert len(alias_inserts) == 2
+
+    def test_inserts_url_rels_for_artist(self):
+        """url_rels 목록이 artist_url 테이블에 INSERT되어야 한다."""
+        mock_session = self._make_session_mock()
+        artist = {
+            "mbid": "m1",
+            "name": "Artist",
+            "sort_name": "Artist",
+            "aliases": [],
+            "url_rels": [
+                {"type": "official homepage", "url": "https://example.com"},
+                {"type": "social network", "url": "https://twitter.com/artist"},
+            ],
+        }
+        self._run([artist], mock_session)
+
+        url_inserts = [
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO artist_url" in str(c.args[0])
+        ]
+        assert len(url_inserts) == 2
+
+    def test_selects_artist_id_when_conflict(self):
+        """mbid 충돌로 RETURNING이 없을 때 SELECT로 기존 ID를 조회해야 한다."""
+        mock_session = self._make_session_mock(insert_returns_id=False)
+        artist = {
+            "mbid": "existing-mbid",
+            "name": "Artist",
+            "sort_name": "Artist",
+            "aliases": [{"name": "아티스트", "locale": "ko"}],
+            "url_rels": [],
+        }
+        self._run([artist], mock_session)
+
+        select_calls = [
+            c for c in mock_session.execute.call_args_list
+            if "SELECT id FROM artist" in str(c.args[0])
+        ]
+        assert len(select_calls) == 1
+
+        alias_inserts = [
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO artist_alias" in str(c.args[0])
+        ]
+        assert len(alias_inserts) == 1
+
+    def test_skips_artist_when_id_not_found(self):
+        """INSERT도 SELECT도 None이면 alias·url INSERT 없이 건너뛰어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
+
+        artist = {
+            "mbid": "ghost-mbid",
+            "name": "Ghost",
+            "sort_name": "Ghost",
+            "aliases": [{"name": "고스트", "locale": "ko"}],
+            "url_rels": [{"type": "homepage", "url": "https://ghost.com"}],
+        }
+        self._run([artist], mock_session)
+
+        child_inserts = [
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO artist_alias" in str(c.args[0])
+            or "INSERT INTO artist_url" in str(c.args[0])
+        ]
+        assert len(child_inserts) == 0
+
+    def test_handles_empty_aliases_and_urls(self):
+        """aliases와 url_rels가 없어도 정상 저장되어야 한다."""
+        mock_session = self._make_session_mock()
+        artist = {"mbid": "m1", "name": "A", "sort_name": "A", "aliases": [], "url_rels": []}
+        self._run([artist], mock_session)
+
+        artist_inserts = [
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO artist" in str(c.args[0])
+        ]
+        assert len(artist_inserts) == 1
+
+    def test_handles_empty_list(self):
+        """빈 리스트 입력 시 DB 호출 없이 종료되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run([], mock_session)
+        mock_session.execute.assert_not_called()
