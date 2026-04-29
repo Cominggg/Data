@@ -14,12 +14,8 @@ def _split_cast(cast: str) -> list[str]:
     return [name.strip() for name in _CAST_SEP.split(cast) if name.strip()]
 
 
-def _exact_match(name: str, aliases: list[dict]) -> Optional[dict]:
-    name_lower = name.lower()
-    for alias in aliases:
-        if alias["name"].lower() == name_lower:
-            return alias
-    return None
+def _exact_match(name: str, alias_map: dict) -> Optional[dict]:
+    return alias_map.get(name.lower())
 
 
 def _fuzzy_match(text: str, aliases: list[dict]) -> Optional[dict]:
@@ -51,9 +47,10 @@ def match_concert(concert: dict, aliases: list[dict]) -> tuple[list[dict], list[
     cast = concert.get("cast") or ""
     title = concert.get("title") or ""
     matches = []
+    alias_map = {a["name"].lower(): a for a in aliases}
 
     for artist_name in _split_cast(cast):
-        alias = _exact_match(artist_name, aliases)
+        alias = _exact_match(artist_name, alias_map)
         if alias:
             matches.append({
                 "concert_id": concert_id,
