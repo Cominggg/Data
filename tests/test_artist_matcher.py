@@ -43,6 +43,15 @@ class TestAliasExactMatch:
 
         assert len(matches) == 2
 
+    def test_exact_match_is_case_insensitive(self):
+        """cast와 alias의 대소문자가 달라도 완전 일치로 처리되어야 한다."""
+        concert = {"concert_id": 12, "title": "콘서트", "cast": "bts"}
+        matches, _ = match_concert(concert, _ALIASES)
+
+        assert len(matches) == 1
+        assert matches[0]["confidence"] == "HIGH"
+        assert matches[0]["artist_id"] == 2
+
 
 class TestFuzzyMatch:
     def test_partial_ratio_above_threshold_returns_low_confidence(self):
