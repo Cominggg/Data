@@ -239,6 +239,36 @@ def save_setlists(setlists: list[dict]) -> None:
     logger.info("셋리스트 저장 완료: %d건 처리", len(setlists))
 
 
+def get_all_aliases() -> list[dict]:
+    """매칭에 사용할 모든 아티스트 alias를 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT artist_id, name FROM artist_alias")
+        ).fetchall()
+    return [{"artist_id": row[0], "name": row[1]} for row in rows]
+
+
+def get_all_artist_mbids() -> list[str]:
+    """DB에 저장된 모든 아티스트 MBID를 반환한다."""
+    with get_session() as session:
+        rows = session.execute(text("SELECT mbid FROM artist")).fetchall()
+    return [row[0] for row in rows]
+
+
+def get_unmatched_concerts() -> list[dict]:
+    """concert_artist 매칭이 없는 공연을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT c.id AS concert_id, c.title, c.cast
+                FROM concert c
+                LEFT JOIN concert_artist ca ON ca.concert_id = c.id
+                WHERE ca.concert_id IS NULL
+            """)
+        ).fetchall()
+    return [{"concert_id": row[0], "title": row[1], "cast": row[2]} for row in rows]
+
+
 def save_concert_artists(matches: list[dict]) -> None:
     """매칭 결과를 concert_artist 테이블에 저장한다. HIGH confidence는 즉시 승인."""
     with get_session() as session:
