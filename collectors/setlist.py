@@ -82,9 +82,9 @@ def collect() -> list[dict]:
                 data = _get("/search/setlists", {"artistMbid": artist_mbid, "countryCode": "KR", "p": page})
             except requests.HTTPError as e:
                 if e.response is not None and e.response.status_code == 404:
-                    logger.debug("셋리스트 없음 — 건너뜀: concert_id=%d", concert_id)
+                    logger.debug("셋리스트 없음 — 건너뜀: concert_id=%d, page=%d", concert_id, page)
                 else:
-                    logger.warning("setlist.fm API 오류: concert_id=%d, %s", concert_id, e)
+                    logger.warning("setlist.fm API 오류: concert_id=%d, page=%d, %s", concert_id, page, e)
                 break
 
             setlist_items = data.get("setlist", [])
