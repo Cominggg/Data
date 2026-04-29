@@ -75,7 +75,7 @@ def collect() -> list[dict]:
         logger.debug("셋리스트 조회: concert_id=%d, artist_mbid=%s", concert_id, artist_mbid)
 
         try:
-            data = _get("/search/setlists", {"artistMbid": artist_mbid, "p": 1})
+            data = _get("/search/setlists", {"artistMbid": artist_mbid, "countryCode": "KR", "p": 1})
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
                 logger.debug("셋리스트 없음 — 건너뜀: concert_id=%d", concert_id)
