@@ -270,63 +270,74 @@ def get_unmatched_concerts() -> list[dict]:
 
 
 def save_concert_artists(matches: list[dict]) -> None:
-    """매칭 결과를 concert_artist 테이블에 저장한다. HIGH 매칭은 approved=true로 즉시 노출."""
+    """매칭 결과를 concert_artist 테이블에 저장한다. HIGH confidence는 즉시 승인."""
     with get_session() as session:
         for match in matches:
+            approved = match["confidence"] == "HIGH"
             session.execute(
                 text("""
                     INSERT INTO concert_artist
                         (concert_id, artist_id, confidence, matched_by, approved)
                     VALUES
                         (:concert_id, :artist_id, :confidence, :matched_by, :approved)
-                    ON CONFLICT DO NOTHING
+                    ON CONFLICT (concert_id, artist_id) DO NOTHING
                 """),
                 {
                     "concert_id": match["concert_id"],
                     "artist_id": match["artist_id"],
                     "confidence": match["confidence"],
                     "matched_by": match["matched_by"],
-                    "approved": match["confidence"] == "HIGH",
+                    "approved": approved,
                 },
             )
-    logger.info("concert_artist 저장 완료: %d건", len(matches))
+    logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
 
 
 def save_to_review_queue(failures: list[dict]) -> None:
-    """매칭 실패 공연을 review_queue 테이블에 등록한다."""
+    """매칭 실패 공연을 matching_review_queue 테이블에 PENDING 상태로 등록한다."""
     with get_session() as session:
         for failure in failures:
             session.execute(
                 text("""
-                    INSERT INTO review_queue (concert_id)
-                    VALUES (:concert_id)
-                    ON CONFLICT DO NOTHING
+                    INSERT INTO matching_review_queue (concert_id, status)
+                    VALUES (:concert_id, 'PENDING')
+                    ON CONFLICT (concert_id) DO NOTHING
                 """),
                 {"concert_id": failure["concert_id"]},
             )
-    logger.info("review_queue 등록 완료: %d건", len(failures))
+    logger.info("매칭 검토 큐 등록 완료: %d건 처리", len(failures))
 
 
-def update_artist_is_coming(artist_ids: list[int]) -> None:
-    """지정 아티스트들의 is_coming 플래그를 공연 상태 기준으로 갱신한다."""
-    if not artist_ids:
-        return
+def update_artist_is_coming() -> int:
+    """오늘 이후 approved 공연 보유 여부에 따라 artist.is_coming을 갱신한다.
+
+    값이 실제로 바뀌는 행만 UPDATE해 불필요한 쓰기 I/O를 줄인다.
+    반환값: 갱신된 행 수
+    """
     with get_session() as session:
-        for artist_id in artist_ids:
-            session.execute(
-                text("""
-                    UPDATE artist SET is_coming = EXISTS(
-                        SELECT 1 FROM concert c
-                        JOIN concert_artist ca ON ca.concert_id = c.id
-                        WHERE ca.artist_id = :artist_id
-                          AND ca.approved = true
-                          AND c.status IN ('공연예정', '공연중')
-                    )
-                    WHERE id = :artist_id
-                """),
-                {"artist_id": artist_id},
-            )
-    logger.info("is_coming 갱신 완료: %d명", len(artist_ids))
+        result = session.execute(
+            text("""
+                UPDATE artist
+                SET is_coming = new_val.is_coming
+                FROM (
+                    SELECT a.id,
+                           EXISTS (
+                               SELECT 1
+                               FROM concert_artist ca
+                               JOIN concert c ON c.id = ca.concert_id
+                               WHERE ca.artist_id = a.id
+                                 AND ca.approved = true
+                                 AND c.end_date >= CURRENT_DATE
+                           ) AS is_coming
+                    FROM artist a
+                ) new_val
+                WHERE artist.id = new_val.id
+                  AND artist.is_coming IS DISTINCT FROM new_val.is_coming
+            """)
+        )
+        updated = result.rowcount
+    logger.info("artist.is_coming 갱신 완료: %d건 변경", updated)
+    return updated
 
 
 def update_concert_status(concerts: list[dict]) -> None:
