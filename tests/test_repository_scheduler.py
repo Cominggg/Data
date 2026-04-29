@@ -25,7 +25,7 @@ class TestSaveConcertArtists:
         """HIGH 매칭은 approved=True로 저장되어야 한다."""
         mock_session = MagicMock()
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}])
+            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True}])
 
         params = mock_session.execute.call_args_list[0].args[1]
         assert params["approved"] is True
@@ -34,7 +34,7 @@ class TestSaveConcertArtists:
         """LOW 매칭은 approved=False로 저장되어야 한다."""
         mock_session = MagicMock()
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "LOW", "matched_by": "prfnm"}])
+            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "LOW", "matched_by": "prfnm", "approved": False}])
 
         params = mock_session.execute.call_args_list[0].args[1]
         assert params["approved"] is False
@@ -43,7 +43,7 @@ class TestSaveConcertArtists:
         """INSERT SQL에 ON CONFLICT가 포함되어야 한다."""
         mock_session = MagicMock()
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}])
+            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True}])
 
         sql = str(mock_session.execute.call_args_list[0].args[0])
         assert "ON CONFLICT" in sql
@@ -52,8 +52,8 @@ class TestSaveConcertArtists:
         """여러 매칭 결과가 모두 INSERT되어야 한다."""
         mock_session = MagicMock()
         matches = [
-            {"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"},
-            {"concert_id": 2, "artist_id": 20, "confidence": "LOW", "matched_by": "prfnm"},
+            {"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True},
+            {"concert_id": 2, "artist_id": 20, "confidence": "LOW", "matched_by": "prfnm", "approved": False},
         ]
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
             save_concert_artists(matches)
