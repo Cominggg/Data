@@ -7,6 +7,60 @@ from db.connection import get_session
 logger = logging.getLogger(__name__)
 
 
+def save_artists(artists: list[dict]) -> None:
+    """수집된 아티스트 목록을 artist, artist_alias, artist_url 테이블에 저장한다."""
+    with get_session() as session:
+        for artist in artists:
+            row = session.execute(
+                text("""
+                    INSERT INTO artist (mbid, name, sort_name, debut_date)
+                    VALUES (:mbid, :name, :sort_name, :debut_date)
+                    ON CONFLICT (mbid) DO NOTHING
+                    RETURNING id
+                """),
+                {
+                    "mbid": artist["mbid"],
+                    "name": artist["name"],
+                    "sort_name": artist["sort_name"],
+                    "debut_date": artist.get("debut_date"),
+                },
+            ).fetchone()
+
+            if row is None:
+                row = session.execute(
+                    text("SELECT id FROM artist WHERE mbid = :mbid"),
+                    {"mbid": artist["mbid"]},
+                ).fetchone()
+
+            if row is None:
+                logger.warning("아티스트 ID 조회 실패 — 저장 건너뜀: mbid=%s", artist["mbid"])
+                continue
+
+            artist_id = row[0]
+
+            for alias in artist.get("aliases", []):
+                session.execute(
+                    text("""
+                        INSERT INTO artist_alias (artist_id, name, locale)
+                        VALUES (:artist_id, :name, :locale)
+                        ON CONFLICT DO NOTHING
+                    """),
+                    {"artist_id": artist_id, "name": alias["name"], "locale": alias["locale"]},
+                )
+
+            for url_rel in artist.get("url_rels", []):
+                session.execute(
+                    text("""
+                        INSERT INTO artist_url (artist_id, type, url)
+                        VALUES (:artist_id, :type, :url)
+                        ON CONFLICT DO NOTHING
+                    """),
+                    {"artist_id": artist_id, "type": url_rel["type"], "url": url_rel["url"]},
+                )
+
+    logger.info("아티스트 저장 완료: %d건 처리", len(artists))
+
+
 def save_releases(releases: list[dict]) -> None:
     """수집된 릴리즈 목록을 DB에 저장한다. first_release_date 기준 미존재 항목만 INSERT."""
     with get_session() as session:
