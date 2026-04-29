@@ -278,6 +278,27 @@ def save_to_review_queue(failures: list[dict]) -> None:
     logger.info("매칭 검토 큐 등록 완료: %d건 처리", len(failures))
 
 
+def update_artist_is_coming() -> None:
+    """오늘 이후 approved 공연 보유 여부에 따라 artist.is_coming을 일괄 갱신한다."""
+    with get_session() as session:
+        session.execute(
+            text("""
+                UPDATE artist
+                SET is_coming = (
+                    EXISTS (
+                        SELECT 1
+                        FROM concert_artist ca
+                        JOIN concert c ON c.id = ca.concert_id
+                        WHERE ca.artist_id = artist.id
+                          AND ca.approved = true
+                          AND c.end_date >= CURRENT_DATE
+                    )
+                )
+            """)
+        )
+    logger.info("artist.is_coming 갱신 완료")
+
+
 def update_concert_status(concerts: list[dict]) -> None:
     """updatedate 변화 감지 시 status와 kopis_update_date를 갱신한다."""
     updated = 0
