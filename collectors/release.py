@@ -49,8 +49,16 @@ def _fetch_release_groups(artist_mbid: str, offset: int) -> dict:
 def _fetch_tracks(release_mbid: str) -> dict:
     return _get(
         f"/release/{release_mbid}",
-        {"inc": "recordings", "fmt": "json"},
+        {"inc": "recordings+labels", "fmt": "json"},
     )
+
+
+def _parse_label(release_data: dict) -> Optional[str]:
+    label_info = release_data.get("label-info", [])
+    if not label_info:
+        return None
+    label = label_info[0].get("label") or {}
+    return label.get("name")
 
 
 def _parse_tracks(release_data: dict) -> list[dict]:
@@ -111,10 +119,12 @@ def collect_releases(artist_mbid: str) -> list[dict]:
             release_mbid = _get_representative_release_mbid(rg)
 
             tracks = []
+            label = None
             if release_mbid:
                 try:
                     release_data = _fetch_tracks(release_mbid)
                     tracks = _parse_tracks(release_data)
+                    label = _parse_label(release_data)
                 except requests.HTTPError as e:
                     logger.warning("트랙 수집 실패 release_mbid=%s: %s", release_mbid, e)
 
@@ -134,6 +144,7 @@ def collect_releases(artist_mbid: str) -> list[dict]:
                     "first_release_date": rg.get("first-release-date") or None,
                     "representative_release_mbid": release_mbid,
                     "cover_url": cover_url,
+                    "label": label,
                     "tracks": tracks,
                 }
             )
