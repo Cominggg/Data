@@ -239,6 +239,96 @@ def save_setlists(setlists: list[dict]) -> None:
     logger.info("셋리스트 저장 완료: %d건 처리", len(setlists))
 
 
+def get_all_aliases() -> list[dict]:
+    """매칭에 사용할 모든 아티스트 alias를 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT artist_id, name FROM artist_alias")
+        ).fetchall()
+    return [{"artist_id": row[0], "name": row[1]} for row in rows]
+
+
+def get_all_artist_mbids() -> list[str]:
+    """DB에 저장된 모든 아티스트 MBID를 반환한다."""
+    with get_session() as session:
+        rows = session.execute(text("SELECT mbid FROM artist")).fetchall()
+    return [row[0] for row in rows]
+
+
+def get_unmatched_concerts() -> list[dict]:
+    """concert_artist 매칭이 없는 공연을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT c.id AS concert_id, c.title, c.cast
+                FROM concert c
+                LEFT JOIN concert_artist ca ON ca.concert_id = c.id
+                WHERE ca.concert_id IS NULL
+            """)
+        ).fetchall()
+    return [{"concert_id": row[0], "title": row[1], "cast": row[2]} for row in rows]
+
+
+def save_concert_artists(matches: list[dict]) -> None:
+    """매칭 결과를 concert_artist 테이블에 저장한다. HIGH 매칭은 approved=true로 즉시 노출."""
+    with get_session() as session:
+        for match in matches:
+            session.execute(
+                text("""
+                    INSERT INTO concert_artist
+                        (concert_id, artist_id, confidence, matched_by, approved)
+                    VALUES
+                        (:concert_id, :artist_id, :confidence, :matched_by, :approved)
+                    ON CONFLICT DO NOTHING
+                """),
+                {
+                    "concert_id": match["concert_id"],
+                    "artist_id": match["artist_id"],
+                    "confidence": match["confidence"],
+                    "matched_by": match["matched_by"],
+                    "approved": match["confidence"] == "HIGH",
+                },
+            )
+    logger.info("concert_artist 저장 완료: %d건", len(matches))
+
+
+def save_to_review_queue(failures: list[dict]) -> None:
+    """매칭 실패 공연을 review_queue 테이블에 등록한다."""
+    with get_session() as session:
+        for failure in failures:
+            session.execute(
+                text("""
+                    INSERT INTO review_queue (concert_id)
+                    VALUES (:concert_id)
+                    ON CONFLICT DO NOTHING
+                """),
+                {"concert_id": failure["concert_id"]},
+            )
+    logger.info("review_queue 등록 완료: %d건", len(failures))
+
+
+def update_artist_is_coming(artist_ids: list[int]) -> None:
+    """지정 아티스트들의 is_coming 플래그를 공연 상태 기준으로 갱신한다."""
+    if not artist_ids:
+        return
+    with get_session() as session:
+        for artist_id in artist_ids:
+            session.execute(
+                text("""
+                    UPDATE artist SET is_coming = EXISTS(
+                        SELECT 1 FROM concert c
+                        JOIN concert_artist ca ON ca.concert_id = c.id
+                        WHERE ca.artist_id = :artist_id
+                          AND ca.approved = true
+                          AND c.status IN ('공연예정', '공연중')
+                    )
+                    WHERE id = :artist_id
+                """),
+                {"artist_id": artist_id},
+            )
+    logger.info("is_coming 갱신 완료: %d명", len(artist_ids))
+
+
 def update_concert_status(concerts: list[dict]) -> None:
     """updatedate 변화 감지 시 status와 kopis_update_date를 갱신한다."""
     updated = 0
