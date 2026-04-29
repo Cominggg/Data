@@ -57,8 +57,7 @@ def run_kopis_collect_and_match() -> None:
 
     if all_matches:
         save_concert_artists(all_matches)
-        artist_ids = list({m["artist_id"] for m in all_matches})
-        update_artist_is_coming(artist_ids)
+        update_artist_is_coming()
 
     if all_failures:
         save_to_review_queue(all_failures)
@@ -71,10 +70,7 @@ def run_status_update() -> None:
     logger.info("=== 공연 상태 갱신 잡 시작 ===")
     concerts = kopis.collect()
     update_concert_status(concerts)
-
-    aliases = get_all_aliases()
-    artist_ids = list({a["artist_id"] for a in aliases})
-    update_artist_is_coming(artist_ids)
+    update_artist_is_coming()
     logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
 

@@ -126,7 +126,7 @@ class TestRunKopisCollectAndMatch:
         assert any(f["concert_id"] == 99 for f in failures)
 
     def test_updates_is_coming_after_match(self):
-        """매칭 성공 후 update_artist_is_coming이 호출되어야 한다."""
+        """매칭 성공 후 update_artist_is_coming이 인자 없이 호출되어야 한다."""
         unmatched = [{"concert_id": 1, "title": "아이유 콘서트", "cast": "아이유"}]
         aliases = [{"artist_id": 10, "name": "아이유"}]
         with (
@@ -140,9 +140,7 @@ class TestRunKopisCollectAndMatch:
         ):
             run_kopis_collect_and_match()
 
-        mock_update.assert_called_once()
-        artist_ids = mock_update.call_args[0][0]
-        assert 10 in artist_ids
+        mock_update.assert_called_once_with()
 
     def test_skips_save_concert_artists_when_no_matches(self):
         """매칭 결과가 없으면 save_concert_artists가 호출되지 않아야 한다."""
@@ -167,27 +165,22 @@ class TestRunStatusUpdate:
         with (
             patch("scheduler.kopis.collect", return_value=concerts),
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
             run_status_update()
 
         mock_update.assert_called_once_with(concerts)
 
-    def test_updates_is_coming_for_all_aliased_artists(self):
-        """모든 alias 아티스트에 대해 update_artist_is_coming이 호출되어야 한다."""
-        aliases = [{"artist_id": 1, "name": "아이유"}, {"artist_id": 2, "name": "BTS"}]
+    def test_updates_is_coming_after_status_update(self):
+        """상태 갱신 후 update_artist_is_coming이 인자 없이 호출되어야 한다."""
         with (
             patch("scheduler.kopis.collect", return_value=[]),
             patch("scheduler.update_concert_status"),
-            patch("scheduler.get_all_aliases", return_value=aliases),
             patch("scheduler.update_artist_is_coming") as mock_update,
         ):
             run_status_update()
 
-        mock_update.assert_called_once()
-        artist_ids = mock_update.call_args[0][0]
-        assert set(artist_ids) == {1, 2}
+        mock_update.assert_called_once_with()
 
 
 class TestRunReleaseUpdate:

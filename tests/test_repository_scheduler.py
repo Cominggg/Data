@@ -98,39 +98,44 @@ class TestSaveToReviewQueue:
 
 
 class TestUpdateArtistIsComing:
-    def test_empty_list_skips_db(self):
-        """빈 리스트이면 DB 호출이 없어야 한다."""
-        with patch("db.repository.get_session") as mock_get_session:
-            update_artist_is_coming([])
-
-        mock_get_session.assert_not_called()
-
-    def test_executes_update_per_artist(self):
-        """아티스트 수만큼 UPDATE가 실행되어야 한다."""
+    def test_executes_single_bulk_update(self):
+        """전체 아티스트를 단일 UPDATE로 갱신해야 한다."""
         mock_session = MagicMock()
+        mock_session.execute.return_value.rowcount = 5
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            update_artist_is_coming([1, 2, 3])
+            update_artist_is_coming()
 
-        assert mock_session.execute.call_count == 3
+        assert mock_session.execute.call_count == 1
 
-    def test_update_sql_references_concert_status(self):
-        """UPDATE SQL이 공연 상태를 기준으로 is_coming을 갱신해야 한다."""
+    def test_returns_updated_row_count(self):
+        """갱신된 행 수를 반환해야 한다."""
         mock_session = MagicMock()
+        mock_session.execute.return_value.rowcount = 3
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            update_artist_is_coming([1])
+            result = update_artist_is_coming()
+
+        assert result == 3
+
+    def test_update_sql_uses_end_date(self):
+        """UPDATE SQL이 end_date >= CURRENT_DATE 조건으로 is_coming을 갱신해야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.rowcount = 0
+        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
+            update_artist_is_coming()
 
         sql = str(mock_session.execute.call_args_list[0].args[0])
         assert "is_coming" in sql
-        assert "artist_id" in sql
+        assert "end_date" in sql
 
-    def test_correct_artist_id_passed_as_param(self):
-        """UPDATE 파라미터에 올바른 artist_id가 전달되어야 한다."""
+    def test_update_sql_only_changes_differing_rows(self):
+        """값이 실제로 바뀌는 행만 UPDATE해야 한다 (IS DISTINCT FROM)."""
         mock_session = MagicMock()
+        mock_session.execute.return_value.rowcount = 0
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            update_artist_is_coming([42])
+            update_artist_is_coming()
 
-        params = mock_session.execute.call_args_list[0].args[1]
-        assert params["artist_id"] == 42
+        sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "IS DISTINCT FROM" in sql
 
 
 class TestGetAllAliases:
