@@ -239,6 +239,77 @@ def save_setlists(setlists: list[dict]) -> None:
     logger.info("셋리스트 저장 완료: %d건 처리", len(setlists))
 
 
+def save_concert_artists(matches: list[dict]) -> None:
+    """매칭 결과를 concert_artist 테이블에 저장한다. HIGH confidence는 즉시 승인."""
+    with get_session() as session:
+        for match in matches:
+            approved = match["confidence"] == "HIGH"
+            session.execute(
+                text("""
+                    INSERT INTO concert_artist
+                        (concert_id, artist_id, confidence, matched_by, approved)
+                    VALUES
+                        (:concert_id, :artist_id, :confidence, :matched_by, :approved)
+                    ON CONFLICT (concert_id, artist_id) DO NOTHING
+                """),
+                {
+                    "concert_id": match["concert_id"],
+                    "artist_id": match["artist_id"],
+                    "confidence": match["confidence"],
+                    "matched_by": match["matched_by"],
+                    "approved": approved,
+                },
+            )
+    logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
+
+
+def save_to_review_queue(failures: list[dict]) -> None:
+    """매칭 실패 공연을 matching_review_queue 테이블에 PENDING 상태로 등록한다."""
+    with get_session() as session:
+        for failure in failures:
+            session.execute(
+                text("""
+                    INSERT INTO matching_review_queue (concert_id, status)
+                    VALUES (:concert_id, 'PENDING')
+                    ON CONFLICT (concert_id) DO NOTHING
+                """),
+                {"concert_id": failure["concert_id"]},
+            )
+    logger.info("매칭 검토 큐 등록 완료: %d건 처리", len(failures))
+
+
+def update_artist_is_coming() -> int:
+    """오늘 이후 approved 공연 보유 여부에 따라 artist.is_coming을 갱신한다.
+
+    값이 실제로 바뀌는 행만 UPDATE해 불필요한 쓰기 I/O를 줄인다.
+    반환값: 갱신된 행 수
+    """
+    with get_session() as session:
+        result = session.execute(
+            text("""
+                UPDATE artist
+                SET is_coming = new_val.is_coming
+                FROM (
+                    SELECT a.id,
+                           EXISTS (
+                               SELECT 1
+                               FROM concert_artist ca
+                               JOIN concert c ON c.id = ca.concert_id
+                               WHERE ca.artist_id = a.id
+                                 AND ca.approved = true
+                                 AND c.end_date >= CURRENT_DATE
+                           ) AS is_coming
+                    FROM artist a
+                ) new_val
+                WHERE artist.id = new_val.id
+                  AND artist.is_coming IS DISTINCT FROM new_val.is_coming
+            """)
+        )
+        updated = result.rowcount
+    logger.info("artist.is_coming 갱신 완료: %d건 변경", updated)
+    return updated
+
+
 def update_concert_status(concerts: list[dict]) -> None:
     """updatedate 변화 감지 시 status와 kopis_update_date를 갱신한다."""
     updated = 0
