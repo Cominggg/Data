@@ -273,7 +273,6 @@ def save_concert_artists(matches: list[dict]) -> None:
     """매칭 결과를 concert_artist 테이블에 저장한다. HIGH confidence는 즉시 승인."""
     with get_session() as session:
         for match in matches:
-            approved = match["confidence"] == "HIGH"
             session.execute(
                 text("""
                     INSERT INTO concert_artist

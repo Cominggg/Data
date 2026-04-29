@@ -57,6 +57,7 @@ def match_concert(concert: dict, aliases: list[dict]) -> tuple[list[dict], list[
                 "artist_id": alias["artist_id"],
                 "confidence": "HIGH",
                 "matched_by": "prfcast",
+                "approved": True,
             })
             logger.debug("HIGH 매칭: concert_id=%s, artist_id=%s, name=%s", concert_id, alias["artist_id"], artist_name)
 
@@ -68,6 +69,7 @@ def match_concert(concert: dict, aliases: list[dict]) -> tuple[list[dict], list[
                 "artist_id": alias["artist_id"],
                 "confidence": "LOW",
                 "matched_by": "prfnm",
+                "approved": False,
             })
             logger.debug("LOW 매칭: concert_id=%s, artist_id=%s, title=%s", concert_id, alias["artist_id"], title)
 
