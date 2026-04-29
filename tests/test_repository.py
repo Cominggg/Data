@@ -90,6 +90,27 @@ class TestSaveArtists:
         url_calls = [c for c in mock_session.execute.call_args_list if "artist_url" in str(c.args[0])]
         assert len(url_calls) == 2
 
+    def test_falls_back_to_select_when_returning_is_none(self):
+        """RETURNING id가 None(중복 충돌)이면 SELECT로 fallback해 alias를 정상 저장해야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, (7,)]
+        self._run(
+            [
+                {
+                    "mbid": "mbid-dup",
+                    "name": "Dup Artist",
+                    "sort_name": "Dup",
+                    "debut_date": None,
+                    "aliases": [{"name": "중복아티스트", "locale": "ko"}],
+                    "url_rels": [],
+                }
+            ],
+            mock_session,
+        )
+
+        alias_calls = [c for c in mock_session.execute.call_args_list if "artist_alias" in str(c.args[0])]
+        assert len(alias_calls) == 1
+
     def test_skips_artist_when_id_not_found(self):
         """RETURNING id가 없고 SELECT도 None이면 alias·url 삽입 없이 건너뛰어야 한다."""
         mock_session = MagicMock()
