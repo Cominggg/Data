@@ -1,6 +1,145 @@
 from unittest.mock import MagicMock, call, patch
 
-from db.repository import save_concert_artists, save_to_review_queue, update_artist_is_coming
+from db.repository import (
+    save_artists,
+    save_concert_artists,
+    save_to_review_queue,
+    update_artist_is_coming,
+)
+
+
+class TestSaveArtists:
+    def _run(self, artists, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_artists(artists)
+
+    def _make_session_mock(self, artist_id=1):
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (artist_id,)
+        return mock_session
+
+    def test_inserts_into_artist_table(self):
+        """아티스트 정보가 artist 테이블에 INSERT되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(
+            [{"mbid": "mbid-1", "name": "Artist A", "sort_name": "A, Artist", "debut_date": "2010-01-01", "aliases": [], "url_rels": []}],
+            mock_session,
+        )
+
+        first_sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "INSERT INTO artist" in first_sql
+
+    def test_on_conflict_mbid_do_nothing(self):
+        """중복 mbid 시 ON CONFLICT DO NOTHING이 포함되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(
+            [{"mbid": "mbid-1", "name": "Artist A", "sort_name": "A, Artist", "debut_date": None, "aliases": [], "url_rels": []}],
+            mock_session,
+        )
+
+        first_sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "ON CONFLICT" in first_sql
+
+    def test_inserts_aliases(self):
+        """alias 목록이 artist_alias 테이블에 INSERT되어야 한다."""
+        mock_session = self._make_session_mock(artist_id=5)
+        self._run(
+            [
+                {
+                    "mbid": "mbid-1",
+                    "name": "Artist A",
+                    "sort_name": "A, Artist",
+                    "debut_date": None,
+                    "aliases": [
+                        {"name": "아티스트 A", "locale": "ko"},
+                        {"name": "アーティスト A", "locale": "ja"},
+                    ],
+                    "url_rels": [],
+                }
+            ],
+            mock_session,
+        )
+
+        sqls = [str(call.args[0]) for call in mock_session.execute.call_args_list]
+        assert any("INSERT INTO artist_alias" in s for s in sqls)
+        alias_calls = [c for c in mock_session.execute.call_args_list if "artist_alias" in str(c.args[0])]
+        assert len(alias_calls) == 2
+
+    def test_inserts_url_rels(self):
+        """url_rels 목록이 artist_url 테이블에 INSERT되어야 한다."""
+        mock_session = self._make_session_mock(artist_id=5)
+        self._run(
+            [
+                {
+                    "mbid": "mbid-1",
+                    "name": "Artist A",
+                    "sort_name": "A, Artist",
+                    "debut_date": None,
+                    "aliases": [],
+                    "url_rels": [
+                        {"type": "official homepage", "url": "https://example.com"},
+                        {"type": "social network", "url": "https://twitter.com/artist"},
+                    ],
+                }
+            ],
+            mock_session,
+        )
+
+        url_calls = [c for c in mock_session.execute.call_args_list if "artist_url" in str(c.args[0])]
+        assert len(url_calls) == 2
+
+    def test_falls_back_to_select_when_returning_is_none(self):
+        """RETURNING id가 None(중복 충돌)이면 SELECT로 fallback해 alias를 정상 저장해야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, (7,)]
+        self._run(
+            [
+                {
+                    "mbid": "mbid-dup",
+                    "name": "Dup Artist",
+                    "sort_name": "Dup",
+                    "debut_date": None,
+                    "aliases": [{"name": "중복아티스트", "locale": "ko"}],
+                    "url_rels": [],
+                }
+            ],
+            mock_session,
+        )
+
+        alias_calls = [c for c in mock_session.execute.call_args_list if "artist_alias" in str(c.args[0])]
+        assert len(alias_calls) == 1
+
+    def test_skips_artist_when_id_not_found(self):
+        """RETURNING id가 없고 SELECT도 None이면 alias·url 삽입 없이 건너뛰어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
+        self._run(
+            [{"mbid": "mbid-x", "name": "Ghost", "sort_name": "Ghost", "debut_date": None, "aliases": [{"name": "고스트", "locale": "ko"}], "url_rels": []}],
+            mock_session,
+        )
+
+        sqls = [str(call.args[0]) for call in mock_session.execute.call_args_list]
+        assert not any("artist_alias" in s for s in sqls)
+
+    def test_handles_empty_list(self):
+        """빈 리스트 입력 시 DB 호출 없이 종료되어야 한다."""
+        mock_session = MagicMock()
+        self._run([], mock_session)
+        mock_session.execute.assert_not_called()
+
+    def test_inserts_multiple_artists(self):
+        """복수 아티스트가 모두 INSERT되어야 한다."""
+        mock_session = self._make_session_mock()
+        artists = [
+            {"mbid": f"mbid-{i}", "name": f"Artist {i}", "sort_name": f"{i}", "debut_date": None, "aliases": [], "url_rels": []}
+            for i in range(3)
+        ]
+        self._run(artists, mock_session)
+
+        artist_insert_calls = [c for c in mock_session.execute.call_args_list if "INSERT INTO artist" in str(c.args[0])]
+        assert len(artist_insert_calls) == 3
 
 
 class TestSaveConcertArtists:
