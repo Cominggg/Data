@@ -278,25 +278,36 @@ def save_to_review_queue(failures: list[dict]) -> None:
     logger.info("매칭 검토 큐 등록 완료: %d건 처리", len(failures))
 
 
-def update_artist_is_coming() -> None:
-    """오늘 이후 approved 공연 보유 여부에 따라 artist.is_coming을 일괄 갱신한다."""
+def update_artist_is_coming() -> int:
+    """오늘 이후 approved 공연 보유 여부에 따라 artist.is_coming을 갱신한다.
+
+    값이 실제로 바뀌는 행만 UPDATE해 불필요한 쓰기 I/O를 줄인다.
+    반환값: 갱신된 행 수
+    """
     with get_session() as session:
-        session.execute(
+        result = session.execute(
             text("""
                 UPDATE artist
-                SET is_coming = (
-                    EXISTS (
-                        SELECT 1
-                        FROM concert_artist ca
-                        JOIN concert c ON c.id = ca.concert_id
-                        WHERE ca.artist_id = artist.id
-                          AND ca.approved = true
-                          AND c.end_date >= CURRENT_DATE
-                    )
-                )
+                SET is_coming = new_val.is_coming
+                FROM (
+                    SELECT a.id,
+                           EXISTS (
+                               SELECT 1
+                               FROM concert_artist ca
+                               JOIN concert c ON c.id = ca.concert_id
+                               WHERE ca.artist_id = a.id
+                                 AND ca.approved = true
+                                 AND c.end_date >= CURRENT_DATE
+                           ) AS is_coming
+                    FROM artist a
+                ) new_val
+                WHERE artist.id = new_val.id
+                  AND artist.is_coming IS DISTINCT FROM new_val.is_coming
             """)
         )
-    logger.info("artist.is_coming 갱신 완료")
+        updated = result.rowcount
+    logger.info("artist.is_coming 갱신 완료: %d건 변경", updated)
+    return updated
 
 
 def update_concert_status(concerts: list[dict]) -> None:

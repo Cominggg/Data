@@ -118,15 +118,20 @@ class TestSaveToReviewQueue:
 
 
 class TestUpdateArtistIsComing:
+    def _make_session_mock(self, rowcount=0):
+        mock_session = MagicMock()
+        mock_session.execute.return_value.rowcount = rowcount
+        return mock_session
+
     def _run(self, mock_session):
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            update_artist_is_coming()
+            return update_artist_is_coming()
 
     def test_executes_update_statement(self):
         """artist 테이블에 UPDATE 쿼리가 실행되어야 한다."""
-        mock_session = MagicMock()
+        mock_session = self._make_session_mock()
         self._run(mock_session)
 
         update_sql = str(mock_session.execute.call_args_list[0].args[0])
@@ -134,7 +139,7 @@ class TestUpdateArtistIsComing:
 
     def test_uses_current_date_for_comparison(self):
         """공연 종료일 비교에 CURRENT_DATE가 사용되어야 한다."""
-        mock_session = MagicMock()
+        mock_session = self._make_session_mock()
         self._run(mock_session)
 
         update_sql = str(mock_session.execute.call_args_list[0].args[0])
@@ -142,7 +147,7 @@ class TestUpdateArtistIsComing:
 
     def test_filters_by_approved_true(self):
         """approved=true인 공연만 is_coming 판단에 반영되어야 한다."""
-        mock_session = MagicMock()
+        mock_session = self._make_session_mock()
         self._run(mock_session)
 
         update_sql = str(mock_session.execute.call_args_list[0].args[0])
@@ -150,8 +155,23 @@ class TestUpdateArtistIsComing:
 
     def test_sets_is_coming_field(self):
         """UPDATE 쿼리가 is_coming 필드를 갱신해야 한다."""
-        mock_session = MagicMock()
+        mock_session = self._make_session_mock()
         self._run(mock_session)
 
         update_sql = str(mock_session.execute.call_args_list[0].args[0])
         assert "is_coming" in update_sql
+
+    def test_only_updates_changed_rows(self):
+        """값이 바뀌는 행만 UPDATE하도록 IS DISTINCT FROM 조건이 포함되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(mock_session)
+
+        update_sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "IS DISTINCT FROM" in update_sql
+
+    def test_returns_updated_row_count(self):
+        """갱신된 행 수를 반환해야 한다."""
+        mock_session = self._make_session_mock(rowcount=3)
+        result = self._run(mock_session)
+
+        assert result == 3
