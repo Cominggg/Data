@@ -17,6 +17,7 @@ def _make_detail_response(
     poster: Optional[str] = None,
     adres: Optional[str] = None,
     relates: object = None,
+    pcseguidance: Optional[str] = None,
 ) -> dict:
     db = {"mt20id": kopis_id}
     if poster is not None:
@@ -25,6 +26,8 @@ def _make_detail_response(
         db["adres"] = adres
     if relates is not None:
         db["relates"] = relates
+    if pcseguidance is not None:
+        db["pcseguidance"] = pcseguidance
     return {"dbs": {"db": db}}
 
 
@@ -265,8 +268,21 @@ class TestFetchDetail:
 
         assert result["relates"] == [{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
 
+    def test_returns_price(self):
+        """상세 API 응답에서 pcseguidance(price)를 파싱해야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_detail_response(
+            "PF123456", pcseguidance="전석 110,000원"
+        )
+
+        with patch("collectors.kopis.requests.get", return_value=mock_response):
+            result = _fetch_detail("PF123456")
+
+        assert result["price"] == "전석 110,000원"
+
     def test_returns_none_when_fields_missing(self):
-        """상세 API 응답에 필드가 없으면 poster_url, venue_address는 None이어야 한다."""
+        """상세 API 응답에 필드가 없으면 poster_url, venue_address, price는 None이어야 한다."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = _make_detail_response("PF123456")
@@ -277,6 +293,7 @@ class TestFetchDetail:
         assert result["poster_url"] is None
         assert result["venue_address"] is None
         assert result["relates"] == []
+        assert result["price"] is None
 
     def test_normalizes_list_db_response(self):
         """db 응답이 리스트일 경우 첫 번째 요소를 사용해야 한다."""
@@ -356,6 +373,7 @@ class TestSaveConcerts:
             "updatedate": "2024.01.15 12:00:00",
             "poster_url": None,
             "venue_address": None,
+            "price": None,
             "relates": [],
         }
         base.update(kwargs)
@@ -417,6 +435,37 @@ class TestSaveConcerts:
         params = insert_call.args[1]
         assert params["poster_url"] == "http://poster.jpg"
         assert params["venue_address"] == "서울특별시 강남구"
+
+    def test_insert_sql_includes_price(self):
+        """INSERT SQL에 price 컬럼이 포함되어야 한다."""
+        mock_session = MagicMock()
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([self._make_concert(price="전석 110,000원")])
+
+        insert_sqls = [
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
+            if "INSERT INTO concert" in str(c.args[0])
+        ]
+        assert "price" in insert_sqls[0]
+
+    def test_price_param_passed(self):
+        """INSERT 파라미터에 price 값이 전달되어야 한다."""
+        mock_session = MagicMock()
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([self._make_concert(price="전석 110,000원")])
+
+        insert_call = [
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO concert" in str(c.args[0])
+        ][0]
+        assert insert_call.args[1]["price"] == "전석 110,000원"
 
     def test_booking_links_inserted_for_new_concert(self):
         """신규 공연 저장 시 relates가 concert_booking_link 테이블에 별도 INSERT되어야 한다."""
