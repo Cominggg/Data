@@ -204,6 +204,27 @@ class TestSetlistCollect:
         assert result == []
         assert mock_get.call_count == 1
 
+    def test_stops_pagination_at_max_pages(self):
+        """_MAX_PAGES 상한에 도달하면 추가 페이지를 요청하지 않아야 한다."""
+        no_match_response = MagicMock()
+        no_match_response.raise_for_status = MagicMock()
+        no_match_response.json.return_value = {
+            "setlist": [_sample_setlist(eventDate="01-01-2025")],
+            "total": 9999,
+            "itemsPerPage": 1,
+        }
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist._MAX_PAGES", 3):
+                with patch(
+                    "collectors.setlist.requests.get",
+                    return_value=no_match_response,
+                ) as mock_get:
+                    result = collect()
+
+        assert result == []
+        assert mock_get.call_count == 3
+
 
 class TestParseTracks:
     def test_parses_songs_in_order(self):

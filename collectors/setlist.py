@@ -23,6 +23,8 @@ _HEADERS = {
     "Accept": "application/json",
 }
 
+_MAX_PAGES = 10
+
 
 def _get(path: str, params: dict) -> dict:
     response = requests.get(f"{_BASE_URL}{path}", headers=_HEADERS, params=params, timeout=30)
@@ -114,7 +116,7 @@ def collect() -> list[dict]:
 
             total = int(data.get("total", 0))
             items_per_page = int(data.get("itemsPerPage", 20))
-            if page * items_per_page >= total:
+            if page * items_per_page >= total or page >= _MAX_PAGES:
                 break
             page += 1
 
