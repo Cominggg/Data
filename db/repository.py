@@ -286,7 +286,7 @@ def save_concert_artists(matches: list[dict]) -> None:
                     "artist_id": match["artist_id"],
                     "confidence": match["confidence"],
                     "matched_by": match["matched_by"],
-                    "approved": approved,
+                    "approved": match["confidence"] == "HIGH",
                 },
             )
     logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
