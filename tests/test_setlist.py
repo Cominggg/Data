@@ -143,6 +143,19 @@ class TestSetlistCollect:
         assert "x-api-key" in headers
         assert headers.get("Accept") == "application/json"
 
+    def test_request_includes_country_code_kr(self):
+        """countryCode=KR 파라미터가 반드시 포함되어야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_api_response([])
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", return_value=mock_response) as mock_get:
+                collect()
+
+        params = mock_get.call_args.kwargs.get("params")
+        assert params.get("countryCode") == "KR"
+
 
 class TestParseTracks:
     def test_parses_songs_in_order(self):
