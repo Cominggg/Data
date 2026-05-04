@@ -1,6 +1,7 @@
 import logging
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from db.connection import get_session
 
@@ -64,7 +65,7 @@ def save_artists(artists: list[dict]) -> None:
                     )
 
                 saved += 1
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error("아티스트 저장 실패 — 건너뜀: mbid=%s, 오류=%s", artist["mbid"], e)
 
     logger.info("아티스트 저장 완료: %d / %d건 처리", saved, len(artists))

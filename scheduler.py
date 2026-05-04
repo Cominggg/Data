@@ -43,6 +43,7 @@ def run_initial_collect() -> None:
     artists = musicbrainz.collect_artists(skip_mbids=saved_mbids)
     save_artists(artists)
 
+    # 재개 시 기존 아티스트도 포함해야 하므로 저장 완료 후 DB에서 전체 MBID를 재조회한다.
     for mbid in get_all_artist_mbids():
         releases = release.collect_releases(mbid)
         save_releases(releases)
