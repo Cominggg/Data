@@ -2,122 +2,125 @@
 
 ```sql
 CREATE TABLE "user" (
-    id bigint PRIMARY KEY,
-    provider varchar(20),
-    provider_id varchar(255),
-    nickname varchar(50),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    provider varchar(20) NOT NULL,
+    provider_id varchar(255) NOT NULL,
+    nickname varchar(50) NOT NULL,
     profile_image_url text,
-    role varchar(20),
-    status varchar(20),
+    role varchar(20) NOT NULL,
+    status varchar(20) NOT NULL,
     created_at timestamp,
     updated_at timestamp
 );
 
 CREATE TABLE artist (
-    id bigint PRIMARY KEY,
-    mbid varchar(36) UNIQUE,
-    name varchar(255),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    mbid varchar(36) NOT NULL UNIQUE,
+    name varchar(255) NOT NULL,
     sort_name varchar(255),
     debut_date date,
-    is_coming boolean,
+    is_coming boolean NOT NULL DEFAULT false,
     created_at timestamp,
     updated_at timestamp
 );
 
 CREATE TABLE artist_alias (
-    id bigint PRIMARY KEY,
-    artist_id bigint REFERENCES artist(id),
-    name varchar(255),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    artist_id bigint NOT NULL REFERENCES artist(id),
+    name varchar(255) NOT NULL,
     locale varchar(10),
-    is_learned boolean,
+    is_learned boolean NOT NULL DEFAULT false,
     created_at timestamp
 );
 
 CREATE TABLE artist_url (
-    id bigint PRIMARY KEY,
-    artist_id bigint REFERENCES artist(id),
-    type varchar(100),
-    url text
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    artist_id bigint NOT NULL REFERENCES artist(id),
+    type varchar(100) NOT NULL,
+    url text NOT NULL
 );
 
 CREATE TABLE user_follow_artist (
-    id bigint PRIMARY KEY,
-    user_id bigint REFERENCES "user"(id),
-    artist_id bigint REFERENCES artist(id),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id bigint NOT NULL REFERENCES "user"(id),
+    artist_id bigint NOT NULL REFERENCES artist(id),
     created_at timestamp
 );
 
 CREATE TABLE concert (
-    id bigint PRIMARY KEY,
-    kopis_id varchar(50) UNIQUE,
-    title varchar(500),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    kopis_id varchar(50) NOT NULL UNIQUE,
+    title varchar(500) NOT NULL,
     cast text,
-    start_date date,
-    end_date date,
-    venue_name varchar(255),
+    start_date date NOT NULL,
+    end_date date NOT NULL,
+    venue_name varchar(255) NOT NULL,
     venue_address varchar(500),
     poster_url text,
-    status varchar(20),
-    view_count bigint,
-    kopis_update_date date,
+    price text,
+    status varchar(20) NOT NULL,
+    view_count bigint NOT NULL DEFAULT 0,
+    kopis_update_date date NOT NULL,
     created_at timestamp,
     updated_at timestamp
 );
 
 CREATE TABLE concert_booking_link (
-    id bigint PRIMARY KEY,
-    concert_id bigint REFERENCES concert(id),
-    name varchar(100),
-    url text
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    concert_id bigint NOT NULL REFERENCES concert(id),
+    name varchar(100) NOT NULL,
+    url text NOT NULL,
+    UNIQUE (concert_id, url)
 );
 
 CREATE TABLE concert_artist (
-    id bigint PRIMARY KEY,
-    concert_id bigint REFERENCES concert(id),
-    artist_id bigint REFERENCES artist(id),
-    confidence varchar(10),
-    matched_by varchar(20),
-    approved boolean,
-    created_at timestamp
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    concert_id bigint NOT NULL REFERENCES concert(id),
+    artist_id bigint NOT NULL REFERENCES artist(id),
+    confidence varchar(10) NOT NULL,
+    matched_by varchar(20) NOT NULL,
+    approved boolean NOT NULL,
+    created_at timestamp,
+    UNIQUE (concert_id, artist_id)
 );
 
 CREATE TABLE concert_status_log (
-    id bigint PRIMARY KEY,
-    concert_id bigint REFERENCES concert(id),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    concert_id bigint NOT NULL REFERENCES concert(id),
     previous_status varchar(20),
-    new_status varchar(20),
-    changed_by varchar(20),
+    new_status varchar(20) NOT NULL,
+    changed_by varchar(20) NOT NULL,
     admin_user_id bigint REFERENCES "user"(id),
-    changed_at timestamp
+    changed_at timestamp NOT NULL
 );
 
 CREATE TABLE user_concert_calendar (
-    id bigint PRIMARY KEY,
-    user_id bigint REFERENCES "user"(id),
-    concert_id bigint REFERENCES concert(id),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id bigint NOT NULL REFERENCES "user"(id),
+    concert_id bigint NOT NULL REFERENCES concert(id),
     created_at timestamp
 );
 
 CREATE TABLE setlist (
-    id bigint PRIMARY KEY,
-    concert_id bigint REFERENCES concert(id),
-    setlist_fm_id varchar(50) UNIQUE,
-    collected_at timestamp
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    concert_id bigint NOT NULL REFERENCES concert(id),
+    setlist_fm_id varchar(50) NOT NULL UNIQUE,
+    collected_at timestamp NOT NULL
 );
 
 CREATE TABLE setlist_track (
-    id bigint PRIMARY KEY,
-    setlist_id bigint REFERENCES setlist(id),
-    position int,
-    song_name varchar(255),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    setlist_id bigint NOT NULL REFERENCES setlist(id),
+    position int NOT NULL,
+    song_name varchar(255) NOT NULL,
     info text
 );
 
 CREATE TABLE release_group (
-    id bigint PRIMARY KEY,
-    mbid varchar(36) UNIQUE,
-    artist_id bigint REFERENCES artist(id),
-    title varchar(500),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    mbid varchar(36) NOT NULL UNIQUE,
+    artist_id bigint NOT NULL REFERENCES artist(id),
+    title varchar(500) NOT NULL,
     type varchar(20),
     first_release_date date,
     cover_url text,
@@ -127,38 +130,39 @@ CREATE TABLE release_group (
 );
 
 CREATE TABLE track (
-    id bigint PRIMARY KEY,
-    release_group_id bigint REFERENCES release_group(id),
-    mbid varchar(36) UNIQUE,
-    title varchar(500),
-    position int,
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    release_group_id bigint NOT NULL REFERENCES release_group(id),
+    mbid varchar(36) NOT NULL UNIQUE,
+    title varchar(500) NOT NULL,
+    position int NOT NULL,
     length_ms int
 );
 
 CREATE TABLE inquiry (
-    id bigint PRIMARY KEY,
-    user_id bigint REFERENCES "user"(id),
-    type varchar(20),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id bigint NOT NULL REFERENCES "user"(id),
+    type varchar(20) NOT NULL,
     concert_id bigint REFERENCES concert(id),
     artist_id bigint REFERENCES artist(id),
-    title varchar(255),
-    content text,
-    status varchar(20),
+    title varchar(255) NOT NULL,
+    content text NOT NULL,
+    status varchar(20) NOT NULL,
     admin_note text,
     created_at timestamp,
     updated_at timestamp
 );
 
 CREATE TABLE matching_review_queue (
-    id bigint PRIMARY KEY,
-    concert_id bigint REFERENCES concert(id),
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    concert_id bigint NOT NULL REFERENCES concert(id),
     matched_artist_id bigint REFERENCES artist(id),
     matched_alias varchar(255),
     score float,
-    status varchar(20),
+    status varchar(20) NOT NULL,
     reviewed_by bigint REFERENCES "user"(id),
     reviewed_at timestamp,
-    created_at timestamp
+    created_at timestamp,
+    UNIQUE (concert_id)
 );
 ```
 
@@ -192,3 +196,9 @@ CREATE TABLE matching_review_queue (
 | 2026-04-24 | user.is_deleted → user.status varchar(20) 로 변경 |
 | 2026-04-24 | inquiry에 title varchar(255) 컬럼 추가 |
 | 2026-04-24 | release_group.lastfm_summary 컬럼 제거 — API·파이프라인 미사용 |
+| 2026-04-30 | concert.price(text) 컬럼 추가 — KOPIS pcseguidance 수집 |
+| 2026-04-30 | concert_booking_link에 UNIQUE(concert_id, url) 제약 추가 — 중복 예매 링크 방지 |
+| 2026-04-30 | 전체 테이블 id 컬럼에 GENERATED ALWAYS AS IDENTITY 추가 — INSERT 시 null 위반 방지 |
+| 2026-05-04 | 전 컬럼 NOT NULL 명시 및 DEFAULT 추가 — 파이프라인 INSERT 쿼리와 정합성 검증 완료 |
+| 2026-05-04 | concert_artist에 UNIQUE(concert_id, artist_id) 추가 — ON CONFLICT 대상 제약 명시 |
+| 2026-05-04 | matching_review_queue에 UNIQUE(concert_id) 추가 — ON CONFLICT 대상 제약 명시 |
