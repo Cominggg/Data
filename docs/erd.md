@@ -30,14 +30,16 @@ CREATE TABLE artist_alias (
     name varchar(255) NOT NULL,
     locale varchar(10),
     is_learned boolean NOT NULL DEFAULT false,
-    created_at timestamp
+    created_at timestamp,
+    UNIQUE (artist_id, name)
 );
 
 CREATE TABLE artist_url (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     artist_id bigint NOT NULL REFERENCES artist(id),
     type varchar(100) NOT NULL,
-    url text NOT NULL
+    url text NOT NULL,
+    UNIQUE (artist_id, url)
 );
 
 CREATE TABLE user_follow_artist (
@@ -202,3 +204,5 @@ CREATE TABLE matching_review_queue (
 | 2026-05-04 | 전 컬럼 NOT NULL 명시 및 DEFAULT 추가 — 파이프라인 INSERT 쿼리와 정합성 검증 완료 |
 | 2026-05-04 | concert_artist에 UNIQUE(concert_id, artist_id) 추가 — ON CONFLICT 대상 제약 명시 |
 | 2026-05-04 | matching_review_queue에 UNIQUE(concert_id) 추가 — ON CONFLICT 대상 제약 명시 |
+| 2026-05-04 | artist_alias에 UNIQUE(artist_id, name) 추가 — 동일 alias 중복 INSERT 방지 |
+| 2026-05-04 | artist_url에 UNIQUE(artist_id, url) 추가 — 동일 URL 중복 INSERT 방지 |
