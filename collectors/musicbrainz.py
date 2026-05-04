@@ -82,9 +82,13 @@ def _parse_artist(detail: dict) -> dict:
     }
 
 
-def collect_artists() -> list[dict]:
-    """country=JP, tag=j-pop 조건으로 아티스트 전체 수집 후 파싱된 리스트 반환."""
-    logger.info("MusicBrainz 아티스트 수집 시작")
+def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
+    """country=JP, tag=j-pop 조건으로 아티스트 전체 수집 후 파싱된 리스트 반환.
+
+    skip_mbids: 이미 DB에 저장된 MBID 집합. 상세 조회를 건너뛰어 재개 시 시간을 절약한다.
+    """
+    skip = skip_mbids or set()
+    logger.info("MusicBrainz 아티스트 수집 시작 (건너뜀: %d건)", len(skip))
     artists = []
     offset = 0
 
@@ -101,11 +105,14 @@ def collect_artists() -> list[dict]:
             mbid = item.get("id")
             if not mbid:
                 continue
+            if mbid in skip:
+                logger.debug("건너뜀(기존): %s (%s)", item.get("name"), mbid)
+                continue
             try:
                 detail = _fetch_artist_detail(mbid)
                 artists.append(_parse_artist(detail))
-                logger.debug("수집 완료: %s (%s)", item.get("name"), mbid)
-            except requests.HTTPError as e:
+                logger.info("수집 완료: %s (%s)", item.get("name"), mbid)
+            except requests.RequestException as e:
                 logger.warning("아티스트 상세 수집 실패 mbid=%s: %s", mbid, e)
 
         offset += len(batch)

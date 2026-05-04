@@ -125,14 +125,14 @@ def collect_releases(artist_mbid: str) -> list[dict]:
                     release_data = _fetch_tracks(release_mbid)
                     tracks = _parse_tracks(release_data)
                     label = _parse_label(release_data)
-                except requests.HTTPError as e:
+                except requests.RequestException as e:
                     logger.warning("트랙 수집 실패 release_mbid=%s: %s", release_mbid, e)
 
             cover_url = None
             if rg_mbid:
                 try:
                     cover_url = _fetch_cover_art_url(rg_mbid)
-                except requests.HTTPError as e:
+                except requests.RequestException as e:
                     logger.warning("커버 아트 수집 실패 release_group_mbid=%s: %s", rg_mbid, e)
 
             results.append(
