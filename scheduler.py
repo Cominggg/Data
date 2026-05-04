@@ -29,13 +29,24 @@ logger = logging.getLogger(__name__)
 
 
 def run_initial_collect() -> None:
-    """초기 아티스트 + 릴리즈 수집 (1회성 CLI)."""
+    """초기 아티스트 + 릴리즈 수집 (1회성 CLI).
+
+    재개 지원: 이미 DB에 저장된 아티스트는 건너뛰고, 릴리즈는 DB 기준 mbid 목록을 사용한다.
+    중단 후 재실행해도 처음부터 다시 수집하지 않는다.
+    """
     logger.info("=== 초기 수집 시작 ===")
-    artists = musicbrainz.collect_artists()
+
+    saved_mbids = set(get_all_artist_mbids())
+    if saved_mbids:
+        logger.info("기존 저장 아티스트 %d건 건너뜀 — 재개 모드", len(saved_mbids))
+
+    artists = musicbrainz.collect_artists(skip_mbids=saved_mbids)
     save_artists(artists)
-    for artist in artists:
-        releases = release.collect_releases(artist["mbid"])
+
+    for mbid in get_all_artist_mbids():
+        releases = release.collect_releases(mbid)
         save_releases(releases)
+
     logger.info("=== 초기 수집 완료 ===")
 
 
