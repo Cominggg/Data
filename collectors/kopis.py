@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+import re
 import time
 from typing import Optional
 
@@ -24,6 +25,21 @@ _DEFAULT_PARAMS = {
     "outfmt": "json",
     "stdate": "20200101",
 }
+
+
+def _parse_kopis_date(raw: Optional[str]) -> Optional[str]:
+    """KOPIS 날짜 문자열을 DB date 컬럼용 YYYY-MM-DD로 정규화.
+
+    "YYYY.MM.DD"            → "YYYY-MM-DD"
+    "YYYY.MM.DD HH:MM:SS"   → "YYYY-MM-DD"  (시간 부분 버림)
+    그 외 / None             → None
+    """
+    if not raw:
+        return None
+    m = re.match(r"^(\d{4})\.(\d{2})\.(\d{2})", raw)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    return None
 
 
 def _get(params: dict) -> dict:
@@ -67,11 +83,11 @@ def _parse_concert(item: dict) -> dict:
         "kopis_id": item.get("mt20id"),
         "prfnm": item.get("prfnm"),
         "prfcast": item.get("prfcast"),
-        "prfpdfrom": item.get("prfpdfrom"),
-        "prfpdto": item.get("prfpdto"),
+        "prfpdfrom": _parse_kopis_date(item.get("prfpdfrom")),
+        "prfpdto": _parse_kopis_date(item.get("prfpdto")),
         "fcltynm": item.get("fcltynm"),
         "prfstate": item.get("prfstate"),
-        "updatedate": item.get("updatedate"),
+        "updatedate": _parse_kopis_date(item.get("updatedate")),
         "relates": _parse_relates(item.get("relates")),
     }
 
