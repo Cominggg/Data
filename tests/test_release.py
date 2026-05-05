@@ -577,3 +577,33 @@ class TestSaveReleases:
             if "INSERT INTO track" in str(c.args[0])
         ]
         assert len(track_inserts) == 1
+
+    def test_one_failure_does_not_rollback_others(self):
+        """한 릴리즈 INSERT 실패가 다른 릴리즈 저장에 영향을 주지 않아야 한다."""
+        from sqlalchemy.exc import SQLAlchemyError
+
+        ok_session = MagicMock()
+        ok_session.execute.return_value.fetchone.return_value = (1,)
+
+        fail_session = MagicMock()
+        fail_session.execute.side_effect = SQLAlchemyError("duplicate key")
+
+        sessions = [ok_session, fail_session, ok_session]
+        call_count = {"n": -1}
+
+        def make_ctx():
+            call_count["n"] += 1
+            ctx = MagicMock()
+            ctx.__enter__ = MagicMock(return_value=sessions[call_count["n"]])
+            ctx.__exit__ = MagicMock(return_value=False)
+            return ctx
+
+        releases = [
+            {"release_group_mbid": "rg-ok", "artist_mbid": "a-1", "title": "OK", "type": "Album",
+             "first_release_date": None, "cover_url": None, "tracks": []},
+            {"release_group_mbid": "rg-fail", "artist_mbid": "a-1", "title": "Fail", "type": "Album",
+             "first_release_date": None, "cover_url": None, "tracks": []},
+        ]
+
+        with patch("db.repository.get_session", side_effect=make_ctx):
+            save_releases(releases)
