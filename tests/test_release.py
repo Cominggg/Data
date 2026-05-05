@@ -63,14 +63,16 @@ class TestParseTracks:
 
 
 class TestParseReleaseDate:
-    def test_full_date_unchanged(self):
+    def test_full_date_accepted(self):
         assert _parse_release_date("2020-01-15") == "2020-01-15"
 
-    def test_year_month_padded_to_first_day(self):
-        assert _parse_release_date("2020-01") == "2020-01-01"
+    def test_year_month_returns_none(self):
+        """월까지만 있는 부분 날짜는 누락 데이터로 간주해 None 반환."""
+        assert _parse_release_date("2020-01") is None
 
-    def test_year_only_padded_to_january_first(self):
-        assert _parse_release_date("2020") == "2020-01-01"
+    def test_year_only_returns_none(self):
+        """연도만 있는 부분 날짜는 누락 데이터로 간주해 None 반환."""
+        assert _parse_release_date("2020") is None
 
     def test_none_returns_none(self):
         assert _parse_release_date(None) is None

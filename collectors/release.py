@@ -26,18 +26,9 @@ _CAA_BASE_URL = "https://coverartarchive.org"
 
 
 def _parse_release_date(raw: Optional[str]) -> Optional[str]:
-    """MusicBrainz first-release-date를 DB date 컬럼용 YYYY-MM-DD로 정규화.
-
-    YYYY → YYYY-01-01, YYYY-MM → YYYY-MM-01, 그 외 포맷은 None 반환.
-    """
-    if not raw:
-        return None
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+    """YYYY-MM-DD 형식만 유효로 인정하고, 부분 날짜(YYYY·YYYY-MM)는 None 반환."""
+    if raw and re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
         return raw
-    if re.match(r"^\d{4}-\d{2}$", raw):
-        return f"{raw}-01"
-    if re.match(r"^\d{4}$", raw):
-        return f"{raw}-01-01"
     return None
 
 
