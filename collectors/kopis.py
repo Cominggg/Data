@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+import time
 from typing import Optional
 
 import requests
@@ -94,12 +95,24 @@ def collect() -> list[dict]:
 
         for item in batch:
             concert = _parse_concert(item)
-            try:
-                detail = _fetch_detail(concert["kopis_id"])
-                concert.update(detail)
-            except Exception:
-                logger.warning("상세 API 실패 — 건너뜀: kopis_id=%s", concert["kopis_id"])
-                concert.update({"poster_url": None, "venue_address": None})
+            for attempt in range(1, 4):
+                try:
+                    detail = _fetch_detail(concert["kopis_id"])
+                    concert.update(detail)
+                    break
+                except requests.RequestException as e:
+                    if attempt == 3:
+                        logger.warning(
+                            "상세 API 3회 실패 — 폴백 적용: kopis_id=%s, %s",
+                            concert["kopis_id"], e,
+                        )
+                        concert.update({"poster_url": None, "venue_address": None, "price": None, "relates": []})
+                    else:
+                        logger.debug(
+                            "상세 API 재시도 %d/3: kopis_id=%s, %s",
+                            attempt, concert["kopis_id"], e,
+                        )
+                        time.sleep(5 * attempt)
             results.append(concert)
 
         logger.info("KOPIS 수집 중: cpage=%d, 누적 %d건", cpage, len(results))

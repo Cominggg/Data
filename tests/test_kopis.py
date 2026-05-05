@@ -179,7 +179,7 @@ class TestKopisCollect:
         assert result[1]["relates"] == []
 
     def test_skips_item_on_detail_api_failure(self):
-        """상세 API 실패 시 해당 건을 건너뛰고 나머지 수집을 계속해야 한다."""
+        """상세 API 3회 실패 시 폴백(None/빈배열)을 적용하고 수집을 계속해야 한다."""
         item = _sample_item()
         list_resp = _make_api_response([item])
 
@@ -193,12 +193,15 @@ class TestKopisCollect:
             return response
 
         with patch("collectors.kopis.requests.get", side_effect=failing_get):
-            result = collect()
+            with patch("collectors.kopis.time.sleep"):
+                result = collect()
 
         assert len(result) == 1
         assert result[0]["kopis_id"] == "PF123456"
         assert result[0]["poster_url"] is None
         assert result[0]["venue_address"] is None
+        assert result[0]["price"] is None
+        assert result[0]["relates"] == []
 
     def test_detects_status_change_by_updatedate(self):
         """update_concert_status가 호출되면 updatedate 변화를 감지해 prfstate를 갱신한다."""
@@ -225,6 +228,35 @@ class TestKopisCollect:
             if "UPDATE" in str(c.args[0])
         ]
         assert len(update_calls) == 1
+
+
+class TestKopisDetailRetry:
+    def test_retries_on_network_error_then_succeeds(self):
+        """상세 API 네트워크 오류 후 재시도에서 성공 시 결과에 포함되어야 한다."""
+        item = _sample_item()
+        list_resp = _make_api_response([item])
+        detail_resp = _make_detail_response("PF123456", poster="http://poster.jpg")
+
+        call_count = {"n": 0}
+
+        def flaky_get(url, params=None, **kwargs):
+            response = MagicMock()
+            response.raise_for_status = MagicMock()
+            if url == "http://kopis.or.kr/openApi/restful/pblprfr":
+                response.json.return_value = list_resp
+                return response
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                response.raise_for_status.side_effect = requests.ConnectionError("timeout")
+            else:
+                response.json.return_value = detail_resp
+            return response
+
+        with patch("collectors.kopis.requests.get", side_effect=flaky_get):
+            with patch("collectors.kopis.time.sleep"):
+                result = collect()
+
+        assert result[0]["poster_url"] == "http://poster.jpg"
 
 
 class TestFetchDetail:
