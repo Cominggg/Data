@@ -97,14 +97,21 @@ def _parse_tracks(release_data: dict) -> list[dict]:
 
 
 def _fetch_cover_art_url(release_group_mbid: str) -> Optional[str]:
-    time.sleep(_RATE_LIMIT_SLEEP)
     url = f"{_CAA_BASE_URL}/release-group/{release_group_mbid}/front"
-    response = requests.get(url, allow_redirects=False, timeout=30)
-    if response.status_code in (301, 302, 307, 308):
-        return response.headers.get("Location")
-    if response.status_code == 404:
-        return None
-    response.raise_for_status()
+    for attempt in range(1, 4):
+        time.sleep(_RATE_LIMIT_SLEEP)
+        response = requests.get(url, allow_redirects=False, timeout=30)
+        if response.status_code in (301, 302, 307, 308):
+            return response.headers.get("Location")
+        if response.status_code == 404:
+            return None
+        try:
+            response.raise_for_status()
+        except requests.RequestException as e:
+            if attempt == 3:
+                raise
+            logger.warning("커버 아트 재시도 %d/3 mbid=%s: %s", attempt, release_group_mbid, e)
+            time.sleep(5 * attempt)
 
 
 def _get_representative_release_mbid(release_group: dict) -> Optional[str]:
@@ -126,7 +133,16 @@ def collect_releases(artist_mbid: str) -> list[dict]:
 
     while True:
         logger.debug("릴리즈 그룹 조회 offset=%d", offset)
-        page = _fetch_release_groups(artist_mbid, offset)
+        for attempt in range(1, 4):
+            try:
+                page = _fetch_release_groups(artist_mbid, offset)
+                break
+            except requests.RequestException as e:
+                if attempt == 3:
+                    logger.error("릴리즈 그룹 수집 실패 (offset=%d), 3회 시도 후 중단: %s", offset, e)
+                    return results
+                logger.warning("릴리즈 그룹 재시도 %d/3 (offset=%d): %s", attempt, offset, e)
+                time.sleep(5 * attempt)
         batch = page.get("release-groups", [])
         total = page.get("release-group-count", 0)
 

@@ -147,6 +147,39 @@ class TestFetchCoverArtUrl:
 
     @patch("collectors.release.requests.get")
     @patch("collectors.release.time.sleep")
+    def test_retries_on_network_error_then_succeeds(self, mock_sleep, mock_get):
+        """네트워크 오류 후 재시도에서 성공 시 Location 반환해야 한다."""
+        fail_response = MagicMock()
+        fail_response.status_code = 503
+        fail_response.raise_for_status.side_effect = requests.RequestException("503")
+
+        ok_response = MagicMock()
+        ok_response.status_code = 307
+        ok_response.headers = {"Location": "https://archive.org/image.jpg"}
+
+        mock_get.side_effect = [fail_response, ok_response]
+
+        result = _fetch_cover_art_url("some-mbid")
+
+        assert result == "https://archive.org/image.jpg"
+        assert mock_get.call_count == 2
+
+    @patch("collectors.release.requests.get")
+    @patch("collectors.release.time.sleep")
+    def test_raises_after_three_retries(self, mock_sleep, mock_get):
+        """3회 재시도 모두 실패하면 예외를 전파해야 한다."""
+        fail_response = MagicMock()
+        fail_response.status_code = 503
+        fail_response.raise_for_status.side_effect = requests.RequestException("503")
+        mock_get.return_value = fail_response
+
+        with pytest.raises(requests.RequestException):
+            _fetch_cover_art_url("some-mbid")
+
+        assert mock_get.call_count == 3
+
+    @patch("collectors.release.requests.get")
+    @patch("collectors.release.time.sleep")
     def test_sleep_applied_before_request(self, mock_sleep, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 404
