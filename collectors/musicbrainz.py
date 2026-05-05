@@ -38,7 +38,7 @@ def _search_artists(offset: int) -> dict:
     return _get(
         "/artist/",
         {
-            "query": "tag:j-pop AND country:JP",
+            "query": "tag:j-pop AND country:JP AND (type:Group OR type:Person)",
             "fmt": "json",
             "limit": _PAGE_LIMIT,
             "offset": offset,
