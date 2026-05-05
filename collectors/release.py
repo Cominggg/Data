@@ -45,12 +45,19 @@ def _fetch_release_groups(artist_mbid: str, offset: int) -> dict:
         "/release-group/",
         {
             "artist": artist_mbid,
-            "inc": "releases",
             "fmt": "json",
             "limit": _PAGE_LIMIT,
             "offset": offset,
         },
     )
+
+
+def _fetch_releases_for_group(release_group_mbid: str) -> list[dict]:
+    data = _get(
+        "/release/",
+        {"release-group": release_group_mbid, "fmt": "json", "limit": 100},
+    )
+    return data.get("releases", [])
 
 
 def _fetch_tracks(release_mbid: str) -> dict:
@@ -105,8 +112,7 @@ def _fetch_cover_art_url(release_group_mbid: str) -> Optional[str]:
             time.sleep(5 * attempt)
 
 
-def _get_representative_release_mbid(release_group: dict) -> Optional[str]:
-    releases = release_group.get("releases", [])
+def _get_representative_release_mbid(release_group: dict, releases: list) -> Optional[str]:
     if not releases:
         return None
     first_release_date = release_group.get("first-release-date", "")
@@ -142,7 +148,13 @@ def collect_releases(artist_mbid: str) -> list[dict]:
 
         for rg in [r for r in batch if r.get("primary-type") in _ALLOWED_TYPES]:
             rg_mbid = rg.get("id")
-            release_mbid = _get_representative_release_mbid(rg)
+            releases_in_group = []
+            if rg_mbid:
+                try:
+                    releases_in_group = _fetch_releases_for_group(rg_mbid)
+                except requests.RequestException as e:
+                    logger.warning("릴리즈 목록 수집 실패 release_group_mbid=%s: %s", rg_mbid, e)
+            release_mbid = _get_representative_release_mbid(rg, releases_in_group)
 
             tracks = []
             label = None
