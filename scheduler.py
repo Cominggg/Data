@@ -8,6 +8,7 @@ from collectors import kopis, musicbrainz, release, setlist
 from db.repository import (
     get_all_aliases,
     get_all_artist_mbids,
+    get_matched_artist_mbids,
     get_release_groups_without_cover,
     get_unmatched_concerts,
     save_artists,
@@ -31,11 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 def run_initial_collect(skip_artists: bool = False) -> None:
-    """초기 아티스트 + 릴리즈 수집 (1회성 CLI).
+    """초기 수집 (1회성 CLI): 아티스트 → KOPIS 매칭 → 매칭 아티스트 릴리즈 순으로 수집.
 
-    재개 지원: 이미 DB에 저장된 아티스트는 건너뛰고, 릴리즈는 DB 기준 mbid 목록을 사용한다.
-    중단 후 재실행해도 처음부터 다시 수집하지 않는다.
-    skip_artists=True 시 아티스트 수집 단계를 완전히 건너뛴다.
+    재개 지원: 이미 DB에 저장된 아티스트는 건너뛴다.
+    나머지 아티스트 릴리즈는 주간 배치(run_release_update)가 점진적으로 채운다.
     """
     logger.info("=== 초기 수집 시작 ===")
 
@@ -48,12 +48,18 @@ def run_initial_collect(skip_artists: bool = False) -> None:
         artists = musicbrainz.collect_artists(skip_mbids=saved_mbids)
         save_artists(artists)
 
-    # 저장 완료 후 DB에서 전체 MBID를 재조회해 릴리즈 수집에 사용한다.
-    for mbid in get_all_artist_mbids():
+    # KOPIS 수집 + 매칭으로 내한 확정 아티스트를 먼저 파악한다.
+    logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
+    run_kopis_collect_and_match()
+
+    # 매칭된 아티스트만 즉시 릴리즈 수집, 나머지는 주간 배치가 처리한다.
+    matched_mbids = get_matched_artist_mbids()
+    logger.info("매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_mbids))
+    for mbid in matched_mbids:
         releases = release.collect_releases(mbid)
         save_releases(releases)
 
-    logger.info("=== 초기 수집 완료 ===")
+    logger.info("=== 초기 수집 완료 (나머지 릴리즈는 주간 배치로 수집) ===")
 
 
 def run_kopis_collect_and_match() -> None:

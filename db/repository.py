@@ -280,6 +280,20 @@ def get_all_artist_mbids() -> list[str]:
     return [row[0] for row in rows]
 
 
+def get_matched_artist_mbids() -> list[str]:
+    """승인된 공연-아티스트 매칭이 있는 아티스트 MBID를 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT DISTINCT a.mbid
+                FROM artist a
+                JOIN concert_artist ca ON ca.artist_id = a.id
+                WHERE ca.approved = true
+            """)
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
 def get_release_groups_without_cover() -> list[str]:
     """cover_url이 없는 release_group의 mbid 목록을 반환한다."""
     with get_session() as session:
