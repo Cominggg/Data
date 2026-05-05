@@ -28,22 +28,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_initial_collect() -> None:
+def run_initial_collect(skip_artists: bool = False) -> None:
     """초기 아티스트 + 릴리즈 수집 (1회성 CLI).
 
     재개 지원: 이미 DB에 저장된 아티스트는 건너뛰고, 릴리즈는 DB 기준 mbid 목록을 사용한다.
     중단 후 재실행해도 처음부터 다시 수집하지 않는다.
+    skip_artists=True 시 아티스트 수집 단계를 완전히 건너뛴다.
     """
     logger.info("=== 초기 수집 시작 ===")
 
-    saved_mbids = set(get_all_artist_mbids())
-    if saved_mbids:
-        logger.info("기존 저장 아티스트 %d건 건너뜀 — 재개 모드", len(saved_mbids))
+    if skip_artists:
+        logger.info("--skip-artists 플래그 감지 — 아티스트 수집 건너뜀")
+    else:
+        saved_mbids = set(get_all_artist_mbids())
+        if saved_mbids:
+            logger.info("기존 저장 아티스트 %d건 건너뜀 — 재개 모드", len(saved_mbids))
+        artists = musicbrainz.collect_artists(skip_mbids=saved_mbids)
+        save_artists(artists)
 
-    artists = musicbrainz.collect_artists(skip_mbids=saved_mbids)
-    save_artists(artists)
-
-    # 재개 시 기존 아티스트도 포함해야 하므로 저장 완료 후 DB에서 전체 MBID를 재조회한다.
+    # 저장 완료 후 DB에서 전체 MBID를 재조회해 릴리즈 수집에 사용한다.
     for mbid in get_all_artist_mbids():
         releases = release.collect_releases(mbid)
         save_releases(releases)
@@ -120,10 +123,15 @@ def main() -> None:
         choices=["init"],
         help="init: 초기 아티스트·릴리즈 수집 후 종료",
     )
+    parser.add_argument(
+        "--skip-artists",
+        action="store_true",
+        help="아티스트 수집을 건너뛰고 릴리즈 수집만 수행 (init 전용)",
+    )
     args = parser.parse_args()
 
     if args.command == "init":
-        run_initial_collect()
+        run_initial_collect(skip_artists=args.skip_artists)
         return
 
     scheduler = _build_scheduler()
