@@ -8,6 +8,7 @@ from collectors.release import (
     _fetch_tracks,
     _get_representative_release_mbid,
     _parse_label,
+    _parse_release_date,
     _parse_tracks,
     collect_releases,
 )
@@ -51,13 +52,34 @@ class TestParseTracks:
     def test_returns_empty_for_no_media(self):
         assert _parse_tracks({}) == []
 
-    def test_handles_missing_recording_id(self):
+    def test_skips_track_with_missing_recording_id(self):
+        """recording id가 없는 트랙은 track.mbid UNIQUE 제약 위반 방지를 위해 제외해야 한다."""
         release_data = {
             "media": [
                 {"tracks": [{"title": "T", "position": 1, "length": 100, "recording": {}}]}
             ]
         }
-        assert _parse_tracks(release_data)[0]["mbid"] is None
+        assert _parse_tracks(release_data) == []
+
+
+class TestParseReleaseDate:
+    def test_full_date_unchanged(self):
+        assert _parse_release_date("2020-01-15") == "2020-01-15"
+
+    def test_year_month_padded_to_first_day(self):
+        assert _parse_release_date("2020-01") == "2020-01-01"
+
+    def test_year_only_padded_to_january_first(self):
+        assert _parse_release_date("2020") == "2020-01-01"
+
+    def test_none_returns_none(self):
+        assert _parse_release_date(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert _parse_release_date("") is None
+
+    def test_unknown_format_returns_none(self):
+        assert _parse_release_date("January 2020") is None
 
 
 class TestGetRepresentativeReleaseMbid:

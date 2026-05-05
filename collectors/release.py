@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import time
 from typing import Optional
 
@@ -22,6 +23,22 @@ _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
 _ALLOWED_TYPES = {"Album", "Single", "EP"}
 _CAA_BASE_URL = "https://coverartarchive.org"
+
+
+def _parse_release_date(raw: Optional[str]) -> Optional[str]:
+    """MusicBrainz first-release-date를 DB date 컬럼용 YYYY-MM-DD로 정규화.
+
+    YYYY → YYYY-01-01, YYYY-MM → YYYY-MM-01, 그 외 포맷은 None 반환.
+    """
+    if not raw:
+        return None
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return raw
+    if re.match(r"^\d{4}-\d{2}$", raw):
+        return f"{raw}-01"
+    if re.match(r"^\d{4}$", raw):
+        return f"{raw}-01-01"
+    return None
 
 
 def _get(path: str, params: dict) -> dict:
@@ -65,9 +82,12 @@ def _parse_tracks(release_data: dict) -> list[dict]:
     for medium in release_data.get("media", []):
         for track in medium.get("tracks", []):
             recording = track.get("recording", {})
+            mbid = recording.get("id")
+            if mbid is None:
+                continue
             tracks.append(
                 {
-                    "mbid": recording.get("id"),
+                    "mbid": mbid,
                     "title": track.get("title"),
                     "position": track.get("position"),
                     "length_ms": track.get("length"),
@@ -140,7 +160,7 @@ def collect_releases(artist_mbid: str) -> list[dict]:
                     "artist_mbid": artist_mbid,
                     "title": rg.get("title"),
                     "type": rg.get("primary-type"),
-                    "first_release_date": rg.get("first-release-date") or None,
+                    "first_release_date": _parse_release_date(rg.get("first-release-date")),
                     "representative_release_mbid": release_mbid,
                     "cover_url": cover_url,
                     "label": label,
