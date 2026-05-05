@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import logging
 import os
+import re
 import time
+from typing import Optional
 
 import requests
 from dotenv import load_dotenv
@@ -68,6 +72,13 @@ def _parse_url_rels(relations: list) -> list[dict]:
     ]
 
 
+def _parse_date(raw: Optional[str]) -> Optional[str]:
+    """YYYY-MM-DD 형식만 유효로 인정하고, 그 외는 None 반환."""
+    if raw and re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return raw
+    return None
+
+
 def _parse_artist(detail: dict) -> dict:
     relations = detail.get("relations", [])
     life_span = detail.get("life-span", {})
@@ -78,7 +89,7 @@ def _parse_artist(detail: dict) -> dict:
         "sort_name": detail.get("sort-name"),
         "aliases": _parse_aliases(detail.get("aliases", [])),
         "url_rels": _parse_url_rels(relations),
-        "debut_date": life_span.get("begin"),
+        "debut_date": _parse_date(life_span.get("begin")),
     }
 
 
@@ -94,7 +105,16 @@ def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
 
     while True:
         logger.debug("아티스트 검색 offset=%d", offset)
-        page = _search_artists(offset)
+        for attempt in range(1, 4):
+            try:
+                page = _search_artists(offset)
+                break
+            except requests.RequestException as e:
+                if attempt == 3:
+                    logger.error("페이지 수집 실패 (offset=%d), 3회 시도 후 중단: %s", offset, e)
+                    return artists
+                logger.warning("페이지 수집 실패 (offset=%d), %d/3회 재시도: %s", offset, attempt, e)
+                time.sleep(5 * attempt)
         batch = page.get("artists", [])
         total = page.get("count", 0)
 
@@ -108,12 +128,18 @@ def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
             if mbid in skip:
                 logger.debug("건너뜀(기존): %s (%s)", item.get("name"), mbid)
                 continue
-            try:
-                detail = _fetch_artist_detail(mbid)
-                artists.append(_parse_artist(detail))
-                logger.info("수집 완료: %s (%s)", item.get("name"), mbid)
-            except requests.RequestException as e:
-                logger.warning("아티스트 상세 수집 실패 mbid=%s: %s", mbid, e)
+            for attempt in range(1, 4):
+                try:
+                    detail = _fetch_artist_detail(mbid)
+                    artists.append(_parse_artist(detail))
+                    logger.info("수집 완료: %s (%s)", item.get("name"), mbid)
+                    break
+                except requests.RequestException as e:
+                    if attempt == 3:
+                        logger.warning("아티스트 상세 수집 실패 mbid=%s: %s", mbid, e)
+                    else:
+                        logger.debug("아티스트 상세 재시도 %d/3 mbid=%s: %s", attempt, mbid, e)
+                        time.sleep(5 * attempt)
 
         offset += len(batch)
         logger.info("진행: %d / %d", offset, total)
