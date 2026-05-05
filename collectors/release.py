@@ -20,7 +20,7 @@ _HEADERS = {
 }
 _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
-_RELEASE_TYPES = "Album|Single|EP"
+_ALLOWED_TYPES = {"Album", "Single", "EP"}
 _CAA_BASE_URL = "https://coverartarchive.org"
 
 
@@ -37,7 +37,6 @@ def _fetch_release_groups(artist_mbid: str, offset: int) -> dict:
         "/release-group/",
         {
             "artist": artist_mbid,
-            "type": _RELEASE_TYPES,
             "inc": "releases",
             "fmt": "json",
             "limit": _PAGE_LIMIT,
@@ -114,7 +113,7 @@ def collect_releases(artist_mbid: str) -> list[dict]:
         if not batch:
             break
 
-        for rg in batch:
+        for rg in [r for r in batch if r.get("primary-type") in _ALLOWED_TYPES]:
             rg_mbid = rg.get("id")
             release_mbid = _get_representative_release_mbid(rg)
 
