@@ -42,6 +42,11 @@ def _sample_concert(**kwargs) -> dict:
 
 
 class TestSetlistCollect:
+    @pytest.fixture(autouse=True)
+    def mock_sleep(self):
+        with patch("collectors.setlist.time.sleep"):
+            yield
+
     def test_collect_returns_list(self):
         """collect() 호출 결과가 리스트여야 한다."""
         mock_response = MagicMock()
@@ -227,10 +232,13 @@ class TestSetlistCollect:
 
 
 class TestSetlistRetry:
+    @pytest.fixture(autouse=True)
+    def mock_sleep(self):
+        with patch("collectors.setlist.time.sleep"):
+            yield
+
     def test_retries_on_network_error_then_succeeds(self):
         """네트워크 오류 후 재시도 성공 시 셋리스트가 수집되어야 한다."""
-        from unittest.mock import call
-
         fail_response = MagicMock()
         fail_response.raise_for_status.side_effect = requests.ConnectionError("timeout")
 
@@ -240,8 +248,7 @@ class TestSetlistRetry:
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", side_effect=[fail_response, ok_response]):
-                with patch("collectors.setlist.time.sleep"):
-                    result = collect()
+                result = collect()
 
         assert len(result) == 1
 
@@ -255,8 +262,7 @@ class TestSetlistRetry:
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", return_value=fail_response):
-                with patch("collectors.setlist.time.sleep"):
-                    result = collect()
+                result = collect()
 
         assert result == []
 
@@ -270,8 +276,7 @@ class TestSetlistRetry:
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", return_value=fail_response) as mock_get:
-                with patch("collectors.setlist.time.sleep"):
-                    result = collect()
+                result = collect()
 
         assert result == []
         assert mock_get.call_count == 1
