@@ -19,6 +19,16 @@ jpop-concert-collector/
 └── requirements.txt
 ```
 
+## 파이썬 버전
+
+- **Python 3.9.6** (런타임 및 `pyproject.toml` `requires-python = ">=3.9"`)
+- 코드 작성 시 Python 3.9 호환 문법만 사용한다:
+  - `X | Y` 타입 유니온 문법 사용 불가 → `Optional[X]` / `Union[X, Y]` 사용
+  - `dict | None` 대신 `Optional[dict]` 사용
+  - `match` 문 사용 불가 (3.10+)
+  - `str.removeprefix` / `str.removesuffix` 사용 불가 (3.9부터 가능, OK)
+  - 제네릭 내장 타입 힌트(`list[str]`, `dict[str, int]`) 3.9부터 가능 (OK)
+
 ## 코딩 규칙
 
 - DML만 사용 — DDL은 백엔드(Spring) Flyway가 단일 관리
