@@ -5,6 +5,7 @@ import os
 import re
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
@@ -24,6 +25,15 @@ _HEADERS = {
 _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
 _MAX_ARTISTS = 10_000
+_ALLOWED_URL_DOMAINS = {
+    "instagram.com",
+    "twitter.com",
+    "x.com",
+    "youtube.com",
+    "youtu.be",
+    "open.spotify.com",
+    "music.apple.com",
+}
 
 
 def _get(path: str, params: dict) -> dict:
@@ -65,11 +75,17 @@ def _parse_aliases(raw_aliases: list) -> list[dict]:
 
 
 def _parse_url_rels(relations: list) -> list[dict]:
-    return [
-        {"type": rel.get("type", ""), "url": rel.get("url", {}).get("resource", "")}
-        for rel in relations
-        if rel.get("target-type") == "url"
-    ]
+    result = []
+    for rel in relations:
+        if rel.get("target-type") != "url":
+            continue
+        resource = rel.get("url", {}).get("resource", "")
+        netloc = urlparse(resource).netloc.lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        if netloc in _ALLOWED_URL_DOMAINS:
+            result.append({"type": rel.get("type", ""), "url": resource})
+    return result
 
 
 def _parse_date(raw: Optional[str]) -> Optional[str]:

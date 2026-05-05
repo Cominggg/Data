@@ -36,16 +36,37 @@ class TestParseAliases:
 
 
 class TestParseUrlRels:
-    def test_extracts_url_type_relations(self):
+    def test_allows_instagram(self):
         relations = [
             {
                 "target-type": "url",
-                "type": "official homepage",
-                "url": {"resource": "https://example.com"},
+                "type": "social network",
+                "url": {"resource": "https://www.instagram.com/artist"},
             }
         ]
         result = _parse_url_rels(relations)
-        assert result == [{"type": "official homepage", "url": "https://example.com"}]
+        assert result == [{"type": "social network", "url": "https://www.instagram.com/artist"}]
+
+    def test_allows_all_target_platforms(self):
+        relations = [
+            {"target-type": "url", "type": "social network", "url": {"resource": "https://twitter.com/artist"}},
+            {"target-type": "url", "type": "social network", "url": {"resource": "https://x.com/artist"}},
+            {"target-type": "url", "type": "social network", "url": {"resource": "https://www.instagram.com/artist"}},
+            {"target-type": "url", "type": "youtube", "url": {"resource": "https://www.youtube.com/channel/abc"}},
+            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://open.spotify.com/artist/abc"}},
+            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://music.apple.com/artist/abc"}},
+        ]
+        result = _parse_url_rels(relations)
+        assert len(result) == 6
+
+    def test_filters_disallowed_domains(self):
+        relations = [
+            {"target-type": "url", "type": "official homepage", "url": {"resource": "https://example.com"}},
+            {"target-type": "url", "type": "social network", "url": {"resource": "https://facebook.com/artist"}},
+            {"target-type": "url", "type": "social network", "url": {"resource": "https://weibo.com/artist"}},
+            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://soundcloud.com/artist"}},
+        ]
+        assert _parse_url_rels(relations) == []
 
     def test_ignores_non_url_relations(self):
         relations = [{"target-type": "artist", "type": "member of band"}]
