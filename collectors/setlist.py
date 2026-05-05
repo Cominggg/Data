@@ -27,10 +27,24 @@ _MAX_PAGES = 10
 
 
 def _get(path: str, params: dict) -> dict:
-    response = requests.get(f"{_BASE_URL}{path}", headers=_HEADERS, params=params, timeout=30)
-    response.raise_for_status()
-    time.sleep(1.0)
-    return response.json()
+    for attempt in range(1, 4):
+        response = requests.get(f"{_BASE_URL}{path}", headers=_HEADERS, params=params, timeout=30)
+        try:
+            response.raise_for_status()
+            time.sleep(1.0)
+            return response.json()
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                raise
+            if attempt == 3:
+                raise
+            logger.warning("setlist.fm HTTP 오류 재시도 %d/3: path=%s, %s", attempt, path, e)
+            time.sleep(5 * attempt)
+        except requests.RequestException as e:
+            if attempt == 3:
+                raise
+            logger.warning("setlist.fm 네트워크 오류 재시도 %d/3: path=%s, %s", attempt, path, e)
+            time.sleep(5 * attempt)
 
 
 def _parse_tracks(sets_data: dict) -> list[dict]:
@@ -56,7 +70,8 @@ def _event_date_in_range(event_date_str: str, prfpdfrom: Optional[str], prfpdto:
         if prfpdto and event_dt > datetime.strptime(prfpdto, "%Y-%m-%d"):
             return False
         return True
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as e:
+        logger.warning("날짜 파싱 실패: event_date=%s, from=%s, to=%s, %s", event_date_str, prfpdfrom, prfpdto, e)
         return False
 
 
@@ -80,11 +95,16 @@ def collect() -> list[dict]:
         while True:
             try:
                 data = _get("/search/setlists", {"artistMbid": artist_mbid, "countryCode": "KR", "p": page})
-            except requests.HTTPError as e:
-                if e.response is not None and e.response.status_code == 404:
+            except requests.RequestException as e:
+                is_404 = (
+                    isinstance(e, requests.HTTPError)
+                    and e.response is not None
+                    and e.response.status_code == 404
+                )
+                if is_404:
                     logger.debug("셋리스트 없음 — 건너뜀: concert_id=%d, page=%d", concert_id, page)
                 else:
-                    logger.warning("setlist.fm API 오류: concert_id=%d, page=%d, %s", concert_id, page, e)
+                    logger.warning("setlist.fm API 오류 (3회 실패): concert_id=%d, page=%d, %s", concert_id, page, e)
                 break
 
             setlist_items = data.get("setlist", [])

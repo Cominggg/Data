@@ -226,6 +226,57 @@ class TestSetlistCollect:
         assert mock_get.call_count == 3
 
 
+class TestSetlistRetry:
+    def test_retries_on_network_error_then_succeeds(self):
+        """네트워크 오류 후 재시도 성공 시 셋리스트가 수집되어야 한다."""
+        from unittest.mock import call
+
+        fail_response = MagicMock()
+        fail_response.raise_for_status.side_effect = requests.ConnectionError("timeout")
+
+        ok_response = MagicMock()
+        ok_response.raise_for_status = MagicMock()
+        ok_response.json.return_value = {"setlist": [_sample_setlist()]}
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", side_effect=[fail_response, ok_response]):
+                with patch("collectors.setlist.time.sleep"):
+                    result = collect()
+
+        assert len(result) == 1
+
+    def test_non_404_http_error_retried_then_gives_up(self):
+        """5xx 오류는 3회 재시도 후 포기하고 해당 공연은 건너뛰어야 한다."""
+        http_err = requests.HTTPError()
+        http_err.response = MagicMock(status_code=500)
+
+        fail_response = MagicMock()
+        fail_response.raise_for_status.side_effect = http_err
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", return_value=fail_response):
+                with patch("collectors.setlist.time.sleep"):
+                    result = collect()
+
+        assert result == []
+
+    def test_404_not_retried(self):
+        """404는 재시도 없이 즉시 건너뛰어야 한다."""
+        http_err = requests.HTTPError()
+        http_err.response = MagicMock(status_code=404)
+
+        fail_response = MagicMock()
+        fail_response.raise_for_status.side_effect = http_err
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", return_value=fail_response) as mock_get:
+                with patch("collectors.setlist.time.sleep"):
+                    result = collect()
+
+        assert result == []
+        assert mock_get.call_count == 1
+
+
 class TestParseTracks:
     def test_parses_songs_in_order(self):
         """sets 안의 song 목록이 순서대로 파싱되어야 한다."""
