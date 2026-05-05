@@ -280,6 +280,24 @@ def get_all_artist_mbids() -> list[str]:
     return [row[0] for row in rows]
 
 
+def get_release_groups_without_cover() -> list[str]:
+    """cover_url이 없는 release_group의 mbid 목록을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT mbid FROM release_group WHERE cover_url IS NULL")
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
+def update_release_group_cover(mbid: str, cover_url: str) -> None:
+    """release_group의 cover_url을 갱신한다."""
+    with get_session() as session:
+        session.execute(
+            text("UPDATE release_group SET cover_url = :cover_url WHERE mbid = :mbid"),
+            {"cover_url": cover_url, "mbid": mbid},
+        )
+
+
 def get_unmatched_concerts() -> list[dict]:
     """concert_artist 매칭이 없는 공연을 반환한다."""
     with get_session() as session:

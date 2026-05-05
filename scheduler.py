@@ -8,6 +8,7 @@ from collectors import kopis, musicbrainz, release, setlist
 from db.repository import (
     get_all_aliases,
     get_all_artist_mbids,
+    get_release_groups_without_cover,
     get_unmatched_concerts,
     save_artists,
     save_concert_artists,
@@ -17,6 +18,7 @@ from db.repository import (
     save_to_review_queue,
     update_artist_is_coming,
     update_concert_status,
+    update_release_group_cover,
 )
 from matchers.artist_matcher import match_concert
 
@@ -89,6 +91,18 @@ def run_status_update() -> None:
     logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
 
+def run_cover_art_update() -> None:
+    """cover_url 미수집 릴리즈 그룹의 커버아트를 수집한다 (주 1회, 수요일)."""
+    logger.info("=== 커버아트 수집 잡 시작 ===")
+    mbids = get_release_groups_without_cover()
+    logger.info("커버아트 미수집 릴리즈 그룹: %d건", len(mbids))
+    for mbid in mbids:
+        cover_url = release.collect_cover_art(mbid)
+        if cover_url:
+            update_release_group_cover(mbid, cover_url)
+    logger.info("=== 커버아트 수집 잡 완료 ===")
+
+
 def run_release_update() -> None:
     """릴리즈 갱신 (주 1회, 화요일). 신규 항목만 INSERT."""
     logger.info("=== 릴리즈 갱신 잡 시작 ===")
@@ -111,6 +125,7 @@ def _build_scheduler() -> BackgroundScheduler:
     scheduler.add_job(run_kopis_collect_and_match, "cron", day_of_week="mon", hour=3)
     scheduler.add_job(run_status_update, "cron", hour=4)
     scheduler.add_job(run_release_update, "cron", day_of_week="tue", hour=5)
+    scheduler.add_job(run_cover_art_update, "cron", day_of_week="wed", hour=5)
     scheduler.add_job(run_setlist_collect, "cron", hour=6)
     return scheduler
 

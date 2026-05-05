@@ -123,6 +123,15 @@ def _get_representative_release_mbid(release_group: dict, releases: list) -> Opt
     return releases[0].get("id")
 
 
+def collect_cover_art(release_group_mbid: str) -> Optional[str]:
+    """단일 release_group의 커버아트 URL을 수집한다. 404 또는 오류 시 None 반환."""
+    try:
+        return _fetch_cover_art_url(release_group_mbid)
+    except requests.RequestException as e:
+        logger.warning("커버 아트 수집 실패 release_group_mbid=%s: %s", release_group_mbid, e)
+        return None
+
+
 def collect_releases(artist_mbid: str) -> list[dict]:
     """아티스트의 릴리즈 그룹(앨범·싱글·EP) 수집."""
     logger.info("릴리즈 수집 시작: artist_mbid=%s", artist_mbid)
@@ -167,13 +176,6 @@ def collect_releases(artist_mbid: str) -> list[dict]:
                 except requests.RequestException as e:
                     logger.warning("트랙 수집 실패 release_mbid=%s: %s", release_mbid, e)
 
-            cover_url = None
-            if rg_mbid:
-                try:
-                    cover_url = _fetch_cover_art_url(rg_mbid)
-                except requests.RequestException as e:
-                    logger.warning("커버 아트 수집 실패 release_group_mbid=%s: %s", rg_mbid, e)
-
             results.append(
                 {
                     "release_group_mbid": rg_mbid,
@@ -182,7 +184,7 @@ def collect_releases(artist_mbid: str) -> list[dict]:
                     "type": rg.get("primary-type"),
                     "first_release_date": _parse_release_date(rg.get("first-release-date")),
                     "representative_release_mbid": release_mbid,
-                    "cover_url": cover_url,
+                    "cover_url": None,
                     "label": label,
                     "tracks": tracks,
                 }
