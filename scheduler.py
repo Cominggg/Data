@@ -18,7 +18,6 @@ from db.repository import (
     save_concerts,
     save_releases,
     save_setlists,
-    save_to_review_queue,
     update_artist_is_coming,
     update_concert_status,
     update_release_group_cover,
@@ -90,18 +89,13 @@ def run_kopis_collect_and_match() -> None:
     unmatched = get_unmatched_concerts()
 
     all_matches: list[dict] = []
-    all_failures: list[dict] = []
     for concert in unmatched:
-        matches, failures = match_concert(concert, aliases)
+        matches, _ = match_concert(concert, aliases)
         all_matches.extend(matches)
-        all_failures.extend(failures)
 
     if all_matches:
         save_concert_artists(all_matches)
         update_artist_is_coming()
-
-    if all_failures:
-        save_to_review_queue(all_failures)
 
     logger.info("=== KOPIS 수집·매칭 잡 완료 ===")
 
@@ -163,12 +157,10 @@ def collect_and_save_concert(kopis_id: str) -> bool:
 
     concert_row = get_concert_by_kopis_id(kopis_id)
     if concert_row:
-        matches, failures = match_concert(concert_row, aliases)
+        matches, _ = match_concert(concert_row, aliases)
         if matches:
             save_concert_artists(matches)
             update_artist_is_coming()
-        if failures:
-            save_to_review_queue(failures)
 
     logger.info("단건 공연 수집 완료: kopis_id=%s", kopis_id)
     return True

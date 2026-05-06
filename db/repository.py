@@ -386,20 +386,6 @@ def save_concert_artists(matches: list[dict]) -> None:
     logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
 
 
-def save_to_review_queue(failures: list[dict]) -> None:
-    """매칭 실패 공연을 matching_review_queue 테이블에 PENDING 상태로 등록한다."""
-    with get_session() as session:
-        for failure in failures:
-            session.execute(
-                text("""
-                    INSERT INTO matching_review_queue (concert_id, status)
-                    VALUES (:concert_id, 'PENDING')
-                    ON CONFLICT (concert_id) DO NOTHING
-                """),
-                {"concert_id": failure["concert_id"]},
-            )
-    logger.info("매칭 검토 큐 등록 완료: %d건 처리", len(failures))
-
 
 def update_artist_is_coming() -> int:
     """오늘 이후 approved 공연 보유 여부에 따라 artist.is_coming을 갱신한다.

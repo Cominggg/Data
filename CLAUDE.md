@@ -64,6 +64,7 @@ jpop-concert-collector/
 ### ③ KOPIS 수집 (주 1회 이상)
 
 - 조건: `visit=Y`, `genrenm=대중음악(GGGA)`
+- 저장 전 `has_match()`로 alias 매칭 공연만 필터링하여 저장 (비매칭 공연은 DB에 저장하지 않음)
 - 저장: `prfnm`, `prfcast`, 날짜, 장소, `updatedate`, `relates`(예매처 링크, 없으면 빈 배열)
 - 상태 갱신: `updatedate` 변화 감지 시 `prfstate` 갱신 (매일 실행)
 
@@ -71,11 +72,13 @@ jpop-concert-collector/
 
 | 단계 | 기준 | 신뢰도 | 노출 |
 |------|------|--------|------|
-| 매칭 ① | `prfcast` → Artist alias **완전 일치** | HIGH | 관리자 승인 없이 즉시 노출 |
-| 매칭 ② | `prfnm` → alias 부분 검색, `rapidfuzz.fuzz.partial_ratio` ≥ 85 | LOW | 관리자 승인 후 노출 |
-| 실패 | 두 매칭 모두 실패 | - | 검토 큐 등록 |
+| 매칭 ① | `prfcast` 각 이름 → Artist alias **완전 일치** | HIGH | 관리자 승인 없이 즉시 노출 |
+| 매칭 ② | `prfcast` 각 이름 → `rapidfuzz.fuzz.token_set_ratio` ≥ 85 | LOW | 관리자 승인 후 노출 |
+| 매칭 ③ | `prfnm` → `rapidfuzz.fuzz.token_set_ratio` ≥ 85 (prfcast 전체 실패 시 폴백) | LOW | 관리자 승인 후 노출 |
 
-- `prfcast`에 여러 아티스트(`,` · `·` 구분) 포함 시 각각 개별 매칭 후 모두 `concert_artist`에 INSERT
+- `has_match()` 통과 공연은 반드시 매칭 ①~③ 중 하나가 성공하므로 별도 검토 큐 없음
+- `prfcast` 구분자: `,` `·` `&` `×` `・` `/` — feat/featuring/ft 표기 자동 제거
+- `prfcast`에 여러 아티스트 포함 시 각각 개별 매칭 후 모두 `concert_artist`에 INSERT
 - 승인 시 alias 학습 → 다음 사이클 자동 매칭률 향상
 
 ### ⑤ setlist.fm 수집 (공연 완료 후 1일 이내)
