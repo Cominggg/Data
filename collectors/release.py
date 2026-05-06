@@ -45,7 +45,7 @@ def _fetch_release_groups(artist_mbid: str, offset: int) -> dict:
         "/release-group/",
         {
             "artist": artist_mbid,
-            "type": "Album|Single|EP",
+            "type": "album|single|ep",
             "fmt": "json",
             "limit": _PAGE_LIMIT,
             "offset": offset,
