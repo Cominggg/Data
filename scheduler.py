@@ -31,11 +31,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_initial_collect(skip_artists: bool = False, force_artists: bool = False) -> None:
+def run_initial_collect(
+    skip_artists: bool = False,
+    force_artists: bool = False,
+    skip_kopis: bool = False,
+) -> None:
     """초기 수집 (1회성 CLI): 아티스트 → KOPIS 매칭 → 매칭 아티스트 릴리즈 순으로 수집.
 
     재개 지원: 이미 DB에 저장된 아티스트는 건너뛴다.
     force_artists=True 시 기존 DB 아티스트를 건너뛰지 않고 전체 재수집한다.
+    skip_kopis=True 시 KOPIS 수집·매칭을 건너뛰고 릴리즈 수집으로 진행한다.
     나머지 아티스트 릴리즈는 주간 배치(run_release_update)가 점진적으로 채운다.
     """
     logger.info("=== 초기 수집 시작 ===")
@@ -53,9 +58,12 @@ def run_initial_collect(skip_artists: bool = False, force_artists: bool = False)
         artists = musicbrainz.collect_artists(skip_mbids=saved_mbids)
         save_artists(artists)
 
-    # KOPIS 수집 + 매칭으로 내한 확정 아티스트를 먼저 파악한다.
-    logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
-    run_kopis_collect_and_match()
+    if skip_kopis:
+        logger.info("--skip-kopis 플래그 감지 — KOPIS 수집·매칭 건너뜀")
+    else:
+        # KOPIS 수집 + 매칭으로 내한 확정 아티스트를 먼저 파악한다.
+        logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
+        run_kopis_collect_and_match()
 
     # 매칭된 아티스트만 즉시 릴리즈 수집, 나머지는 주간 배치가 처리한다.
     matched_mbids = get_matched_artist_mbids()
@@ -159,10 +167,19 @@ def main() -> None:
         action="store_true",
         help="기존 DB 아티스트를 건너뛰지 않고 변경된 쿼리 기준으로 전체 재수집 (init 전용)",
     )
+    parser.add_argument(
+        "--skip-kopis",
+        action="store_true",
+        help="KOPIS 수집·매칭을 건너뛰고 릴리즈 수집으로 바로 진행 (init 전용)",
+    )
     args = parser.parse_args()
 
     if args.command == "init":
-        run_initial_collect(skip_artists=args.skip_artists, force_artists=args.force_artists)
+        run_initial_collect(
+            skip_artists=args.skip_artists,
+            force_artists=args.force_artists,
+            skip_kopis=args.skip_kopis,
+        )
         return
 
     scheduler = _build_scheduler()
