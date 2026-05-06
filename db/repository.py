@@ -266,10 +266,14 @@ def save_setlists(setlists: list[dict]) -> None:
 
 
 def get_all_aliases() -> list[dict]:
-    """매칭에 사용할 모든 아티스트 alias를 반환한다."""
+    """매칭에 사용할 모든 아티스트 alias를 반환한다. artist.name도 포함."""
     with get_session() as session:
         rows = session.execute(
-            text("SELECT artist_id, name FROM artist_alias")
+            text("""
+                SELECT artist_id, name FROM artist_alias
+                UNION
+                SELECT id AS artist_id, name FROM artist
+            """)
         ).fetchall()
     return [{"artist_id": row[0], "name": row[1]} for row in rows]
 

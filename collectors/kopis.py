@@ -66,7 +66,7 @@ def _parse_relates(relates_elem: Optional[ET.Element]) -> list[dict]:
 
 
 _DETAIL_FALLBACK = {
-    "poster_url": None, "venue_address": None, "price": None,
+    "prfcast": None, "poster_url": None, "venue_address": None, "price": None,
     "relates": [], "updatedate": None, "visit": None,
 }
 
@@ -86,6 +86,7 @@ def _fetch_detail(kopis_id: str) -> dict:
     if db is None:
         return _DETAIL_FALLBACK
     return {
+        "prfcast": _text(db, "prfcast"),
         "poster_url": _text(db, "poster"),
         "venue_address": _text(db, "adres"),
         "relates": _parse_relates(db.find("relates")),

@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 _CAST_SEP = re.compile(r"[,·&×・/]")
 _FEAT_RE = re.compile(r"\b(?:featuring|feat|ft)\.?\s*", re.IGNORECASE)
 _FUZZY_THRESHOLD = 85
-_MIN_ALIAS_LEN = 3
+_MIN_ALIAS_LEN = 3        # cast 이름 매칭용
+_MIN_ALIAS_LEN_TITLE = 5  # title 매칭용: 짧은 alias의 false positive 방지
 
 
 def _split_cast(cast: str) -> list[str]:
@@ -37,6 +38,23 @@ def _fuzzy_match(text: str, aliases: list[dict]) -> Optional[dict]:
     return None
 
 
+def _fuzzy_match_title(text: str, aliases: list[dict]) -> Optional[dict]:
+    """title 전용 퍼지 매칭: _MIN_ALIAS_LEN_TITLE 이상 alias만 대상으로 한다."""
+    best_score = 0
+    best_alias = None
+    text_lower = text.lower()
+    for alias in aliases:
+        if len(alias["name"]) < _MIN_ALIAS_LEN_TITLE:
+            continue
+        score = fuzz.token_set_ratio(text_lower, alias["name"].lower())
+        if score > best_score:
+            best_score = score
+            best_alias = alias
+    if best_score >= _FUZZY_THRESHOLD:
+        return best_alias
+    return None
+
+
 def has_match(concert_raw: dict, aliases: list[dict]) -> bool:
     """KOPIS 원시 공연 데이터가 alias와 매칭되는지 확인 (저장 전 필터링용)."""
     cast = concert_raw.get("prfcast") or ""
@@ -46,7 +64,7 @@ def has_match(concert_raw: dict, aliases: list[dict]) -> bool:
     for name in _split_cast(cast):
         if _exact_match(name, alias_map) or _fuzzy_match(name, aliases):
             return True
-    return bool(_fuzzy_match(title, aliases))
+    return bool(_fuzzy_match_title(title, aliases))
 
 
 def match_concert(concert: dict, aliases: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -95,7 +113,7 @@ def match_concert(concert: dict, aliases: list[dict]) -> tuple[list[dict], list[
             logger.debug("LOW(cast) 매칭: concert_id=%s, artist_id=%s, name=%s", concert_id, alias["artist_id"], artist_name)
 
     if not matches:
-        alias = _fuzzy_match(title, aliases)
+        alias = _fuzzy_match_title(title, aliases)
         if alias:
             matches.append({
                 "concert_id": concert_id,
