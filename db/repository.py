@@ -151,7 +151,7 @@ def save_concerts(concerts: list[dict]) -> None:
             row = session.execute(
                 text("""
                     INSERT INTO concert
-                        (kopis_id, title, cast, start_date, end_date,
+                        (kopis_id, title, "cast", start_date, end_date,
                          venue_name, venue_address, poster_url, price, status, kopis_update_date)
                     VALUES
                         (:kopis_id, :title, :cast, :start_date, :end_date,
@@ -317,7 +317,7 @@ def get_unmatched_concerts() -> list[dict]:
     with get_session() as session:
         rows = session.execute(
             text("""
-                SELECT c.id AS concert_id, c.title, c.cast
+                SELECT c.id AS concert_id, c.title, c."cast"
                 FROM concert c
                 LEFT JOIN concert_artist ca ON ca.concert_id = c.id
                 WHERE ca.concert_id IS NULL
