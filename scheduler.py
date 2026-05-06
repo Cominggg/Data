@@ -8,6 +8,8 @@ from collectors import kopis, musicbrainz, release, setlist
 from db.repository import (
     get_all_aliases,
     get_all_artist_mbids,
+    get_concert_by_kopis_id,
+    get_concert_with_artist,
     get_matched_artist_mbids,
     get_release_groups_without_cover,
     get_unmatched_concerts,
@@ -140,6 +142,73 @@ def run_setlist_collect() -> None:
     setlists = setlist.collect()
     save_setlists(setlists)
     logger.info("=== setlist 수집 잡 완료 ===")
+
+
+def collect_and_save_concert(kopis_id: str) -> bool:
+    """단건 KOPIS 공연을 수집해 alias 매칭 후 DB에 저장한다. 성공 시 True 반환."""
+    concert = kopis.collect_by_id(kopis_id)
+    if concert is None:
+        logger.warning("KOPIS 공연 데이터 없음: kopis_id=%s", kopis_id)
+        return False
+    if concert.get("visit") != "Y":
+        logger.info("내한 공연 아님 — 저장 건너뜀: kopis_id=%s", kopis_id)
+        return False
+
+    aliases = get_all_aliases()
+    if not has_match(concert, aliases):
+        logger.info("alias 매칭 없음 — 저장 건너뜀: kopis_id=%s", kopis_id)
+        return False
+
+    save_concerts([concert])
+
+    concert_row = get_concert_by_kopis_id(kopis_id)
+    if concert_row:
+        matches, failures = match_concert(concert_row, aliases)
+        if matches:
+            save_concert_artists(matches)
+            update_artist_is_coming()
+        if failures:
+            save_to_review_queue(failures)
+
+    logger.info("단건 공연 수집 완료: kopis_id=%s", kopis_id)
+    return True
+
+
+def collect_and_save_release_group(release_group_mbid: str, artist_mbid: str) -> bool:
+    """단건 릴리즈 그룹을 수집해 DB에 저장한다. 성공 시 True 반환."""
+    rg = release.collect_release_group(release_group_mbid, artist_mbid)
+    if rg is None:
+        logger.warning("릴리즈 그룹 수집 실패: mbid=%s", release_group_mbid)
+        return False
+    save_releases([rg])
+    logger.info("단건 릴리즈 그룹 수집 완료: mbid=%s", release_group_mbid)
+    return True
+
+
+def collect_and_save_cover_art(release_group_mbid: str) -> bool:
+    """단건 릴리즈 그룹의 커버아트를 수집해 DB에 갱신한다. 성공 시 True 반환."""
+    cover_url = release.collect_cover_art(release_group_mbid)
+    if not cover_url:
+        logger.info("커버아트 없음: mbid=%s", release_group_mbid)
+        return False
+    update_release_group_cover(release_group_mbid, cover_url)
+    logger.info("단건 커버아트 수집 완료: mbid=%s", release_group_mbid)
+    return True
+
+
+def collect_and_save_setlist(concert_id: int) -> bool:
+    """단건 공연의 셋리스트를 수집해 DB에 저장한다. 성공 시 True 반환."""
+    concert = get_concert_with_artist(concert_id)
+    if concert is None:
+        logger.warning("공연 조회 실패 또는 승인된 아티스트 없음: concert_id=%d", concert_id)
+        return False
+    result = setlist.collect_for_concert(concert)
+    if result is None:
+        logger.info("셋리스트 없음: concert_id=%d", concert_id)
+        return False
+    save_setlists([result])
+    logger.info("단건 셋리스트 수집 완료: concert_id=%d", concert_id)
+    return True
 
 
 def _build_scheduler() -> BackgroundScheduler:

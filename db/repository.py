@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -310,6 +311,42 @@ def update_release_group_cover(mbid: str, cover_url: str) -> None:
             text("UPDATE release_group SET cover_url = :cover_url WHERE mbid = :mbid"),
             {"cover_url": cover_url, "mbid": mbid},
         )
+
+
+def get_concert_with_artist(concert_id: int) -> Optional[dict]:
+    """셋리스트 수집에 필요한 공연 정보(artist_mbid 포함)를 반환한다. 없으면 None."""
+    with get_session() as session:
+        row = session.execute(
+            text("""
+                SELECT c.id, c.start_date, c.end_date, a.mbid AS artist_mbid
+                FROM concert c
+                JOIN concert_artist ca ON ca.concert_id = c.id
+                JOIN artist a ON a.id = ca.artist_id
+                WHERE c.id = :concert_id
+                LIMIT 1
+            """),
+            {"concert_id": concert_id},
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "concert_id": row[0],
+        "start_date": str(row[1]) if row[1] else None,
+        "end_date": str(row[2]) if row[2] else None,
+        "artist_mbid": row[3],
+    }
+
+
+def get_concert_by_kopis_id(kopis_id: str) -> Optional[dict]:
+    """kopis_id로 공연을 조회한다. 없으면 None 반환."""
+    with get_session() as session:
+        row = session.execute(
+            text('SELECT id, title, "cast" FROM concert WHERE kopis_id = :kopis_id'),
+            {"kopis_id": kopis_id},
+        ).fetchone()
+    if row is None:
+        return None
+    return {"concert_id": row[0], "title": row[1], "cast": row[2]}
 
 
 def get_unmatched_concerts() -> list[dict]:

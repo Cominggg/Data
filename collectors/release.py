@@ -132,6 +132,48 @@ def collect_cover_art(release_group_mbid: str) -> Optional[str]:
         return None
 
 
+def collect_release_group(release_group_mbid: str, artist_mbid: str) -> Optional[dict]:
+    """단일 release_group의 데이터(트랙·레이블 포함)를 수집한다. 허용 타입이 아니거나 오류 시 None 반환."""
+    try:
+        rg_data = _get(f"/release-group/{release_group_mbid}", {"fmt": "json"})
+    except requests.RequestException as e:
+        logger.warning("릴리즈 그룹 조회 실패: mbid=%s, %s", release_group_mbid, e)
+        return None
+
+    if rg_data.get("primary-type") not in _ALLOWED_TYPES:
+        logger.info("허용되지 않는 타입 — 건너뜀: mbid=%s, type=%s", release_group_mbid, rg_data.get("primary-type"))
+        return None
+
+    releases_in_group: list[dict] = []
+    try:
+        releases_in_group = _fetch_releases_for_group(release_group_mbid)
+    except requests.RequestException as e:
+        logger.warning("릴리즈 목록 조회 실패: mbid=%s, %s", release_group_mbid, e)
+
+    release_mbid = _get_representative_release_mbid(rg_data, releases_in_group)
+    tracks: list[dict] = []
+    label = None
+    if release_mbid:
+        try:
+            release_data = _fetch_tracks(release_mbid)
+            tracks = _parse_tracks(release_data)
+            label = _parse_label(release_data)
+        except requests.RequestException as e:
+            logger.warning("트랙 수집 실패: release_mbid=%s, %s", release_mbid, e)
+
+    return {
+        "release_group_mbid": release_group_mbid,
+        "artist_mbid": artist_mbid,
+        "title": rg_data.get("title"),
+        "type": rg_data.get("primary-type"),
+        "first_release_date": _parse_release_date(rg_data.get("first-release-date")),
+        "representative_release_mbid": release_mbid,
+        "cover_url": None,
+        "label": label,
+        "tracks": tracks,
+    }
+
+
 def collect_releases(artist_mbid: str) -> list[dict]:
     """아티스트의 릴리즈 그룹(앨범·싱글·EP) 수집."""
     logger.info("릴리즈 수집 시작: artist_mbid=%s", artist_mbid)

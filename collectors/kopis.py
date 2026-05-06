@@ -109,6 +109,36 @@ def _parse_concert(item: ET.Element) -> dict:
     }
 
 
+def collect_by_id(kopis_id: str) -> Optional[dict]:
+    """단건 kopis_id로 공연 상세 데이터를 수집한다. 데이터 없거나 파싱 실패 시 None 반환."""
+    url = f"{_BASE_URL}/{kopis_id}"
+    response = requests.get(url, params={"service": _API_KEY}, timeout=30)
+    response.raise_for_status()
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as e:
+        logger.warning("단건 XML 파싱 실패: kopis_id=%s, %s", kopis_id, e)
+        return None
+    db = root.find("db")
+    if db is None:
+        return None
+    return {
+        "kopis_id": _text(db, "mt20id") or kopis_id,
+        "prfnm": _text(db, "prfnm"),
+        "prfcast": _text(db, "prfcast"),
+        "prfpdfrom": _parse_kopis_date(_text(db, "prfpdfrom")),
+        "prfpdto": _parse_kopis_date(_text(db, "prfpdto")),
+        "fcltynm": _text(db, "fcltynm"),
+        "prfstate": _text(db, "prfstate"),
+        "poster_url": _text(db, "poster"),
+        "venue_address": _text(db, "adres"),
+        "price": _text(db, "pcseguidance"),
+        "relates": _parse_relates(db.find("relates")),
+        "updatedate": _parse_kopis_date(_text(db, "updatedate")),
+        "visit": _text(db, "visit"),
+    }
+
+
 def collect() -> list[dict]:
     """KOPIS에서 내한공연 목록을 전 페이지 순회해 반환한다."""
     logger.info("KOPIS 공연 수집 시작")

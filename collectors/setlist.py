@@ -75,6 +75,45 @@ def _event_date_in_range(event_date_str: str, prfpdfrom: Optional[str], prfpdto:
         return False
 
 
+def collect_for_concert(concert: dict) -> Optional[dict]:
+    """단건 공연의 셋리스트를 setlist.fm에서 수집한다.
+
+    concert: {"concert_id": int, "artist_mbid": str, "start_date": str, "end_date": str}
+    Returns: setlist dict, 또는 없으면 None
+    """
+    concert_id = concert["concert_id"]
+    artist_mbid = concert["artist_mbid"]
+
+    page = 1
+    while True:
+        try:
+            data = _get("/search/setlists", {"artistMbid": artist_mbid, "countryCode": "KR", "p": page})
+        except requests.RequestException as e:
+            is_404 = (
+                isinstance(e, requests.HTTPError)
+                and e.response is not None
+                and e.response.status_code == 404
+            )
+            if not is_404:
+                logger.warning("setlist.fm API 오류: concert_id=%d, %s", concert_id, e)
+            return None
+
+        for item in data.get("setlist", []):
+            event_date = item.get("eventDate", "")
+            if not _event_date_in_range(event_date, concert["start_date"], concert["end_date"]):
+                continue
+            tracks = _parse_tracks(item.get("sets", {}))
+            logger.info("셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
+                        concert_id, item.get("id"), len(tracks))
+            return {"concert_id": concert_id, "setlist_fm_id": item.get("id"), "tracks": tracks}
+
+        total = int(data.get("total", 0))
+        items_per_page = int(data.get("itemsPerPage", 20))
+        if page * items_per_page >= total or page >= _MAX_PAGES:
+            return None
+        page += 1
+
+
 def collect() -> list[dict]:
     """공연완료 상태 공연의 셋리스트를 setlist.fm에서 수집한다."""
     logger.info("setlist.fm 수집 시작")
