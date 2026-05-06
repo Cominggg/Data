@@ -21,7 +21,7 @@ from db.repository import (
     update_concert_status,
     update_release_group_cover,
 )
-from matchers.artist_matcher import match_concert
+from matchers.artist_matcher import has_match, match_concert
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,9 +79,12 @@ def run_kopis_collect_and_match() -> None:
     """KOPIS 수집 + 공연-아티스트 매칭 (주 1회, 월요일)."""
     logger.info("=== KOPIS 수집·매칭 잡 시작 ===")
     concerts = kopis.collect()
-    save_concerts(concerts)
-
     aliases = get_all_aliases()
+
+    filtered = [c for c in concerts if has_match(c, aliases)]
+    logger.info("alias 매칭 공연 %d건 / 전체 수집 %d건", len(filtered), len(concerts))
+    save_concerts(filtered)
+
     unmatched = get_unmatched_concerts()
 
     all_matches: list[dict] = []
