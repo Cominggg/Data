@@ -53,7 +53,7 @@ CREATE TABLE concert (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     kopis_id varchar(50) NOT NULL UNIQUE,
     title varchar(500) NOT NULL,
-    cast text,
+    "cast" text,
     start_date date NOT NULL,
     end_date date NOT NULL,
     venue_name varchar(255) NOT NULL,
@@ -154,18 +154,6 @@ CREATE TABLE inquiry (
     updated_at timestamp
 );
 
-CREATE TABLE matching_review_queue (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    concert_id bigint NOT NULL REFERENCES concert(id),
-    matched_artist_id bigint REFERENCES artist(id),
-    matched_alias varchar(255),
-    score float,
-    status varchar(20) NOT NULL,
-    reviewed_by bigint REFERENCES "user"(id),
-    reviewed_at timestamp,
-    created_at timestamp,
-    UNIQUE (concert_id)
-);
 ```
 
 ## 테이블 관계 요약
@@ -187,7 +175,6 @@ CREATE TABLE matching_review_queue (
 | `release_group` | 앨범·싱글·EP |
 | `track` | 릴리즈 트랙 |
 | `inquiry` | 유저 문의 |
-| `matching_review_queue` | 매칭 검토 큐 |
 
 ## 변경 이력
 
@@ -203,6 +190,6 @@ CREATE TABLE matching_review_queue (
 | 2026-04-30 | 전체 테이블 id 컬럼에 GENERATED ALWAYS AS IDENTITY 추가 — INSERT 시 null 위반 방지 |
 | 2026-05-04 | 전 컬럼 NOT NULL 명시 및 DEFAULT 추가 — 파이프라인 INSERT 쿼리와 정합성 검증 완료 |
 | 2026-05-04 | concert_artist에 UNIQUE(concert_id, artist_id) 추가 — ON CONFLICT 대상 제약 명시 |
-| 2026-05-04 | matching_review_queue에 UNIQUE(concert_id) 추가 — ON CONFLICT 대상 제약 명시 |
 | 2026-05-04 | artist_alias에 UNIQUE(artist_id, name) 추가 — 동일 alias 중복 INSERT 방지 |
 | 2026-05-04 | artist_url에 UNIQUE(artist_id, url) 추가 — 동일 URL 중복 INSERT 방지 |
+| 2026-05-07 | matching_review_queue 테이블 제거 — has_match 필터로 매칭 실패 경로 소멸 |
