@@ -1,6 +1,9 @@
 import datetime
 import logging
 import os
+import re
+import time
+import xml.etree.ElementTree as ET
 from typing import Optional
 
 import requests
@@ -20,58 +23,124 @@ _DEFAULT_PARAMS = {
     "visit": "Y",
     "genrenm": "GGGA",
     "rows": 100,
-    "outfmt": "json",
-    "stdate": "20200101",
+    "stdate": "20230101",
 }
 
 
-def _get(params: dict) -> dict:
+def _parse_kopis_date(raw: Optional[str]) -> Optional[str]:
+    """KOPIS 날짜 문자열을 DB date 컬럼용 YYYY-MM-DD로 정규화.
+
+    "YYYY.MM.DD"              → "YYYY-MM-DD"
+    "YYYY.MM.DD HH:MM:SS"     → "YYYY-MM-DD"
+    "YYYY-MM-DD HH:MM:SS..."  → "YYYY-MM-DD"
+    그 외 / None               → None
+    """
+    if not raw:
+        return None
+    m = re.match(r"^(\d{4})[-.](\d{2})[-.](\d{2})", raw)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    return None
+
+
+def _text(elem: ET.Element, tag: str) -> Optional[str]:
+    """child 요소의 텍스트를 반환. 없으면 None."""
+    child = elem.find(tag)
+    return child.text if child is not None else None
+
+
+def _get(params: dict) -> ET.Element:
     response = requests.get(_BASE_URL, params=params, timeout=30)
     response.raise_for_status()
-    return response.json()
+    try:
+        return ET.fromstring(response.content)
+    except ET.ParseError as e:
+        logger.error("KOPIS 리스트 XML 파싱 실패: %s", e)
+        raise
 
 
-def _parse_relates(raw: object) -> list[dict]:
-    """relates 필드가 없거나 빈 문자열이면 [] 반환."""
-    if not raw or not isinstance(raw, dict):
+def _parse_relates(relates_elem: Optional[ET.Element]) -> list[dict]:
+    """relates XML 요소에서 예매처 링크 목록을 추출한다. 없으면 [] 반환."""
+    if relates_elem is None:
         return []
-    relate = raw.get("relate")
-    if not relate:
-        return []
-    # relate 가 단일 객체일 때도 리스트로 정규화
-    if isinstance(relate, dict):
-        relate = [relate]
-    return [{"relatenm": r.get("relatenm"), "relateurl": r.get("relateurl")} for r in relate]
+    return [
+        {"relatenm": _text(r, "relatenm"), "relateurl": _text(r, "relateurl")}
+        for r in relates_elem.findall("relate")
+    ]
+
+
+_DETAIL_FALLBACK = {
+    "prfcast": None, "poster_url": None, "venue_address": None, "price": None,
+    "relates": [], "updatedate": None, "visit": None,
+}
 
 
 def _fetch_detail(kopis_id: str) -> dict:
-    """단건 상세 API를 호출해 poster_url, venue_address, relates를 반환한다."""
+    """단건 상세 API를 호출해 poster_url, venue_address, relates, price, updatedate를 반환한다."""
     url = f"{_BASE_URL}/{kopis_id}"
-    response = requests.get(url, params={"service": _API_KEY, "outfmt": "json"}, timeout=30)
+    response = requests.get(url, params={"service": _API_KEY}, timeout=30)
     response.raise_for_status()
-    data = response.json()
-    db = data.get("dbs", {}).get("db", {})
-    if isinstance(db, list):
-        db = db[0] if db else {}
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as e:
+        # 이스케이프되지 않은 특수문자(&, < 등) 포함 시 발생 — 폴백 적용
+        logger.warning("상세 API XML 파싱 실패 — 폴백 적용: kopis_id=%s, %s", kopis_id, e)
+        return _DETAIL_FALLBACK
+    db = root.find("db")
+    if db is None:
+        return _DETAIL_FALLBACK
     return {
-        "poster_url": db.get("poster"),
-        "venue_address": db.get("adres"),
-        "relates": _parse_relates(db.get("relates")),
-        "price": db.get("pcseguidance"),
+        "prfcast": _text(db, "prfcast"),
+        "poster_url": _text(db, "poster"),
+        "venue_address": _text(db, "adres"),
+        "relates": _parse_relates(db.find("relates")),
+        "price": _text(db, "pcseguidance"),
+        "updatedate": _parse_kopis_date(_text(db, "updatedate")),
+        "visit": _text(db, "visit"),
     }
 
 
-def _parse_concert(item: dict) -> dict:
+def _parse_concert(item: ET.Element) -> dict:
     return {
-        "kopis_id": item.get("mt20id"),
-        "prfnm": item.get("prfnm"),
-        "prfcast": item.get("prfcast"),
-        "prfpdfrom": item.get("prfpdfrom"),
-        "prfpdto": item.get("prfpdto"),
-        "fcltynm": item.get("fcltynm"),
-        "prfstate": item.get("prfstate"),
-        "updatedate": item.get("updatedate"),
-        "relates": _parse_relates(item.get("relates")),
+        "kopis_id": _text(item, "mt20id"),
+        "prfnm": _text(item, "prfnm"),
+        "prfcast": _text(item, "prfcast"),
+        "prfpdfrom": _parse_kopis_date(_text(item, "prfpdfrom")),
+        "prfpdto": _parse_kopis_date(_text(item, "prfpdto")),
+        "fcltynm": _text(item, "fcltynm"),
+        "prfstate": _text(item, "prfstate"),
+        "updatedate": _parse_kopis_date(_text(item, "updatedate")),
+        "relates": _parse_relates(item.find("relates")),
+    }
+
+
+def collect_by_id(kopis_id: str) -> Optional[dict]:
+    """단건 kopis_id로 공연 상세 데이터를 수집한다. 데이터 없거나 파싱 실패 시 None 반환."""
+    url = f"{_BASE_URL}/{kopis_id}"
+    response = requests.get(url, params={"service": _API_KEY}, timeout=30)
+    response.raise_for_status()
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as e:
+        logger.warning("단건 XML 파싱 실패: kopis_id=%s, %s", kopis_id, e)
+        return None
+    db = root.find("db")
+    if db is None:
+        return None
+    return {
+        "kopis_id": _text(db, "mt20id") or kopis_id,
+        "prfnm": _text(db, "prfnm"),
+        "prfcast": _text(db, "prfcast"),
+        "prfpdfrom": _parse_kopis_date(_text(db, "prfpdfrom")),
+        "prfpdto": _parse_kopis_date(_text(db, "prfpdto")),
+        "fcltynm": _text(db, "fcltynm"),
+        "prfstate": _text(db, "prfstate"),
+        "poster_url": _text(db, "poster"),
+        "venue_address": _text(db, "adres"),
+        "price": _text(db, "pcseguidance"),
+        "relates": _parse_relates(db.find("relates")),
+        "updatedate": _parse_kopis_date(_text(db, "updatedate")),
+        "visit": _text(db, "visit"),
     }
 
 
@@ -85,27 +154,59 @@ def collect() -> list[dict]:
     while True:
         logger.debug("KOPIS 페이지 조회: cpage=%d", cpage)
         params = {**_DEFAULT_PARAMS, "cpage": cpage, "eddate": eddate}
-        data = _get(params)
 
-        batch: Optional[list] = data.get("dbs", {}).get("db")
-        # 빈 페이지이거나 dbs 자체가 없으면 순회 종료
+        root = None
+        for attempt in range(1, 4):
+            try:
+                root = _get(params)
+                break
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response is not None else None
+                if attempt == 3:
+                    if status == 400:
+                        logger.info("KOPIS 400 응답 — 마지막 페이지로 간주하고 수집 종료: cpage=%d", cpage)
+                        return results
+                    raise
+                logger.warning("KOPIS 페이지 조회 실패 (attempt %d/3, status=%s): cpage=%d", attempt, status, cpage)
+                time.sleep(2 ** attempt)
+
+        batch = root.findall("db")
         if not batch:
             break
 
         for item in batch:
+            if _text(item, "genrenm") != "대중음악":
+                continue
             concert = _parse_concert(item)
-            try:
-                detail = _fetch_detail(concert["kopis_id"])
-                concert.update(detail)
-            except Exception:
-                logger.warning("상세 API 실패 — 건너뜀: kopis_id=%s", concert["kopis_id"])
-                concert.update({"poster_url": None, "venue_address": None})
+            for attempt in range(1, 4):
+                try:
+                    detail = _fetch_detail(concert["kopis_id"])
+                    concert.update(detail)
+                    break
+                except requests.RequestException as e:
+                    if attempt == 3:
+                        logger.warning(
+                            "상세 API 3회 실패 — 폴백 적용: kopis_id=%s, %s",
+                            concert["kopis_id"], e,
+                        )
+                        concert.update({
+                            "poster_url": None, "venue_address": None,
+                            "price": None, "relates": [], "updatedate": None, "visit": None,
+                        })
+                    else:
+                        logger.debug(
+                            "상세 API 재시도 %d/3: kopis_id=%s, %s",
+                            attempt, concert["kopis_id"], e,
+                        )
+                        time.sleep(5 * attempt)
+            if concert.get("visit") != "Y":
+                logger.debug("내한 공연 아님 — 제외: kopis_id=%s, prfnm=%s", concert["kopis_id"], concert["prfnm"])
+                continue
             results.append(concert)
 
         logger.info("KOPIS 수집 중: cpage=%d, 누적 %d건", cpage, len(results))
         cpage += 1
 
-        # 마지막 페이지는 rows보다 적게 반환되므로 그 시점에 중단
         if len(batch) < _DEFAULT_PARAMS["rows"]:
             break
 

@@ -8,6 +8,7 @@ from collectors.release import (
     _fetch_tracks,
     _get_representative_release_mbid,
     _parse_label,
+    _parse_release_date,
     _parse_tracks,
     collect_releases,
 )
@@ -51,13 +52,36 @@ class TestParseTracks:
     def test_returns_empty_for_no_media(self):
         assert _parse_tracks({}) == []
 
-    def test_handles_missing_recording_id(self):
+    def test_skips_track_with_missing_recording_id(self):
+        """recording id가 없는 트랙은 track.mbid UNIQUE 제약 위반 방지를 위해 제외해야 한다."""
         release_data = {
             "media": [
                 {"tracks": [{"title": "T", "position": 1, "length": 100, "recording": {}}]}
             ]
         }
-        assert _parse_tracks(release_data)[0]["mbid"] is None
+        assert _parse_tracks(release_data) == []
+
+
+class TestParseReleaseDate:
+    def test_full_date_accepted(self):
+        assert _parse_release_date("2020-01-15") == "2020-01-15"
+
+    def test_year_month_returns_none(self):
+        """월까지만 있는 부분 날짜는 누락 데이터로 간주해 None 반환."""
+        assert _parse_release_date("2020-01") is None
+
+    def test_year_only_returns_none(self):
+        """연도만 있는 부분 날짜는 누락 데이터로 간주해 None 반환."""
+        assert _parse_release_date("2020") is None
+
+    def test_none_returns_none(self):
+        assert _parse_release_date(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert _parse_release_date("") is None
+
+    def test_unknown_format_returns_none(self):
+        assert _parse_release_date("January 2020") is None
 
 
 class TestGetRepresentativeReleaseMbid:
@@ -122,6 +146,39 @@ class TestFetchCoverArtUrl:
 
         with pytest.raises(requests.HTTPError):
             _fetch_cover_art_url("err-mbid")
+
+    @patch("collectors.release.requests.get")
+    @patch("collectors.release.time.sleep")
+    def test_retries_on_network_error_then_succeeds(self, mock_sleep, mock_get):
+        """네트워크 오류 후 재시도에서 성공 시 Location 반환해야 한다."""
+        fail_response = MagicMock()
+        fail_response.status_code = 503
+        fail_response.raise_for_status.side_effect = requests.RequestException("503")
+
+        ok_response = MagicMock()
+        ok_response.status_code = 307
+        ok_response.headers = {"Location": "https://archive.org/image.jpg"}
+
+        mock_get.side_effect = [fail_response, ok_response]
+
+        result = _fetch_cover_art_url("some-mbid")
+
+        assert result == "https://archive.org/image.jpg"
+        assert mock_get.call_count == 2
+
+    @patch("collectors.release.requests.get")
+    @patch("collectors.release.time.sleep")
+    def test_raises_after_three_retries(self, mock_sleep, mock_get):
+        """3회 재시도 모두 실패하면 예외를 전파해야 한다."""
+        fail_response = MagicMock()
+        fail_response.status_code = 503
+        fail_response.raise_for_status.side_effect = requests.RequestException("503")
+        mock_get.return_value = fail_response
+
+        with pytest.raises(requests.RequestException):
+            _fetch_cover_art_url("some-mbid")
+
+        assert mock_get.call_count == 3
 
     @patch("collectors.release.requests.get")
     @patch("collectors.release.time.sleep")
@@ -520,3 +577,33 @@ class TestSaveReleases:
             if "INSERT INTO track" in str(c.args[0])
         ]
         assert len(track_inserts) == 1
+
+    def test_one_failure_does_not_rollback_others(self):
+        """한 릴리즈 INSERT 실패가 다른 릴리즈 저장에 영향을 주지 않아야 한다."""
+        from sqlalchemy.exc import SQLAlchemyError
+
+        ok_session = MagicMock()
+        ok_session.execute.return_value.fetchone.return_value = (1,)
+
+        fail_session = MagicMock()
+        fail_session.execute.side_effect = SQLAlchemyError("duplicate key")
+
+        sessions = [ok_session, fail_session, ok_session]
+        call_count = {"n": -1}
+
+        def make_ctx():
+            call_count["n"] += 1
+            ctx = MagicMock()
+            ctx.__enter__ = MagicMock(return_value=sessions[call_count["n"]])
+            ctx.__exit__ = MagicMock(return_value=False)
+            return ctx
+
+        releases = [
+            {"release_group_mbid": "rg-ok", "artist_mbid": "a-1", "title": "OK", "type": "Album",
+             "first_release_date": None, "cover_url": None, "tracks": []},
+            {"release_group_mbid": "rg-fail", "artist_mbid": "a-1", "title": "Fail", "type": "Album",
+             "first_release_date": None, "cover_url": None, "tracks": []},
+        ]
+
+        with patch("db.repository.get_session", side_effect=make_ctx):
+            save_releases(releases)

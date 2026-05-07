@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -49,7 +50,7 @@ def save_artists(artists: list[dict]) -> None:
                         text("""
                             INSERT INTO artist_alias (artist_id, name, locale)
                             VALUES (:artist_id, :name, :locale)
-                            ON CONFLICT DO NOTHING
+                            ON CONFLICT (artist_id, name) DO NOTHING
                         """),
                         {"artist_id": artist_id, "name": alias["name"], "locale": alias["locale"]},
                     )
@@ -59,7 +60,7 @@ def save_artists(artists: list[dict]) -> None:
                         text("""
                             INSERT INTO artist_url (artist_id, type, url)
                             VALUES (:artist_id, :type, :url)
-                            ON CONFLICT DO NOTHING
+                            ON CONFLICT (artist_id, url) DO NOTHING
                         """),
                         {"artist_id": artist_id, "type": url_rel["type"], "url": url_rel["url"]},
                     )
@@ -72,69 +73,76 @@ def save_artists(artists: list[dict]) -> None:
 
 
 def save_releases(releases: list[dict]) -> None:
-    """수집된 릴리즈 목록을 DB에 저장한다. first_release_date 기준 미존재 항목만 INSERT."""
-    with get_session() as session:
-        artist_id_cache: dict = {}
-        for release in releases:
-            artist_mbid = release["artist_mbid"]
-            if artist_mbid not in artist_id_cache:
-                artist_row = session.execute(
-                    text("SELECT id FROM artist WHERE mbid = :mbid"),
-                    {"mbid": artist_mbid},
-                ).fetchone()
-                if not artist_row:
-                    logger.warning("아티스트 미존재 — 저장 건너뜀: artist_mbid=%s", artist_mbid)
-                    artist_id_cache[artist_mbid] = None
-                else:
-                    artist_id_cache[artist_mbid] = artist_row[0]
+    """수집된 릴리즈 목록을 DB에 저장한다. release_group 단위 독립 트랜잭션으로 격리."""
+    artist_id_cache: dict = {}
+    saved = 0
 
-            artist_id = artist_id_cache[artist_mbid]
-            if artist_id is None:
-                continue
+    for release in releases:
+        artist_mbid = release["artist_mbid"]
 
-            rg_row = session.execute(
-                text("""
-                    INSERT INTO release_group
-                        (mbid, artist_id, title, type, first_release_date, cover_url, label)
-                    VALUES
-                        (:mbid, :artist_id, :title, :type, :first_release_date, :cover_url, :label)
-                    ON CONFLICT (mbid) DO UPDATE SET mbid = EXCLUDED.mbid
-                    RETURNING id
-                """),
-                {
-                    "mbid": release["release_group_mbid"],
-                    "artist_id": artist_id,
-                    "title": release["title"],
-                    "type": release["type"],
-                    "first_release_date": release["first_release_date"],
-                    "cover_url": release["cover_url"],
-                    "label": release.get("label"),
-                },
-            ).fetchone()
+        if artist_mbid not in artist_id_cache:
+            try:
+                with get_session() as session:
+                    row = session.execute(
+                        text("SELECT id FROM artist WHERE mbid = :mbid"),
+                        {"mbid": artist_mbid},
+                    ).fetchone()
+                artist_id_cache[artist_mbid] = row[0] if row else None
+            except SQLAlchemyError as e:
+                logger.error("아티스트 ID 조회 실패 — 건너뜀: artist_mbid=%s, %s", artist_mbid, e)
+                artist_id_cache[artist_mbid] = None
 
-            if not release.get("tracks") or not rg_row:
-                continue
-            rg_id = rg_row[0]
+        artist_id = artist_id_cache[artist_mbid]
+        if artist_id is None:
+            logger.warning("아티스트 미존재 — 저장 건너뜀: artist_mbid=%s", artist_mbid)
+            continue
 
-            for track in release["tracks"]:
-                session.execute(
+        try:
+            with get_session() as session:
+                rg_row = session.execute(
                     text("""
-                        INSERT INTO track
-                            (release_group_id, mbid, title, position, length_ms)
+                        INSERT INTO release_group
+                            (mbid, artist_id, title, type, first_release_date, cover_url, label)
                         VALUES
-                            (:release_group_id, :mbid, :title, :position, :length_ms)
-                        ON CONFLICT (mbid) DO NOTHING
+                            (:mbid, :artist_id, :title, :type, :first_release_date, :cover_url, :label)
+                        ON CONFLICT (mbid) DO UPDATE SET mbid = EXCLUDED.mbid
+                        RETURNING id
                     """),
                     {
-                        "release_group_id": rg_id,
-                        "mbid": track["mbid"],
-                        "title": track["title"],
-                        "position": track["position"],
-                        "length_ms": track["length_ms"],
+                        "mbid": release["release_group_mbid"],
+                        "artist_id": artist_id,
+                        "title": release["title"],
+                        "type": release["type"],
+                        "first_release_date": release["first_release_date"],
+                        "cover_url": release["cover_url"],
+                        "label": release.get("label"),
                     },
-                )
+                ).fetchone()
 
-        logger.info("릴리즈 저장 완료: %d건 처리", len(releases))
+                if release.get("tracks") and rg_row:
+                    rg_id = rg_row[0]
+                    for track in release["tracks"]:
+                        session.execute(
+                            text("""
+                                INSERT INTO track
+                                    (release_group_id, mbid, title, position, length_ms)
+                                VALUES
+                                    (:release_group_id, :mbid, :title, :position, :length_ms)
+                                ON CONFLICT (mbid) DO NOTHING
+                            """),
+                            {
+                                "release_group_id": rg_id,
+                                "mbid": track["mbid"],
+                                "title": track["title"],
+                                "position": track["position"],
+                                "length_ms": track["length_ms"],
+                            },
+                        )
+            saved += 1
+        except SQLAlchemyError as e:
+            logger.error("릴리즈 저장 실패 — 건너뜀: mbid=%s, %s", release["release_group_mbid"], e)
+
+    logger.info("릴리즈 저장 완료: %d / %d건 처리", saved, len(releases))
 
 
 def save_concerts(concerts: list[dict]) -> None:
@@ -144,7 +152,7 @@ def save_concerts(concerts: list[dict]) -> None:
             row = session.execute(
                 text("""
                     INSERT INTO concert
-                        (kopis_id, title, cast, start_date, end_date,
+                        (kopis_id, title, "cast", start_date, end_date,
                          venue_name, venue_address, poster_url, price, status, kopis_update_date)
                     VALUES
                         (:kopis_id, :title, :cast, :start_date, :end_date,
@@ -258,10 +266,14 @@ def save_setlists(setlists: list[dict]) -> None:
 
 
 def get_all_aliases() -> list[dict]:
-    """매칭에 사용할 모든 아티스트 alias를 반환한다."""
+    """매칭에 사용할 모든 아티스트 alias를 반환한다. artist.name도 포함."""
     with get_session() as session:
         rows = session.execute(
-            text("SELECT artist_id, name FROM artist_alias")
+            text("""
+                SELECT artist_id, name FROM artist_alias
+                UNION
+                SELECT id AS artist_id, name FROM artist
+            """)
         ).fetchall()
     return [{"artist_id": row[0], "name": row[1]} for row in rows]
 
@@ -273,12 +285,80 @@ def get_all_artist_mbids() -> list[str]:
     return [row[0] for row in rows]
 
 
+def get_matched_artist_mbids() -> list[str]:
+    """승인된 공연-아티스트 매칭이 있는 아티스트 MBID를 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT DISTINCT a.mbid
+                FROM artist a
+                JOIN concert_artist ca ON ca.artist_id = a.id
+                WHERE ca.approved = true
+            """)
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
+def get_release_groups_without_cover() -> list[str]:
+    """cover_url이 없는 release_group의 mbid 목록을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT mbid FROM release_group WHERE cover_url IS NULL")
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
+def update_release_group_cover(mbid: str, cover_url: str) -> None:
+    """release_group의 cover_url을 갱신한다."""
+    with get_session() as session:
+        session.execute(
+            text("UPDATE release_group SET cover_url = :cover_url WHERE mbid = :mbid"),
+            {"cover_url": cover_url, "mbid": mbid},
+        )
+
+
+def get_concert_with_artist(concert_id: int) -> Optional[dict]:
+    """셋리스트 수집에 필요한 공연 정보(artist_mbid 포함)를 반환한다. 없으면 None."""
+    with get_session() as session:
+        row = session.execute(
+            text("""
+                SELECT c.id, c.start_date, c.end_date, a.mbid AS artist_mbid
+                FROM concert c
+                JOIN concert_artist ca ON ca.concert_id = c.id
+                JOIN artist a ON a.id = ca.artist_id
+                WHERE c.id = :concert_id
+                LIMIT 1
+            """),
+            {"concert_id": concert_id},
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "concert_id": row[0],
+        "start_date": str(row[1]) if row[1] else None,
+        "end_date": str(row[2]) if row[2] else None,
+        "artist_mbid": row[3],
+    }
+
+
+def get_concert_by_kopis_id(kopis_id: str) -> Optional[dict]:
+    """kopis_id로 공연을 조회한다. 없으면 None 반환."""
+    with get_session() as session:
+        row = session.execute(
+            text('SELECT id, title, "cast" FROM concert WHERE kopis_id = :kopis_id'),
+            {"kopis_id": kopis_id},
+        ).fetchone()
+    if row is None:
+        return None
+    return {"concert_id": row[0], "title": row[1], "cast": row[2]}
+
+
 def get_unmatched_concerts() -> list[dict]:
     """concert_artist 매칭이 없는 공연을 반환한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
-                SELECT c.id AS concert_id, c.title, c.cast
+                SELECT c.id AS concert_id, c.title, c."cast"
                 FROM concert c
                 LEFT JOIN concert_artist ca ON ca.concert_id = c.id
                 WHERE ca.concert_id IS NULL
@@ -309,20 +389,6 @@ def save_concert_artists(matches: list[dict]) -> None:
             )
     logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
 
-
-def save_to_review_queue(failures: list[dict]) -> None:
-    """매칭 실패 공연을 matching_review_queue 테이블에 PENDING 상태로 등록한다."""
-    with get_session() as session:
-        for failure in failures:
-            session.execute(
-                text("""
-                    INSERT INTO matching_review_queue (concert_id, status)
-                    VALUES (:concert_id, 'PENDING')
-                    ON CONFLICT (concert_id) DO NOTHING
-                """),
-                {"concert_id": failure["concert_id"]},
-            )
-    logger.info("매칭 검토 큐 등록 완료: %d건 처리", len(failures))
 
 
 def update_artist_is_coming() -> int:

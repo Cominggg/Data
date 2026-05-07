@@ -5,7 +5,7 @@ Jpop 아티스트 및 내한공연 수집 파이프라인 (KOPIS / MusicBrainz /
 ## 레포지토리 구조
 
 ```
-jpop-concert-collector/
+coming-data/
 ├── collectors/
 │   ├── kopis.py           # KOPIS API 수집
 │   ├── musicbrainz.py     # MusicBrainz 아티스트·멤버 수집
@@ -15,9 +15,40 @@ jpop-concert-collector/
 │   └── artist_matcher.py  # alias 기반 매칭 로직 (rapidfuzz)
 ├── db/
 │   └── repository.py      # DB 저장 (SQLAlchemy)
+├── tests/                 # pytest 단위 테스트
+├── docs/
+│   └── erd.md             # DB ERD 정의
 ├── scheduler.py           # APScheduler 진입점
-└── requirements.txt
+└── pyproject.toml
 ```
+
+## 실행 명령어
+
+```bash
+# 단위 테스트 (통합 테스트 제외, pytest.ini_options 기본값)
+pytest
+
+# 린트
+ruff check .
+
+# 전체 파이프라인 실행
+python scheduler.py
+
+# 플래그
+python scheduler.py --skip-artists   # 아티스트 수집 건너뜀
+python scheduler.py --skip-kopis     # KOPIS 수집 건너뜀
+python scheduler.py --force-artists  # 아티스트 강제 재수집
+```
+
+## 파이썬 버전
+
+- **Python 3.9.6** (런타임 및 `pyproject.toml` `requires-python = ">=3.9"`)
+- 코드 작성 시 Python 3.9 호환 문법만 사용한다:
+  - `X | Y` 타입 유니온 문법 사용 불가 → `Optional[X]` / `Union[X, Y]` 사용
+  - `dict | None` 대신 `Optional[dict]` 사용
+  - `match` 문 사용 불가 (3.10+)
+  - `str.removeprefix` / `str.removesuffix` 사용 불가 (3.9부터 가능, OK)
+  - 제네릭 내장 타입 힌트(`list[str]`, `dict[str, int]`) 3.9부터 가능 (OK)
 
 ## 코딩 규칙
 
@@ -26,6 +57,7 @@ jpop-concert-collector/
 - `.env` 커밋 금지
 - MusicBrainz 모든 요청에 `time.sleep(1.1)` 필수 (Rate Limit: 1 req/sec)
 - Cover Art Archive도 1 req/sec 제한 — 동일하게 sleep 적용
+- 린터: `ruff check .` (`line-length=100`, `select=E,F,I`)
 
 ## 외부 API 정보
 
@@ -54,6 +86,7 @@ jpop-concert-collector/
 ### ③ KOPIS 수집 (주 1회 이상)
 
 - 조건: `visit=Y`, `genrenm=대중음악(GGGA)`
+- 저장 전 `has_match()`로 alias 매칭 공연만 필터링하여 저장 (비매칭 공연은 DB에 저장하지 않음)
 - 저장: `prfnm`, `prfcast`, 날짜, 장소, `updatedate`, `relates`(예매처 링크, 없으면 빈 배열)
 - 상태 갱신: `updatedate` 변화 감지 시 `prfstate` 갱신 (매일 실행)
 
@@ -61,11 +94,13 @@ jpop-concert-collector/
 
 | 단계 | 기준 | 신뢰도 | 노출 |
 |------|------|--------|------|
-| 매칭 ① | `prfcast` → Artist alias **완전 일치** | HIGH | 관리자 승인 없이 즉시 노출 |
-| 매칭 ② | `prfnm` → alias 부분 검색, `rapidfuzz.fuzz.partial_ratio` ≥ 85 | LOW | 관리자 승인 후 노출 |
-| 실패 | 두 매칭 모두 실패 | - | 검토 큐 등록 |
+| 매칭 ① | `prfcast` 각 이름 → Artist alias **완전 일치** | HIGH | 관리자 승인 없이 즉시 노출 |
+| 매칭 ② | `prfcast` 각 이름 → `rapidfuzz.fuzz.token_set_ratio` ≥ 85 | LOW | 관리자 승인 후 노출 |
+| 매칭 ③ | `prfnm` → `rapidfuzz.fuzz.token_set_ratio` ≥ 85 (prfcast 전체 실패 시 폴백) | LOW | 관리자 승인 후 노출 |
 
-- `prfcast`에 여러 아티스트(`,` · `·` 구분) 포함 시 각각 개별 매칭 후 모두 `concert_artist`에 INSERT
+- `has_match()` 통과 공연은 반드시 매칭 ①~③ 중 하나가 성공하므로 별도 검토 큐 없음
+- `prfcast` 구분자: `,` `·` `&` `×` `・` `/` — feat/featuring/ft 표기 자동 제거
+- `prfcast`에 여러 아티스트 포함 시 각각 개별 매칭 후 모두 `concert_artist`에 INSERT
 - 승인 시 alias 학습 → 다음 사이클 자동 매칭률 향상
 
 ### ⑤ setlist.fm 수집 (공연 완료 후 1일 이내)

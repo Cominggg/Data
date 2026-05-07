@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from collectors.kopis import _fetch_detail, _parse_concert, _parse_relates, collect
+from collectors.kopis import _fetch_detail, _parse_concert, _parse_kopis_date, _parse_relates, collect
 from db.repository import save_concerts, update_concert_status
 
 
@@ -179,7 +179,7 @@ class TestKopisCollect:
         assert result[1]["relates"] == []
 
     def test_skips_item_on_detail_api_failure(self):
-        """상세 API 실패 시 해당 건을 건너뛰고 나머지 수집을 계속해야 한다."""
+        """상세 API 3회 실패 시 폴백(None/빈배열)을 적용하고 수집을 계속해야 한다."""
         item = _sample_item()
         list_resp = _make_api_response([item])
 
@@ -193,25 +193,28 @@ class TestKopisCollect:
             return response
 
         with patch("collectors.kopis.requests.get", side_effect=failing_get):
-            result = collect()
+            with patch("collectors.kopis.time.sleep"):
+                result = collect()
 
         assert len(result) == 1
         assert result[0]["kopis_id"] == "PF123456"
         assert result[0]["poster_url"] is None
         assert result[0]["venue_address"] is None
+        assert result[0]["price"] is None
+        assert result[0]["relates"] == []
 
     def test_detects_status_change_by_updatedate(self):
         """update_concert_status가 호출되면 updatedate 변화를 감지해 prfstate를 갱신한다."""
         mock_session = MagicMock()
         mock_session.execute.return_value.fetchone.return_value = (
-            "2024.01.10 00:00:00",
+            "2024-01-10",
         )
 
         concerts = [
             {
                 "kopis_id": "PF123456",
                 "prfstate": "공연완료",
-                "updatedate": "2024.01.20 12:00:00",
+                "updatedate": "2024-01-20",
             }
         ]
 
@@ -225,6 +228,35 @@ class TestKopisCollect:
             if "UPDATE" in str(c.args[0])
         ]
         assert len(update_calls) == 1
+
+
+class TestKopisDetailRetry:
+    def test_retries_on_network_error_then_succeeds(self):
+        """상세 API 네트워크 오류 후 재시도에서 성공 시 결과에 포함되어야 한다."""
+        item = _sample_item()
+        list_resp = _make_api_response([item])
+        detail_resp = _make_detail_response("PF123456", poster="http://poster.jpg")
+
+        call_count = {"n": 0}
+
+        def flaky_get(url, params=None, **kwargs):
+            response = MagicMock()
+            response.raise_for_status = MagicMock()
+            if url == "http://kopis.or.kr/openApi/restful/pblprfr":
+                response.json.return_value = list_resp
+                return response
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                response.raise_for_status.side_effect = requests.ConnectionError("timeout")
+            else:
+                response.json.return_value = detail_resp
+            return response
+
+        with patch("collectors.kopis.requests.get", side_effect=flaky_get):
+            with patch("collectors.kopis.time.sleep"):
+                result = collect()
+
+        assert result[0]["poster_url"] == "http://poster.jpg"
 
 
 class TestFetchDetail:
@@ -335,6 +367,41 @@ class TestFetchDetail:
                 _fetch_detail("PF123456")
 
 
+class TestParseKopisDate:
+    def test_date_only_normalized(self):
+        assert _parse_kopis_date("2024.01.15") == "2024-01-15"
+
+    def test_datetime_string_strips_time(self):
+        assert _parse_kopis_date("2024.01.15 12:00:00") == "2024-01-15"
+
+    def test_none_returns_none(self):
+        assert _parse_kopis_date(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert _parse_kopis_date("") is None
+
+    def test_unknown_format_returns_none(self):
+        assert _parse_kopis_date("2024-01-15") is None
+
+    def test_parse_concert_applies_normalization(self):
+        """_parse_concert 결과에서 날짜 필드가 YYYY-MM-DD 형식이어야 한다."""
+        item = {
+            "mt20id": "PF123456",
+            "prfnm": "공연명",
+            "prfcast": "아티스트",
+            "prfpdfrom": "2024.01.01",
+            "prfpdto": "2024.01.31",
+            "fcltynm": "장소",
+            "prfstate": "공연예정",
+            "updatedate": "2024.01.15 12:00:00",
+            "relates": None,
+        }
+        result = _parse_concert(item)
+        assert result["prfpdfrom"] == "2024-01-01"
+        assert result["prfpdto"] == "2024-01-31"
+        assert result["updatedate"] == "2024-01-15"
+
+
 class TestParseRelates:
     def test_parses_relate_list(self):
         raw = {
@@ -366,11 +433,11 @@ class TestSaveConcerts:
             "kopis_id": "PF123456",
             "prfnm": "공연명",
             "prfcast": "아티스트명",
-            "prfpdfrom": "2024.01.01",
-            "prfpdto": "2024.01.31",
+            "prfpdfrom": "2024-01-01",
+            "prfpdto": "2024-01-31",
             "fcltynm": "장소명",
             "prfstate": "공연예정",
-            "updatedate": "2024.01.15 12:00:00",
+            "updatedate": "2024-01-15",
             "poster_url": None,
             "venue_address": None,
             "price": None,
@@ -534,14 +601,14 @@ class TestUpdateConcertStatus:
         """updatedate가 같으면 UPDATE가 실행되지 않아야 한다."""
         mock_session = MagicMock()
         mock_session.execute.return_value.fetchone.return_value = (
-            "2024.01.15 12:00:00",
+            "2024-01-15",
         )
 
         concerts = [
             {
                 "kopis_id": "PF123456",
                 "prfstate": "공연예정",
-                "updatedate": "2024.01.15 12:00:00",
+                "updatedate": "2024-01-15",
             }
         ]
 
@@ -560,14 +627,14 @@ class TestUpdateConcertStatus:
         """updatedate가 다르면 prfstate와 updatedate가 UPDATE되어야 한다."""
         mock_session = MagicMock()
         mock_session.execute.return_value.fetchone.return_value = (
-            "2024.01.10 00:00:00",
+            "2024-01-10",
         )
 
         concerts = [
             {
                 "kopis_id": "PF123456",
                 "prfstate": "공연완료",
-                "updatedate": "2024.01.20 12:00:00",
+                "updatedate": "2024-01-20",
             }
         ]
 
@@ -584,7 +651,7 @@ class TestUpdateConcertStatus:
 
         update_params = update_calls[0].args[1]
         assert update_params["status"] == "공연완료"
-        assert update_params["kopis_update_date"] == "2024.01.20 12:00:00"
+        assert update_params["kopis_update_date"] == "2024-01-20"
 
 
 class TestKopisHttpErrors:

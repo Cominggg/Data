@@ -17,6 +17,7 @@ class TestRunInitialCollect:
     def test_calls_collect_artists(self):
         """collect_artists가 1회 호출되어야 한다."""
         with (
+            patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]) as mock_collect,
             patch("scheduler.save_artists"),
             patch("scheduler.release.collect_releases", return_value=[]),
@@ -30,6 +31,7 @@ class TestRunInitialCollect:
         """save_artists가 collect_artists 결과로 호출되어야 한다."""
         artists = [{"mbid": "mbid-1", "name": "아이유"}]
         with (
+            patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=artists),
             patch("scheduler.save_artists") as mock_save,
             patch("scheduler.release.collect_releases", return_value=[]),
@@ -40,10 +42,10 @@ class TestRunInitialCollect:
         mock_save.assert_called_once_with(artists)
 
     def test_collects_releases_for_each_artist(self):
-        """각 아티스트 MBID로 collect_releases가 호출되어야 한다."""
-        artists = [{"mbid": "mbid-1"}, {"mbid": "mbid-2"}]
+        """DB에서 조회한 MBID 목록으로 collect_releases가 호출되어야 한다."""
         with (
-            patch("scheduler.musicbrainz.collect_artists", return_value=artists),
+            patch("scheduler.get_all_artist_mbids", return_value=["mbid-1", "mbid-2"]),
+            patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
             patch("scheduler.release.collect_releases", return_value=[]) as mock_collect,
             patch("scheduler.save_releases"),
@@ -56,9 +58,9 @@ class TestRunInitialCollect:
 
     def test_saves_releases_for_each_artist(self):
         """각 아티스트 릴리즈가 save_releases로 저장되어야 한다."""
-        artists = [{"mbid": "mbid-1"}, {"mbid": "mbid-2"}]
         with (
-            patch("scheduler.musicbrainz.collect_artists", return_value=artists),
+            patch("scheduler.get_all_artist_mbids", return_value=["mbid-1", "mbid-2"]),
+            patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
             patch("scheduler.release.collect_releases", return_value=[{"title": "앨범"}]),
             patch("scheduler.save_releases") as mock_save,
@@ -66,6 +68,20 @@ class TestRunInitialCollect:
             run_initial_collect()
 
         assert mock_save.call_count == 2
+
+    def test_skip_artists_skips_collect_and_save(self):
+        """--skip-artists 시 collect_artists와 save_artists가 호출되지 않아야 한다."""
+        with (
+            patch("scheduler.get_all_artist_mbids", return_value=[]),
+            patch("scheduler.musicbrainz.collect_artists") as mock_collect,
+            patch("scheduler.save_artists") as mock_save,
+            patch("scheduler.release.collect_releases", return_value=[]),
+            patch("scheduler.save_releases"),
+        ):
+            run_initial_collect(skip_artists=True)
+
+        mock_collect.assert_not_called()
+        mock_save.assert_not_called()
 
 
 class TestRunKopisCollectAndMatch:
