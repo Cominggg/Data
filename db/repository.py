@@ -285,6 +285,43 @@ def get_all_artist_mbids() -> list[str]:
     return [row[0] for row in rows]
 
 
+def get_all_artists() -> list[dict]:
+    """Wikipedia 수집용 아티스트 목록 (artist_id, name)을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(text("SELECT id, name FROM artist")).fetchall()
+    return [{"artist_id": row[0], "name": row[1]} for row in rows]
+
+
+def save_aliases(aliases: list[dict]) -> None:
+    """외부 소스에서 수집된 alias를 artist_alias 테이블에 저장한다. 중복 시 무시.
+
+    aliases: [{"artist_id": int, "name": str, "locale": str}]
+    """
+    saved = 0
+    with get_session() as session:
+        for alias in aliases:
+            try:
+                session.execute(
+                    text("""
+                        INSERT INTO artist_alias (artist_id, name, locale)
+                        VALUES (:artist_id, :name, :locale)
+                        ON CONFLICT (artist_id, name) DO NOTHING
+                    """),
+                    {
+                        "artist_id": alias["artist_id"],
+                        "name": alias["name"],
+                        "locale": alias["locale"],
+                    },
+                )
+                saved += 1
+            except SQLAlchemyError as e:
+                logger.error(
+                    "alias 저장 실패 — 건너뜀: artist_id=%s, name=%s, 오류=%s",
+                    alias["artist_id"], alias["name"], e,
+                )
+    logger.info("alias 저장 완료: %d / %d건 처리", saved, len(aliases))
+
+
 def get_matched_artist_mbids() -> list[str]:
     """승인된 공연-아티스트 매칭이 있는 아티스트 MBID를 반환한다."""
     with get_session() as session:
