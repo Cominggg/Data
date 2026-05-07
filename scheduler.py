@@ -4,15 +4,17 @@ import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from collectors import kopis, musicbrainz, release, setlist
+from collectors import kopis, musicbrainz, release, setlist, wikipedia
 from db.repository import (
     get_all_aliases,
     get_all_artist_mbids,
+    get_all_artists,
     get_concert_by_kopis_id,
     get_concert_with_artist,
     get_matched_artist_mbids,
     get_release_groups_without_cover,
     get_unmatched_concerts,
+    save_aliases,
     save_artists,
     save_concert_artists,
     save_concerts,
@@ -59,6 +61,8 @@ def run_initial_collect(
         artists = musicbrainz.collect_artists(skip_mbids=saved_mbids)
         save_artists(artists)
 
+    run_wikipedia_collect()
+
     if skip_kopis:
         logger.info("--skip-kopis 플래그 감지 — KOPIS 수집·매칭 건너뜀")
     else:
@@ -74,6 +78,16 @@ def run_initial_collect(
         save_releases(releases)
 
     logger.info("=== 초기 수집 완료 (나머지 릴리즈는 주간 배치로 수집) ===")
+
+
+def run_wikipedia_collect() -> None:
+    """Wikipedia 한국어 alias 수집 (초기 1회 + 주 1회, 목요일)."""
+    logger.info("=== Wikipedia 한국어 alias 수집 잡 시작 ===")
+    artists = get_all_artists()
+    aliases = wikipedia.collect_korean_aliases(artists)
+    if aliases:
+        save_aliases(aliases)
+    logger.info("=== Wikipedia 한국어 alias 수집 잡 완료 ===")
 
 
 def run_kopis_collect_and_match() -> None:
@@ -209,6 +223,7 @@ def _build_scheduler() -> BackgroundScheduler:
     scheduler.add_job(run_status_update, "cron", hour=4)
     scheduler.add_job(run_release_update, "cron", day_of_week="tue", hour=5)
     scheduler.add_job(run_cover_art_update, "cron", day_of_week="wed", hour=5)
+    scheduler.add_job(run_wikipedia_collect, "cron", day_of_week="thu", hour=3)
     scheduler.add_job(run_setlist_collect, "cron", hour=6)
     return scheduler
 
