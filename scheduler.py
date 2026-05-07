@@ -192,7 +192,7 @@ def collect_and_save_setlist(concert_id: int) -> bool:
     """단건 공연의 셋리스트를 수집해 DB에 저장한다. 성공 시 True 반환."""
     concert = get_concert_with_artist(concert_id)
     if concert is None:
-        logger.warning("공연 조회 실패 또는 승인된 아티스트 없음: concert_id=%d", concert_id)
+        logger.warning("공연 조회 실패: concert_id=%d", concert_id)
         return False
     result = setlist.collect_for_concert(concert)
     if result is None:

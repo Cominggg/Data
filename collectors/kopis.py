@@ -52,7 +52,11 @@ def _text(elem: ET.Element, tag: str) -> Optional[str]:
 def _get(params: dict) -> ET.Element:
     response = requests.get(_BASE_URL, params=params, timeout=30)
     response.raise_for_status()
-    return ET.fromstring(response.content)
+    try:
+        return ET.fromstring(response.content)
+    except ET.ParseError as e:
+        logger.error("KOPIS 리스트 XML 파싱 실패: %s", e)
+        raise
 
 
 def _parse_relates(relates_elem: Optional[ET.Element]) -> list[dict]:
