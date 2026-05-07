@@ -5,7 +5,7 @@ Jpop 아티스트 및 내한공연 수집 파이프라인 (KOPIS / MusicBrainz /
 ## 레포지토리 구조
 
 ```
-jpop-concert-collector/
+coming-data/
 ├── collectors/
 │   ├── kopis.py           # KOPIS API 수집
 │   ├── musicbrainz.py     # MusicBrainz 아티스트·멤버 수집
@@ -15,8 +15,29 @@ jpop-concert-collector/
 │   └── artist_matcher.py  # alias 기반 매칭 로직 (rapidfuzz)
 ├── db/
 │   └── repository.py      # DB 저장 (SQLAlchemy)
+├── tests/                 # pytest 단위 테스트
+├── docs/
+│   └── erd.md             # DB ERD 정의
 ├── scheduler.py           # APScheduler 진입점
-└── requirements.txt
+└── pyproject.toml
+```
+
+## 실행 명령어
+
+```bash
+# 단위 테스트 (통합 테스트 제외, pytest.ini_options 기본값)
+pytest
+
+# 린트
+ruff check .
+
+# 전체 파이프라인 실행
+python scheduler.py
+
+# 플래그
+python scheduler.py --skip-artists   # 아티스트 수집 건너뜀
+python scheduler.py --skip-kopis     # KOPIS 수집 건너뜀
+python scheduler.py --force-artists  # 아티스트 강제 재수집
 ```
 
 ## 파이썬 버전
@@ -36,6 +57,7 @@ jpop-concert-collector/
 - `.env` 커밋 금지
 - MusicBrainz 모든 요청에 `time.sleep(1.1)` 필수 (Rate Limit: 1 req/sec)
 - Cover Art Archive도 1 req/sec 제한 — 동일하게 sleep 적용
+- 린터: `ruff check .` (`line-length=100`, `select=E,F,I`)
 
 ## 외부 API 정보
 
