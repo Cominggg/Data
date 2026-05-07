@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 _API_URL = "https://ko.wikipedia.org/w/api.php"
 _RATE_LIMIT_SLEEP = 0.5
 _KOREAN_RANGE = range(0xAC00, 0xD7A4)  # 가–힣
+_USER_AGENT = os.environ.get("MUSICBRAINZ_USER_AGENT", "coming/1.0")
+_HEADERS = {"User-Agent": _USER_AGENT}
 
 
 def _is_korean(text: str) -> bool:
@@ -27,7 +33,7 @@ def _fetch_redirects(name: str) -> list[str]:
     }
     try:
         time.sleep(_RATE_LIMIT_SLEEP)
-        resp = requests.get(_API_URL, params=params, timeout=10)
+        resp = requests.get(_API_URL, params=params, headers=_HEADERS, timeout=10)
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as e:
