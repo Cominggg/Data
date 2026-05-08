@@ -81,7 +81,6 @@ CREATE TABLE concert_artist (
     artist_id bigint NOT NULL REFERENCES artist(id),
     confidence varchar(10) NOT NULL,
     matched_by varchar(20) NOT NULL,
-    approved boolean NOT NULL,
     created_at timestamp,
     UNIQUE (concert_id, artist_id)
 );
@@ -167,7 +166,7 @@ CREATE TABLE inquiry (
 | `user_follow_artist` | 유저 아티스트 팔로우 |
 | `concert` | KOPIS 수집 공연 (공연장 정보 텍스트 포함) |
 | `concert_booking_link` | 예매처 링크 |
-| `concert_artist` | 공연-아티스트 매칭 결과 |
+| `concert_artist` | 공연-아티스트 매칭 결과 (confidence=HIGH가 UI 노출 기준) |
 | `concert_status_log` | 공연 상태 변경 이력 |
 | `user_concert_calendar` | 유저 공연 일정 저장 |
 | `setlist` | setlist.fm 수집 셋리스트 |
@@ -193,3 +192,4 @@ CREATE TABLE inquiry (
 | 2026-05-04 | artist_alias에 UNIQUE(artist_id, name) 추가 — 동일 alias 중복 INSERT 방지 |
 | 2026-05-04 | artist_url에 UNIQUE(artist_id, url) 추가 — 동일 URL 중복 INSERT 방지 |
 | 2026-05-07 | matching_review_queue 테이블 제거 — has_match 필터로 매칭 실패 경로 소멸 |
+| 2026-05-08 | concert_artist.approved 컬럼 제거 — confidence='HIGH'가 단일 노출 기준으로 통합 |

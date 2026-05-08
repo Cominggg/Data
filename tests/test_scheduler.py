@@ -86,15 +86,15 @@ class TestRunInitialCollect:
 
 class TestRunKopisCollectAndMatch:
     def test_collects_and_saves_concerts(self):
-        """kopis.collect 후 save_concerts가 호출되어야 한다."""
+        """kopis.collect 후 has_match 통과 공연이 save_concerts로 저장되어야 한다."""
         concerts = [{"kopis_id": "PF001"}]
         with (
             patch("scheduler.kopis.collect", return_value=concerts),
             patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=True),
             patch("scheduler.get_unmatched_concerts", return_value=[]),
             patch("scheduler.save_concert_artists"),
-            patch("scheduler.save_to_review_queue"),
             patch("scheduler.update_artist_is_coming"),
         ):
             run_kopis_collect_and_match()
@@ -111,7 +111,6 @@ class TestRunKopisCollectAndMatch:
             patch("scheduler.get_all_aliases", return_value=aliases),
             patch("scheduler.get_unmatched_concerts", return_value=unmatched),
             patch("scheduler.save_concert_artists") as mock_save_ca,
-            patch("scheduler.save_to_review_queue"),
             patch("scheduler.update_artist_is_coming"),
         ):
             run_kopis_collect_and_match()
@@ -121,25 +120,6 @@ class TestRunKopisCollectAndMatch:
         assert len(saved) == 1
         assert saved[0]["concert_id"] == 1
         assert saved[0]["artist_id"] == 10
-
-    def test_saves_to_review_queue_on_match_failure(self):
-        """매칭 실패 공연이 review_queue에 등록되어야 한다."""
-        unmatched = [{"concert_id": 99, "title": "알 수 없는 공연 xyzxyz", "cast": "미상"}]
-        aliases = [{"artist_id": 1, "name": "아이유"}]
-        with (
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.save_concerts"),
-            patch("scheduler.get_all_aliases", return_value=aliases),
-            patch("scheduler.get_unmatched_concerts", return_value=unmatched),
-            patch("scheduler.save_concert_artists"),
-            patch("scheduler.save_to_review_queue") as mock_rq,
-            patch("scheduler.update_artist_is_coming"),
-        ):
-            run_kopis_collect_and_match()
-
-        mock_rq.assert_called_once()
-        failures = mock_rq.call_args[0][0]
-        assert any(f["concert_id"] == 99 for f in failures)
 
     def test_updates_is_coming_after_match(self):
         """매칭 성공 후 update_artist_is_coming이 인자 없이 호출되어야 한다."""
@@ -151,7 +131,6 @@ class TestRunKopisCollectAndMatch:
             patch("scheduler.get_all_aliases", return_value=aliases),
             patch("scheduler.get_unmatched_concerts", return_value=unmatched),
             patch("scheduler.save_concert_artists"),
-            patch("scheduler.save_to_review_queue"),
             patch("scheduler.update_artist_is_coming") as mock_update,
         ):
             run_kopis_collect_and_match()
@@ -166,7 +145,6 @@ class TestRunKopisCollectAndMatch:
             patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.get_unmatched_concerts", return_value=[]),
             patch("scheduler.save_concert_artists") as mock_save_ca,
-            patch("scheduler.save_to_review_queue"),
             patch("scheduler.update_artist_is_coming"),
         ):
             run_kopis_collect_and_match()
@@ -278,10 +256,10 @@ class TestRunSetlistCollect:
 
 
 class TestBuildScheduler:
-    def test_registers_four_jobs(self):
-        """스케줄러에 4개의 잡이 등록되어야 한다."""
+    def test_registers_six_jobs(self):
+        """스케줄러에 6개의 잡이 등록되어야 한다."""
         scheduler = _build_scheduler()
-        assert len(scheduler.get_jobs()) == 4
+        assert len(scheduler.get_jobs()) == 6
 
     def test_includes_monday_job(self):
         """월요일 KOPIS 수집·매칭 잡이 등록되어야 한다."""

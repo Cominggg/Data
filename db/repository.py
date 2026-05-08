@@ -209,7 +209,7 @@ def get_completed_concerts() -> list[dict]:
                 SELECT DISTINCT c.id AS concert_id, c.title, c.start_date, c.end_date,
                                 a.mbid AS artist_mbid
                 FROM concert c
-                JOIN concert_artist ca ON ca.concert_id = c.id AND ca.approved = true
+                JOIN concert_artist ca ON ca.concert_id = c.id AND ca.confidence = 'HIGH'
                 JOIN artist a ON a.id = ca.artist_id
                 LEFT JOIN setlist s ON s.concert_id = c.id
                 WHERE c.status = '공연완료'
@@ -323,14 +323,14 @@ def save_aliases(aliases: list[dict]) -> None:
 
 
 def get_matched_artist_mbids() -> list[str]:
-    """승인된 공연-아티스트 매칭이 있는 아티스트 MBID를 반환한다."""
+    """HIGH confidence 매칭이 있는 아티스트 MBID를 반환한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
                 SELECT DISTINCT a.mbid
                 FROM artist a
                 JOIN concert_artist ca ON ca.artist_id = a.id
-                WHERE ca.approved = true
+                WHERE ca.confidence = 'HIGH'
             """)
         ).fetchall()
     return [row[0] for row in rows]
@@ -405,15 +405,15 @@ def get_unmatched_concerts() -> list[dict]:
 
 
 def save_concert_artists(matches: list[dict]) -> None:
-    """매칭 결과를 concert_artist 테이블에 저장한다. HIGH confidence는 즉시 승인."""
+    """매칭 결과를 concert_artist 테이블에 저장한다."""
     with get_session() as session:
         for match in matches:
             session.execute(
                 text("""
                     INSERT INTO concert_artist
-                        (concert_id, artist_id, confidence, matched_by, approved)
+                        (concert_id, artist_id, confidence, matched_by)
                     VALUES
-                        (:concert_id, :artist_id, :confidence, :matched_by, :approved)
+                        (:concert_id, :artist_id, :confidence, :matched_by)
                     ON CONFLICT (concert_id, artist_id) DO NOTHING
                 """),
                 {
@@ -421,7 +421,6 @@ def save_concert_artists(matches: list[dict]) -> None:
                     "artist_id": match["artist_id"],
                     "confidence": match["confidence"],
                     "matched_by": match["matched_by"],
-                    "approved": match["approved"],
                 },
             )
     logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
@@ -429,7 +428,7 @@ def save_concert_artists(matches: list[dict]) -> None:
 
 
 def update_artist_is_coming() -> int:
-    """오늘 이후 approved 공연 보유 여부에 따라 artist.is_coming을 갱신한다.
+    """오늘 이후 HIGH confidence 공연 보유 여부에 따라 artist.is_coming을 갱신한다.
 
     값이 실제로 바뀌는 행만 UPDATE해 불필요한 쓰기 I/O를 줄인다.
     반환값: 갱신된 행 수
@@ -446,7 +445,7 @@ def update_artist_is_coming() -> int:
                                FROM concert_artist ca
                                JOIN concert c ON c.id = ca.concert_id
                                WHERE ca.artist_id = a.id
-                                 AND ca.approved = true
+                                 AND ca.confidence = 'HIGH'
                                  AND c.end_date >= CURRENT_DATE
                            ) AS is_coming
                     FROM artist a
