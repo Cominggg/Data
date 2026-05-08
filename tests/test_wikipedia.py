@@ -51,18 +51,33 @@ class TestFetchRedirects:
         result = _fetch_redirects("Unknown Artist")
         assert result == []
 
+    @patch("collectors.wikipedia.time.sleep")
     @patch("collectors.wikipedia.requests.get")
-    def test_returns_empty_on_http_error(self, mock_get):
+    def test_returns_empty_on_http_error(self, mock_get, mock_sleep):
         mock_get.return_value = MagicMock()
         mock_get.return_value.raise_for_status.side_effect = requests.HTTPError("404")
         result = _fetch_redirects("Some Artist")
         assert result == []
+        assert mock_get.call_count == 3
 
+    @patch("collectors.wikipedia.time.sleep")
     @patch("collectors.wikipedia.requests.get")
-    def test_returns_empty_on_connection_error(self, mock_get):
+    def test_returns_empty_on_connection_error(self, mock_get, mock_sleep):
         mock_get.side_effect = requests.ConnectionError("timeout")
         result = _fetch_redirects("Some Artist")
         assert result == []
+        assert mock_get.call_count == 3
+
+    @patch("collectors.wikipedia.time.sleep")
+    @patch("collectors.wikipedia.requests.get")
+    def test_retries_and_succeeds_on_second_attempt(self, mock_get, mock_sleep):
+        mock_get.side_effect = [
+            requests.ConnectionError("timeout"),
+            self._make_response(["호시노 겐"]),
+        ]
+        result = _fetch_redirects("Hoshino Gen")
+        assert result == ["호시노 겐"]
+        assert mock_get.call_count == 2
 
     @patch("collectors.wikipedia.requests.get")
     def test_skips_redirect_with_empty_title(self, mock_get):

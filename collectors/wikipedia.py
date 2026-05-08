@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _API_URL = "https://ko.wikipedia.org/w/api.php"
 _RATE_LIMIT_SLEEP = 0.5
+_MAX_RETRIES = 3
 _KOREAN_RANGE = range(0xAC00, 0xD7A4)  # 가–힣
 _USER_AGENT = os.environ.get("MUSICBRAINZ_USER_AGENT", "coming/1.0")
 _HEADERS = {"User-Agent": _USER_AGENT}
@@ -31,13 +32,26 @@ def _fetch_redirects(name: str) -> list[str]:
         "rdlimit": "500",
         "format": "json",
     }
-    try:
-        time.sleep(_RATE_LIMIT_SLEEP)
-        resp = requests.get(_API_URL, params=params, headers=_HEADERS, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.RequestException as e:
-        logger.warning("Wikipedia API 요청 실패 — name=%s: %s", name, e)
+    data = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            time.sleep(_RATE_LIMIT_SLEEP)
+            resp = requests.get(_API_URL, params=params, headers=_HEADERS, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except requests.RequestException as e:
+            if attempt == _MAX_RETRIES:
+                logger.warning("Wikipedia API 요청 실패 — name=%s: %s", name, e)
+                return []
+            wait = 2 ** attempt
+            logger.warning(
+                "Wikipedia API 재시도 %d/%d — %ds 후: name=%s, %s",
+                attempt, _MAX_RETRIES, wait, name, e,
+            )
+            time.sleep(wait)
+
+    if data is None:
         return []
 
     pages = data.get("query", {}).get("pages", {})
