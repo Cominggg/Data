@@ -24,7 +24,7 @@ _DEFAULT_PARAMS = {
     "visit": "Y",
     "genrenm": "GGGA",
     "rows": 100,
-    "stdate": "20230101",
+    "stdate": "20200101",
 }
 
 
