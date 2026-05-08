@@ -8,7 +8,6 @@ from db.repository import (
     get_all_artist_mbids,
     get_unmatched_concerts,
     save_concert_artists,
-    save_to_review_queue,
     update_artist_is_coming,
 )
 
@@ -21,29 +20,11 @@ def _make_session_ctx(mock_session):
 
 
 class TestSaveConcertArtists:
-    def test_high_match_sets_approved_true(self):
-        """HIGH 매칭은 approved=True로 저장되어야 한다."""
-        mock_session = MagicMock()
-        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True}])
-
-        params = mock_session.execute.call_args_list[0].args[1]
-        assert params["approved"] is True
-
-    def test_low_match_sets_approved_false(self):
-        """LOW 매칭은 approved=False로 저장되어야 한다."""
-        mock_session = MagicMock()
-        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "LOW", "matched_by": "prfnm", "approved": False}])
-
-        params = mock_session.execute.call_args_list[0].args[1]
-        assert params["approved"] is False
-
     def test_insert_uses_on_conflict_do_nothing(self):
         """INSERT SQL에 ON CONFLICT가 포함되어야 한다."""
         mock_session = MagicMock()
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True}])
+            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}])
 
         sql = str(mock_session.execute.call_args_list[0].args[0])
         assert "ON CONFLICT" in sql
@@ -52,8 +33,8 @@ class TestSaveConcertArtists:
         """여러 매칭 결과가 모두 INSERT되어야 한다."""
         mock_session = MagicMock()
         matches = [
-            {"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast", "approved": True},
-            {"concert_id": 2, "artist_id": 20, "confidence": "LOW", "matched_by": "prfnm", "approved": False},
+            {"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"},
+            {"concert_id": 2, "artist_id": 20, "confidence": "LOW", "matched_by": "prfnm"},
         ]
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
             save_concert_artists(matches)
@@ -67,34 +48,6 @@ class TestSaveConcertArtists:
             save_concert_artists([])
 
         mock_session.execute.assert_not_called()
-
-
-class TestSaveToReviewQueue:
-    def test_inserts_concert_id(self):
-        """매칭 실패 concert_id가 INSERT되어야 한다."""
-        mock_session = MagicMock()
-        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_to_review_queue([{"concert_id": 99}])
-
-        params = mock_session.execute.call_args_list[0].args[1]
-        assert params["concert_id"] == 99
-
-    def test_insert_uses_on_conflict(self):
-        """INSERT SQL에 ON CONFLICT가 포함되어야 한다."""
-        mock_session = MagicMock()
-        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_to_review_queue([{"concert_id": 1}])
-
-        sql = str(mock_session.execute.call_args_list[0].args[0])
-        assert "ON CONFLICT" in sql
-
-    def test_multiple_failures_insert_all(self):
-        """여러 실패 항목이 모두 INSERT되어야 한다."""
-        mock_session = MagicMock()
-        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_to_review_queue([{"concert_id": 1}, {"concert_id": 2}, {"concert_id": 3}])
-
-        assert mock_session.execute.call_count == 3
 
 
 class TestUpdateArtistIsComing:
