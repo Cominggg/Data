@@ -4,6 +4,7 @@ import os
 import re
 import time
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 import requests
@@ -73,6 +74,7 @@ _DETAIL_FALLBACK = {
     "prfcast": None, "poster_url": None, "venue_address": None, "price": None,
     "relates": [], "updatedate": None, "visit": None,
 }
+_DETAIL_WORKERS = 8
 
 
 def _fetch_detail(kopis_id: str) -> dict:
@@ -144,6 +146,35 @@ def collect_by_id(kopis_id: str) -> Optional[dict]:
     }
 
 
+def _fetch_and_merge(concert: dict) -> Optional[dict]:
+    """상세 API를 호출해 concert에 병합. visit!=Y이면 None 반환."""
+    for attempt in range(1, 4):
+        try:
+            detail = _fetch_detail(concert["kopis_id"])
+            concert.update(detail)
+            break
+        except requests.RequestException as e:
+            if attempt == 3:
+                logger.warning(
+                    "상세 API 3회 실패 — 폴백 적용: kopis_id=%s, %s",
+                    concert["kopis_id"], e,
+                )
+                concert.update({
+                    "poster_url": None, "venue_address": None,
+                    "price": None, "relates": [], "updatedate": None, "visit": None,
+                })
+            else:
+                logger.debug(
+                    "상세 API 재시도 %d/3: kopis_id=%s, %s",
+                    attempt, concert["kopis_id"], e,
+                )
+                time.sleep(5 * attempt)
+    if concert.get("visit") != "Y":
+        logger.debug("내한 공연 아님 — 제외: kopis_id=%s, prfnm=%s", concert["kopis_id"], concert["prfnm"])
+        return None
+    return concert
+
+
 def collect() -> list[dict]:
     """KOPIS에서 내한공연 목록을 전 페이지 순회해 반환한다."""
     logger.info("KOPIS 공연 수집 시작")
@@ -174,35 +205,18 @@ def collect() -> list[dict]:
         if not batch:
             break
 
-        for item in batch:
-            if _text(item, "genrenm") != "대중음악":
-                continue
-            concert = _parse_concert(item)
-            for attempt in range(1, 4):
-                try:
-                    detail = _fetch_detail(concert["kopis_id"])
-                    concert.update(detail)
-                    break
-                except requests.RequestException as e:
-                    if attempt == 3:
-                        logger.warning(
-                            "상세 API 3회 실패 — 폴백 적용: kopis_id=%s, %s",
-                            concert["kopis_id"], e,
-                        )
-                        concert.update({
-                            "poster_url": None, "venue_address": None,
-                            "price": None, "relates": [], "updatedate": None, "visit": None,
-                        })
-                    else:
-                        logger.debug(
-                            "상세 API 재시도 %d/3: kopis_id=%s, %s",
-                            attempt, concert["kopis_id"], e,
-                        )
-                        time.sleep(5 * attempt)
-            if concert.get("visit") != "Y":
-                logger.debug("내한 공연 아님 — 제외: kopis_id=%s, prfnm=%s", concert["kopis_id"], concert["prfnm"])
-                continue
-            results.append(concert)
+        concerts_to_fetch = [
+            _parse_concert(item)
+            for item in batch
+            if _text(item, "genrenm") == "대중음악"
+        ]
+
+        with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as pool:
+            futures = [pool.submit(_fetch_and_merge, c) for c in concerts_to_fetch]
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    results.append(result)
 
         logger.info("KOPIS 수집 중: cpage=%d, 누적 %d건", cpage, len(results))
         cpage += 1
