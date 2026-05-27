@@ -20,8 +20,8 @@ def save_artists(artists: list[dict]) -> None:
             with get_session() as session:
                 row = session.execute(
                     text("""
-                        INSERT INTO artist (mbid, name, sort_name, debut_date)
-                        VALUES (:mbid, :name, :sort_name, :debut_date)
+                        INSERT INTO artist (mbid, name, sort_name)
+                        VALUES (:mbid, :name, :sort_name)
                         ON CONFLICT (mbid) DO NOTHING
                         RETURNING id
                     """),
@@ -29,7 +29,6 @@ def save_artists(artists: list[dict]) -> None:
                         "mbid": artist["mbid"],
                         "name": artist["name"],
                         "sort_name": artist["sort_name"],
-                        "debut_date": artist.get("debut_date"),
                     },
                 ).fetchone()
 

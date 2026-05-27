@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import time
-from typing import Optional
 from urllib.parse import urlparse
 
 import requests
@@ -88,16 +86,8 @@ def _parse_url_rels(relations: list) -> list[dict]:
     return result
 
 
-def _parse_date(raw: Optional[str]) -> Optional[str]:
-    """YYYY-MM-DD 형식만 유효로 인정하고, 그 외는 None 반환."""
-    if raw and re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
-        return raw
-    return None
-
-
 def _parse_artist(detail: dict) -> dict:
     relations = detail.get("relations", [])
-    life_span = detail.get("life-span", {})
 
     return {
         "mbid": detail.get("id"),
@@ -105,7 +95,6 @@ def _parse_artist(detail: dict) -> dict:
         "sort_name": detail.get("sort-name"),
         "aliases": _parse_aliases(detail.get("aliases", [])),
         "url_rels": _parse_url_rels(relations),
-        "debut_date": _parse_date(life_span.get("begin")),
     }
 
 
