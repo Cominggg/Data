@@ -26,14 +26,14 @@ _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
 _MAX_ARTISTS = 10_000
 _MIN_LISTENERS = int(os.environ.get("LASTFM_MIN_LISTENERS", "1000"))
-_ALLOWED_URL_DOMAINS = {
-    "instagram.com",
-    "twitter.com",
-    "x.com",
-    "youtube.com",
-    "youtu.be",
-    "open.spotify.com",
-    "music.apple.com",
+_DOMAIN_TO_TYPE = {
+    "instagram.com": "Instagram",
+    "twitter.com": "Twitter",
+    "x.com": "Twitter",
+    "youtube.com": "YouTube",
+    "youtu.be": "YouTube",
+    "open.spotify.com": "Spotify",
+    "music.apple.com": "AppleMusic",
 }
 
 
@@ -81,11 +81,15 @@ def _parse_url_rels(relations: list) -> list[dict]:
         if rel.get("target-type") != "url":
             continue
         resource = rel.get("url", {}).get("resource", "")
+        if rel.get("type") == "official homepage":
+            result.append({"type": "Official", "url": resource})
+            continue
         netloc = urlparse(resource).netloc.lower()
         if netloc.startswith("www."):
             netloc = netloc[4:]
-        if netloc in _ALLOWED_URL_DOMAINS:
-            result.append({"type": rel.get("type", ""), "url": resource})
+        site_type = _DOMAIN_TO_TYPE.get(netloc)
+        if site_type:
+            result.append({"type": site_type, "url": resource})
     return result
 
 

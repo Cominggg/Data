@@ -45,7 +45,7 @@ class TestParseUrlRels:
             }
         ]
         result = _parse_url_rels(relations)
-        assert result == [{"type": "social network", "url": "https://www.instagram.com/artist"}]
+        assert result == [{"type": "Instagram", "url": "https://www.instagram.com/artist"}]
 
     def test_allows_all_target_platforms(self):
         relations = [
@@ -59,9 +59,30 @@ class TestParseUrlRels:
         result = _parse_url_rels(relations)
         assert len(result) == 6
 
+    def test_maps_domains_to_site_names(self):
+        """도메인 기반으로 사이트 이름이 type에 저장되어야 한다."""
+        relations = [
+            {"target-type": "url", "type": "social network", "url": {"resource": "https://twitter.com/artist"}},
+            {"target-type": "url", "type": "social network", "url": {"resource": "https://x.com/artist"}},
+            {"target-type": "url", "type": "social network", "url": {"resource": "https://www.instagram.com/artist"}},
+            {"target-type": "url", "type": "youtube", "url": {"resource": "https://www.youtube.com/channel/abc"}},
+            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://open.spotify.com/artist/abc"}},
+            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://music.apple.com/artist/abc"}},
+        ]
+        result = _parse_url_rels(relations)
+        types = [r["type"] for r in result]
+        assert types == ["Twitter", "Twitter", "Instagram", "YouTube", "Spotify", "AppleMusic"]
+
+    def test_official_homepage_stored_as_official(self):
+        """official homepage type은 도메인과 무관하게 'Official'로 저장되어야 한다."""
+        relations = [
+            {"target-type": "url", "type": "official homepage", "url": {"resource": "https://artist-official.com"}},
+        ]
+        result = _parse_url_rels(relations)
+        assert result == [{"type": "Official", "url": "https://artist-official.com"}]
+
     def test_filters_disallowed_domains(self):
         relations = [
-            {"target-type": "url", "type": "official homepage", "url": {"resource": "https://example.com"}},
             {"target-type": "url", "type": "social network", "url": {"resource": "https://facebook.com/artist"}},
             {"target-type": "url", "type": "social network", "url": {"resource": "https://weibo.com/artist"}},
             {"target-type": "url", "type": "free streaming", "url": {"resource": "https://soundcloud.com/artist"}},
@@ -129,7 +150,7 @@ class TestCollectArtists:
         result = collect_artists()
         assert result == []
 
-    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=1000)
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=500)
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
     def test_skips_artist_below_listener_threshold(self, mock_search, mock_detail, mock_listeners):
