@@ -28,6 +28,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-v --cov=collectors --cov=db --cov=matchers --cov-report=term-missing -m 'not integration'"
 markers = [
     "unit: 외부 의존성 없는 순수 단위 테스트",

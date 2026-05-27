@@ -1,6 +1,7 @@
 import argparse
 import logging
 import time
+from typing import List
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -32,6 +33,12 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+_RELEASE_TYPE_ORDER = {"Album": 0, "EP": 1, "Single": 2}
+
+
+def _sort_releases(releases: List[dict]) -> List[dict]:
+    return sorted(releases, key=lambda r: _RELEASE_TYPE_ORDER.get(r.get("type", ""), 9))
 
 
 def run_initial_collect(
@@ -79,7 +86,7 @@ def run_initial_collect(
     matched_mbids = get_matched_artist_mbids()
     logger.info("매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_mbids))
     for mbid in matched_mbids:
-        releases = release.collect_releases(mbid)
+        releases = _sort_releases(release.collect_releases(mbid))
         save_releases(releases)
 
     logger.info("=== 초기 수집 완료 (나머지 릴리즈는 주간 배치로 수집) ===")
@@ -144,7 +151,7 @@ def run_release_update() -> None:
     """릴리즈 갱신 (주 1회, 화요일). 신규 항목만 INSERT."""
     logger.info("=== 릴리즈 갱신 잡 시작 ===")
     for mbid in get_all_artist_mbids():
-        releases = release.collect_releases(mbid)
+        releases = _sort_releases(release.collect_releases(mbid))
         save_releases(releases)
     logger.info("=== 릴리즈 갱신 잡 완료 ===")
 

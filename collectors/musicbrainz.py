@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import time
-from typing import Optional
 from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
+
+from collectors.lastfm import get_monthly_listeners
 
 load_dotenv()
 
@@ -25,14 +25,15 @@ _HEADERS = {
 _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
 _MAX_ARTISTS = 10_000
-_ALLOWED_URL_DOMAINS = {
-    "instagram.com",
-    "twitter.com",
-    "x.com",
-    "youtube.com",
-    "youtu.be",
-    "open.spotify.com",
-    "music.apple.com",
+_MIN_LISTENERS = int(os.environ.get("LASTFM_MIN_LISTENERS", "1000"))
+_DOMAIN_TO_TYPE = {
+    "instagram.com": "Instagram",
+    "twitter.com": "Twitter",
+    "x.com": "Twitter",
+    "youtube.com": "YouTube",
+    "youtu.be": "YouTube",
+    "open.spotify.com": "Spotify",
+    "music.apple.com": "AppleMusic",
 }
 
 
@@ -80,24 +81,20 @@ def _parse_url_rels(relations: list) -> list[dict]:
         if rel.get("target-type") != "url":
             continue
         resource = rel.get("url", {}).get("resource", "")
+        if rel.get("type") == "official homepage":
+            result.append({"type": "Official", "url": resource})
+            continue
         netloc = urlparse(resource).netloc.lower()
         if netloc.startswith("www."):
             netloc = netloc[4:]
-        if netloc in _ALLOWED_URL_DOMAINS:
-            result.append({"type": rel.get("type", ""), "url": resource})
+        site_type = _DOMAIN_TO_TYPE.get(netloc)
+        if site_type:
+            result.append({"type": site_type, "url": resource})
     return result
-
-
-def _parse_date(raw: Optional[str]) -> Optional[str]:
-    """YYYY-MM-DD 형식만 유효로 인정하고, 그 외는 None 반환."""
-    if raw and re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
-        return raw
-    return None
 
 
 def _parse_artist(detail: dict) -> dict:
     relations = detail.get("relations", [])
-    life_span = detail.get("life-span", {})
 
     return {
         "mbid": detail.get("id"),
@@ -105,7 +102,6 @@ def _parse_artist(detail: dict) -> dict:
         "sort_name": detail.get("sort-name"),
         "aliases": _parse_aliases(detail.get("aliases", [])),
         "url_rels": _parse_url_rels(relations),
-        "debut_date": _parse_date(life_span.get("begin")),
     }
 
 
@@ -147,15 +143,28 @@ def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
             for attempt in range(1, 4):
                 try:
                     detail = _fetch_artist_detail(mbid)
-                    artists.append(_parse_artist(detail))
-                    logger.info("수집 완료: %s (%s)", item.get("name"), mbid)
                     break
                 except requests.RequestException as e:
                     if attempt == 3:
                         logger.warning("아티스트 상세 수집 실패 mbid=%s: %s", mbid, e)
+                        detail = None
                     else:
                         logger.debug("아티스트 상세 재시도 %d/3 mbid=%s: %s", attempt, mbid, e)
                         time.sleep(5 * attempt)
+
+            if detail is None:
+                continue
+
+            listeners = get_monthly_listeners(mbid)
+            if listeners is not None and listeners < _MIN_LISTENERS:
+                logger.debug(
+                    "리스너 수 미달 — 건너뜀: %s (%s), listeners=%d",
+                    item.get("name"), mbid, listeners,
+                )
+                continue
+
+            artists.append(_parse_artist(detail))
+            logger.info("수집 완료: %s (%s)", item.get("name"), mbid)
 
         offset += len(batch)
         logger.info("진행: %d / %d", offset, total)

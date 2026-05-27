@@ -5,6 +5,7 @@ import pytest
 
 from scheduler import (
     _build_scheduler,
+    _sort_releases,
     run_initial_collect,
     run_kopis_collect_and_match,
     run_release_update,
@@ -284,3 +285,44 @@ class TestBuildScheduler:
         scheduler = _build_scheduler()
         job_funcs = [job.func for job in scheduler.get_jobs()]
         assert run_setlist_collect in job_funcs
+
+
+class TestSortReleases:
+    def test_album_before_single(self):
+        """Album이 Single보다 앞에 와야 한다."""
+        releases = [
+            {"type": "Single", "title": "S"},
+            {"type": "Album", "title": "A"},
+        ]
+        result = _sort_releases(releases)
+        assert result[0]["type"] == "Album"
+        assert result[1]["type"] == "Single"
+
+    def test_album_ep_single_order(self):
+        """Album → EP → Single 순서여야 한다."""
+        releases = [
+            {"type": "Single", "title": "S"},
+            {"type": "EP", "title": "E"},
+            {"type": "Album", "title": "A"},
+        ]
+        result = _sort_releases(releases)
+        assert [r["type"] for r in result] == ["Album", "EP", "Single"]
+
+    def test_unknown_type_goes_last(self):
+        """알 수 없는 타입은 맨 뒤에 위치해야 한다."""
+        releases = [
+            {"type": "Live", "title": "L"},
+            {"type": "Album", "title": "A"},
+        ]
+        result = _sort_releases(releases)
+        assert result[0]["type"] == "Album"
+        assert result[1]["type"] == "Live"
+
+    def test_preserves_all_releases(self):
+        """정렬 후 릴리즈 개수가 유지되어야 한다."""
+        releases = [{"type": t} for t in ["Single", "Album", "EP", "Live"]]
+        assert len(_sort_releases(releases)) == 4
+
+    def test_empty_list(self):
+        """빈 리스트를 넘기면 빈 리스트를 반환해야 한다."""
+        assert _sort_releases([]) == []

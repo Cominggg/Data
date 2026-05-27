@@ -16,8 +16,6 @@ coming-data/
 ├── db/
 │   └── repository.py      # DB 저장 (SQLAlchemy)
 ├── tests/                 # pytest 단위 테스트
-├── docs/
-│   └── erd.md             # DB ERD 정의
 ├── scheduler.py           # APScheduler 진입점
 └── pyproject.toml
 ```
