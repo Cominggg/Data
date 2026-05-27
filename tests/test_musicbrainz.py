@@ -84,30 +84,19 @@ class TestParseArtist:
             "sort-name": "Artist, Test",
             "aliases": [{"name": "테스트", "locale": "ko"}],
             "relations": [],
-            "life-span": {"begin": "2010-01-01"},
         }
         result = _parse_artist(detail)
         assert result["mbid"] == "mbid-artist"
         assert result["name"] == "Test Artist"
-        assert result["debut_date"] == "2010-01-01"
         assert result["aliases"] == [{"name": "테스트", "locale": "ko"}]
-
-    def test_debut_date_is_none_when_absent(self):
-        detail = {
-            "id": "x",
-            "name": "X",
-            "sort-name": "X",
-            "aliases": [],
-            "relations": [],
-            "life-span": {},
-        }
-        assert _parse_artist(detail)["debut_date"] is None
+        assert "debut_date" not in result
 
 
 class TestCollectArtists:
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=10000)
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
-    def test_collects_single_page(self, mock_search, mock_detail):
+    def test_collects_single_page(self, mock_search, mock_detail, mock_listeners):
         mock_search.return_value = {
             "artists": [{"id": "mbid-1", "name": "Artist1"}],
             "count": 1,
@@ -118,7 +107,6 @@ class TestCollectArtists:
             "sort-name": "Artist1",
             "aliases": [],
             "relations": [],
-            "life-span": {},
         }
         result = collect_artists()
         assert len(result) == 1
@@ -132,13 +120,46 @@ class TestCollectArtists:
         mock_detail.assert_not_called()
         assert result == []
 
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=10000)
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
-    def test_continues_on_http_error(self, mock_search, mock_detail):
+    def test_continues_on_http_error(self, mock_search, mock_detail, mock_listeners):
         mock_search.return_value = {"artists": [{"id": "mbid-err"}], "count": 1}
         mock_detail.side_effect = requests.HTTPError("404")
         result = collect_artists()
         assert result == []
+
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=1000)
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    @patch("collectors.musicbrainz._search_artists")
+    def test_skips_artist_below_listener_threshold(self, mock_search, mock_detail, mock_listeners):
+        """월간 리스너가 임계값 미만이면 아티스트를 수집하지 않아야 한다."""
+        mock_search.return_value = {
+            "artists": [{"id": "mbid-low", "name": "LowArtist"}],
+            "count": 1,
+        }
+        mock_detail.return_value = {
+            "id": "mbid-low", "name": "LowArtist", "sort-name": "LowArtist",
+            "aliases": [], "relations": [],
+        }
+        result = collect_artists()
+        assert result == []
+
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=None)
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    @patch("collectors.musicbrainz._search_artists")
+    def test_includes_artist_when_listeners_unavailable(self, mock_search, mock_detail, mock_listeners):
+        """Last.fm 조회 실패(None) 시 아티스트를 수집해야 한다."""
+        mock_search.return_value = {
+            "artists": [{"id": "mbid-1", "name": "Artist1"}],
+            "count": 1,
+        }
+        mock_detail.return_value = {
+            "id": "mbid-1", "name": "Artist1", "sort-name": "Artist1",
+            "aliases": [], "relations": [],
+        }
+        result = collect_artists()
+        assert len(result) == 1
 
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
@@ -149,21 +170,18 @@ class TestCollectArtists:
         mock_search.assert_called_once()
 
     @patch("collectors.musicbrainz._MAX_ARTISTS", 1)
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=10000)
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
-    def test_stops_at_max_artists_limit(self, mock_search, mock_detail):
+    def test_stops_at_max_artists_limit(self, mock_search, mock_detail, mock_listeners):
         """_MAX_ARTISTS 상한 도달 시 다음 페이지를 요청하지 않고 중단해야 한다."""
         mock_search.return_value = {
             "artists": [{"id": "mbid-1", "name": "Artist1"}],
             "count": 10_000,
         }
         mock_detail.return_value = {
-            "id": "mbid-1",
-            "name": "Artist1",
-            "sort-name": "Artist1",
-            "aliases": [],
-            "relations": [],
-            "life-span": {},
+            "id": "mbid-1", "name": "Artist1", "sort-name": "Artist1",
+            "aliases": [], "relations": [],
         }
         result = collect_artists()
         assert len(result) == 1
