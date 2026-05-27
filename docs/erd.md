@@ -85,16 +85,6 @@ CREATE TABLE concert_artist (
     UNIQUE (concert_id, artist_id)
 );
 
-CREATE TABLE concert_status_log (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    concert_id bigint NOT NULL REFERENCES concert(id),
-    previous_status varchar(20),
-    new_status varchar(20) NOT NULL,
-    changed_by varchar(20) NOT NULL,
-    admin_user_id bigint REFERENCES "user"(id),
-    changed_at timestamp NOT NULL
-);
-
 CREATE TABLE user_concert_calendar (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id bigint NOT NULL REFERENCES "user"(id),
@@ -143,8 +133,7 @@ CREATE TABLE inquiry (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id bigint NOT NULL REFERENCES "user"(id),
     type varchar(20) NOT NULL,
-    concert_id bigint REFERENCES concert(id),
-    artist_id bigint REFERENCES artist(id),
+    target_id bigint NOT NULL,
     title varchar(255) NOT NULL,
     content text NOT NULL,
     status varchar(20) NOT NULL,
@@ -167,7 +156,6 @@ CREATE TABLE inquiry (
 | `concert` | KOPIS 수집 공연 (공연장 정보 텍스트 포함) |
 | `concert_booking_link` | 예매처 링크 |
 | `concert_artist` | 공연-아티스트 매칭 결과 (confidence=HIGH가 UI 노출 기준) |
-| `concert_status_log` | 공연 상태 변경 이력 |
 | `user_concert_calendar` | 유저 공연 일정 저장 |
 | `setlist` | setlist.fm 수집 셋리스트 |
 | `setlist_track` | 셋리스트 트랙 목록 |
@@ -193,3 +181,5 @@ CREATE TABLE inquiry (
 | 2026-05-04 | artist_url에 UNIQUE(artist_id, url) 추가 — 동일 URL 중복 INSERT 방지 |
 | 2026-05-07 | matching_review_queue 테이블 제거 — has_match 필터로 매칭 실패 경로 소멸 |
 | 2026-05-08 | concert_artist.approved 컬럼 제거 — confidence='HIGH'가 단일 노출 기준으로 통합 |
+| 2026-05-09 | concert_status_log 테이블 제거 — 파이프라인 미사용, 상태 변경이 KOPIS 자동 수집으로만 발생 |
+| 2026-05-22 | inquiry.concert_id·artist_id → target_id(bigint NOT NULL) 단일 컬럼으로 통합 — type 컬럼으로 참조 대상 구분 (CONCERT·SETLIST=concert.id, ARTIST=artist.id) |
