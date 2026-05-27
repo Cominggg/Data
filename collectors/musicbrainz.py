@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 
+from collectors.lastfm import get_monthly_listeners
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ _HEADERS = {
 _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
 _MAX_ARTISTS = 10_000
+_MIN_LISTENERS = int(os.environ.get("LASTFM_MIN_LISTENERS", "5000"))
 _ALLOWED_URL_DOMAINS = {
     "instagram.com",
     "twitter.com",
@@ -136,15 +139,28 @@ def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
             for attempt in range(1, 4):
                 try:
                     detail = _fetch_artist_detail(mbid)
-                    artists.append(_parse_artist(detail))
-                    logger.info("수집 완료: %s (%s)", item.get("name"), mbid)
                     break
                 except requests.RequestException as e:
                     if attempt == 3:
                         logger.warning("아티스트 상세 수집 실패 mbid=%s: %s", mbid, e)
+                        detail = None
                     else:
                         logger.debug("아티스트 상세 재시도 %d/3 mbid=%s: %s", attempt, mbid, e)
                         time.sleep(5 * attempt)
+
+            if detail is None:
+                continue
+
+            listeners = get_monthly_listeners(mbid)
+            if listeners is not None and listeners < _MIN_LISTENERS:
+                logger.debug(
+                    "리스너 수 미달 — 건너뜀: %s (%s), listeners=%d",
+                    item.get("name"), mbid, listeners,
+                )
+                continue
+
+            artists.append(_parse_artist(detail))
+            logger.info("수집 완료: %s (%s)", item.get("name"), mbid)
 
         offset += len(batch)
         logger.info("진행: %d / %d", offset, total)
