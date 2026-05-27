@@ -25,7 +25,7 @@ _HEADERS = {
 _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
 _MAX_ARTISTS = 10_000
-_MIN_LISTENERS = int(os.environ.get("LASTFM_MIN_LISTENERS", "5000"))
+_MIN_LISTENERS = int(os.environ.get("LASTFM_MIN_LISTENERS", "1000"))
 _ALLOWED_URL_DOMAINS = {
     "instagram.com",
     "twitter.com",
