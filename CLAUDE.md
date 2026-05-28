@@ -7,14 +7,18 @@ Jpop 아티스트 및 내한공연 수집 파이프라인 (KOPIS / MusicBrainz /
 ```
 coming-data/
 ├── collectors/
+│   ├── artist_image.py    # Fanart.tv 아티스트 프로필 이미지 수집
 │   ├── kopis.py           # KOPIS API 수집
+│   ├── lastfm.py          # Last.fm 월간 리스너 수 수집
 │   ├── musicbrainz.py     # MusicBrainz 아티스트·멤버 수집
 │   ├── release.py         # MusicBrainz 릴리즈(앨범·싱글·EP) + 트랙·커버 수집
-│   └── setlist.py         # setlist.fm 셋리스트 수집
+│   ├── setlist.py         # setlist.fm 셋리스트 수집
+│   └── wikipedia.py       # Wikipedia 한국어 alias 수집
 ├── matchers/
 │   └── artist_matcher.py  # alias 기반 매칭 로직 (rapidfuzz)
 ├── db/
-│   └── repository.py      # DB 저장 (SQLAlchemy)
+│   ├── connection.py      # SQLAlchemy 엔진·세션 설정
+│   └── repository.py      # DB 저장 함수 (DML)
 ├── tests/                 # pytest 단위 테스트
 ├── scheduler.py           # APScheduler 진입점
 └── pyproject.toml
@@ -33,8 +37,9 @@ ruff check .
 python scheduler.py
 
 # 플래그
-python scheduler.py --skip-artists   # 아티스트 수집 건너뜀
+python scheduler.py --skip-artists    # 아티스트 수집 건너뜀
 python scheduler.py --skip-kopis     # KOPIS 수집 건너뜀
+python scheduler.py --skip-wikipedia # Wikipedia alias 수집 건너뜀
 python scheduler.py --force-artists  # 아티스트 강제 재수집
 ```
 
@@ -45,16 +50,12 @@ python scheduler.py --force-artists  # 아티스트 강제 재수집
   - `X | Y` 타입 유니온 문법 사용 불가 → `Optional[X]` / `Union[X, Y]` 사용
   - `dict | None` 대신 `Optional[dict]` 사용
   - `match` 문 사용 불가 (3.10+)
-  - `str.removeprefix` / `str.removesuffix` 사용 불가 (3.9부터 가능, OK)
-  - 제네릭 내장 타입 힌트(`list[str]`, `dict[str, int]`) 3.9부터 가능 (OK)
 
 ## 코딩 규칙
 
 - DML만 사용 — DDL은 백엔드(Spring) Flyway가 단일 관리
 - `logging`만 사용 (`print` 금지)
 - `.env` 커밋 금지
-- MusicBrainz 모든 요청에 `time.sleep(1.1)` 필수 (Rate Limit: 1 req/sec)
-- Cover Art Archive도 1 req/sec 제한 — 동일하게 sleep 적용
 - 린터: `ruff check .` (`line-length=100`, `select=E,F,I`)
 
 ## 외부 API 정보
@@ -65,46 +66,26 @@ python scheduler.py --force-artists  # 아티스트 강제 재수집
 | MusicBrainz | `GET /ws/2/artist/`, `/ws/2/release-group/`, `/ws/2/release/` | **1 req/sec** | `time.sleep(1.1)` 필수 |
 | Cover Art Archive | `GET https://coverartarchive.org/release-group/{mbid}/front` | 1 req/sec | 404 시 null 허용 |
 | setlist.fm | `GET https://api.setlist.fm/rest/1.0/search/setlists` | - | Header: `x-api-key`, `Accept: application/json` 필수 |
+| Fanart.tv | `GET https://webservice.fanart.tv/v3/music/{mbid}` | 1 req/sec | `time.sleep(1.1)` 필수; 404 시 null 허용 |
+| Last.fm | `GET https://ws.audioscrobbler.com/2.0/` | - | method=`artist.getinfo`; 월간 리스너 수 수집 |
+| Wikipedia (ko) | `GET https://ko.wikipedia.org/w/api.php` | 비공식 권장 | `time.sleep(0.5)` 적용 |
 
 ## 수집 파이프라인 단계
 
-### ① MusicBrainz 아티스트 수집 (초기 1회)
+> 상세 로직 및 매칭 알고리즘: [docs/pipeline.md](docs/pipeline.md)
 
-- 조건: `country=JP`, `tag=j-pop`
-- 이름·alias(한/영/일)·url-rels·멤버 구성·데뷔일 저장
-- 멤버 구성: `relations` 배열에서 `type: "member of band"` 파싱, `ended` 필드로 전·현 멤버 구분
-- 데뷔일: `life-span.begin` 저장 (없으면 null 허용)
+| 단계 | 수집 주기 | 진입점 |
+|------|---------|--------|
+| ① MusicBrainz 아티스트 | 초기 1회 | `run_initial_collect()` |
+| ② 릴리즈 (앨범·트랙·커버) | 초기 + 주 1회 | `run_release_update()` |
+| ③ KOPIS 공연 수집·매칭 | 주 1회 이상 | `run_initial_collect()` |
+| ④ 공연-아티스트 매칭 | KOPIS 수집 후 자동 | `matchers/artist_matcher.py` |
+| ⑤ setlist.fm | 공연 완료 후 1일 이내 | `run_setlist_update()` |
 
-### ② 릴리즈 수집 (초기 + 주 1회 갱신)
+## 참고 문서
 
-- release-group별 대표 release MBID 취득 후 트랙·커버 연속 수집
-- `first-release-date` 기준 DB에 없는 항목만 INSERT
-- 앨범 커버: Cover Art Archive 404 시 null 허용
-
-### ③ KOPIS 수집 (주 1회 이상)
-
-- 조건: `visit=Y`, `genrenm=대중음악(GGGA)`
-- 저장 전 `has_match()`로 alias 매칭 공연만 필터링하여 저장 (비매칭 공연은 DB에 저장하지 않음)
-- 저장: `prfnm`, `prfcast`, 날짜, 장소, `updatedate`, `relates`(예매처 링크, 없으면 빈 배열)
-- 상태 갱신: `updatedate` 변화 감지 시 `prfstate` 갱신 (매일 실행)
-
-### ④ 공연-아티스트 매칭
-
-| 단계 | 기준 | 신뢰도 | 노출 |
-|------|------|--------|------|
-| 매칭 ① | `prfcast` 각 이름 → Artist alias **완전 일치** | HIGH | 관리자 승인 없이 즉시 노출 |
-| 매칭 ② | `prfcast` 각 이름 → `rapidfuzz.fuzz.token_set_ratio` ≥ 85 | LOW | 관리자 승인 후 노출 |
-| 매칭 ③ | `prfnm` → `rapidfuzz.fuzz.token_set_ratio` ≥ 85 (prfcast 전체 실패 시 폴백) | LOW | 관리자 승인 후 노출 |
-
-- `has_match()` 통과 공연은 반드시 매칭 ①~③ 중 하나가 성공하므로 별도 검토 큐 없음
-- `prfcast` 구분자: `,` `·` `&` `×` `・` `/` — feat/featuring/ft 표기 자동 제거
-- `prfcast`에 여러 아티스트 포함 시 각각 개별 매칭 후 모두 `concert_artist`에 INSERT
-- 승인 시 alias 학습 → 다음 사이클 자동 매칭률 향상
-
-### ⑤ setlist.fm 수집 (공연 완료 후 1일 이내)
-
-- 대상: `prfstate=공연완료`
-- 데이터 미존재 시 빈 상태 유지
+- ERD: https://github.com/Cominggg/Specification/blob/main/spec/erd.md
+- 파이프라인 상세: [docs/pipeline.md](docs/pipeline.md)
 
 ## 개발 워크플로우
 
@@ -121,12 +102,3 @@ python scheduler.py --force-artists  # 아티스트 강제 재수집
        → /commit → /pr
 ```
 
-## 공연-아티스트 관계 (concert_artist 테이블)
-
-| 컬럼 | 설명 |
-|------|------|
-| `concert_id` | 공연 FK |
-| `artist_id` | 아티스트 FK |
-| `confidence` | `HIGH` / `LOW` |
-| `matched_by` | `prfcast` / `prfnm` / `manual` |
-| `approved` | LOW 매칭의 관리자 승인 여부. HIGH는 항상 `true`. |
