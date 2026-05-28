@@ -103,7 +103,8 @@ def save_releases(releases: list[dict]) -> None:
                         INSERT INTO release_group
                             (mbid, artist_id, title, type, first_release_date, cover_url, label)
                         VALUES
-                            (:mbid, :artist_id, :title, :type, :first_release_date, :cover_url, :label)
+                            (:mbid, :artist_id, :title, :type,
+                             :first_release_date, :cover_url, :label)
                         ON CONFLICT (mbid) DO UPDATE SET mbid = EXCLUDED.mbid
                         RETURNING id
                     """),
@@ -148,14 +149,15 @@ def save_concerts(concerts: list[dict]) -> None:
     """수집된 공연 목록을 concert 테이블에 저장한다. kopis_id 중복 시 무시."""
     with get_session() as session:
         for concert in concerts:
-            row = session.execute(
+            new_row = session.execute(
                 text("""
                     INSERT INTO concert
                         (kopis_id, title, "cast", start_date, end_date,
                          venue_name, venue_address, poster_url, price, status, kopis_update_date)
                     VALUES
                         (:kopis_id, :title, :cast, :start_date, :end_date,
-                         :venue_name, :venue_address, :poster_url, :price, :status, :kopis_update_date)
+                         :venue_name, :venue_address, :poster_url, :price,
+                         :status, :kopis_update_date)
                     ON CONFLICT (kopis_id) DO NOTHING
                     RETURNING id
                 """),
@@ -174,7 +176,18 @@ def save_concerts(concerts: list[dict]) -> None:
                 },
             ).fetchone()
 
-            if row is None:
+            if new_row is not None:
+                concert_id = new_row[0]
+                for position, url in enumerate(concert.get("still_urls", [])):
+                    session.execute(
+                        text("""
+                            INSERT INTO concert_image (concert_id, url, position)
+                            VALUES (:concert_id, :url, :position)
+                        """),
+                        {"concert_id": concert_id, "url": url, "position": position},
+                    )
+                row = new_row
+            else:
                 row = session.execute(
                     text("SELECT id FROM concert WHERE kopis_id = :kopis_id"),
                     {"kopis_id": concert["kopis_id"]},
