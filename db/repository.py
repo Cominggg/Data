@@ -353,6 +353,24 @@ def update_release_group_cover(mbid: str, cover_url: str) -> None:
         )
 
 
+def get_artists_without_image() -> list[dict]:
+    """image_url이 없는 artist의 id·mbid 목록을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT id, mbid FROM artist WHERE image_url IS NULL AND mbid IS NOT NULL")
+        ).fetchall()
+    return [{"id": row[0], "mbid": row[1]} for row in rows]
+
+
+def update_artist_image(artist_id: int, image_url: str) -> None:
+    """artist의 image_url을 갱신한다."""
+    with get_session() as session:
+        session.execute(
+            text("UPDATE artist SET image_url = :image_url WHERE id = :id"),
+            {"image_url": image_url, "id": artist_id},
+        )
+
+
 def get_concert_with_artist(concert_id: int) -> Optional[dict]:
     """셋리스트 수집에 필요한 공연 정보(artist_mbid 포함)를 반환한다. 없으면 None."""
     with get_session() as session:
