@@ -5,11 +5,12 @@ from typing import List
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from collectors import kopis, musicbrainz, release, setlist, wikipedia
+from collectors import artist_image, kopis, musicbrainz, release, setlist, wikipedia
 from db.repository import (
     get_all_aliases,
     get_all_artist_mbids,
     get_all_artists,
+    get_artists_without_image,
     get_concert_by_kopis_id,
     get_concert_with_artist,
     get_matched_artist_mbids,
@@ -21,6 +22,7 @@ from db.repository import (
     save_concerts,
     save_releases,
     save_setlists,
+    update_artist_image,
     update_artist_is_coming,
     update_concert_status,
     update_release_group_cover,
@@ -89,7 +91,11 @@ def run_initial_collect(
         releases = _sort_releases(release.collect_releases(mbid))
         save_releases(releases)
 
-    logger.info("=== 초기 수집 완료 (나머지 릴리즈는 주간 배치로 수집) ===")
+    run_cover_art_update()
+    run_artist_image_update()
+    run_setlist_collect()
+
+    logger.info("=== 초기 수집 완료 ===")
 
 
 def run_wikipedia_collect() -> None:
@@ -145,6 +151,22 @@ def run_cover_art_update() -> None:
         if cover_url:
             update_release_group_cover(mbid, cover_url)
     logger.info("=== 커버아트 수집 잡 완료 ===")
+
+
+def run_artist_image_update() -> None:
+    """image_url 미수집 아티스트의 프로필 이미지를 수집한다 (주 1회, 목요일)."""
+    logger.info("=== 아티스트 이미지 수집 잡 시작 ===")
+    artists = get_artists_without_image()
+    logger.info("이미지 미수집 아티스트: %d건", len(artists))
+    for a in artists:
+        try:
+            image_url = artist_image.collect_artist_image(a["mbid"])
+        except Exception as e:
+            logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", a["mbid"], e)
+            continue
+        if image_url:
+            update_artist_image(a["id"], image_url)
+    logger.info("=== 아티스트 이미지 수집 잡 완료 ===")
 
 
 def run_release_update() -> None:
@@ -236,6 +258,7 @@ def _build_scheduler() -> BackgroundScheduler:
     scheduler.add_job(run_release_update, "cron", day_of_week="tue", hour=5)
     scheduler.add_job(run_cover_art_update, "cron", day_of_week="wed", hour=5)
     scheduler.add_job(run_wikipedia_collect, "cron", day_of_week="thu", hour=3)
+    scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=5)
     scheduler.add_job(run_setlist_collect, "cron", hour=6)
     return scheduler
 

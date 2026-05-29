@@ -52,6 +52,11 @@ def _make_detail_content(kopis_id: str, **fields) -> bytes:
                     rel = ET.SubElement(relates_elem, "relate")
                     ET.SubElement(rel, "relatenm").text = r["relatenm"]
                     ET.SubElement(rel, "relateurl").text = r["relateurl"]
+        elif tag == "styurls":
+            if val:
+                styurls_elem = ET.SubElement(db, "styurls")
+                for url in val:
+                    ET.SubElement(styurls_elem, "styurl").text = url
         elif val is not None:
             ET.SubElement(db, tag).text = str(val)
     return ET.tostring(root, encoding="unicode").encode("utf-8")
@@ -154,7 +159,9 @@ class TestFetchAndMerge:
         """3회 연속 실패 시 폴백(visit=None)이 적용되어 None을 반환해야 한다."""
         concert = {"kopis_id": "PF123456", "prfnm": "공연명"}
 
-        with patch("collectors.kopis._fetch_detail", side_effect=requests.ConnectionError("timeout")):
+        with patch(
+            "collectors.kopis._fetch_detail", side_effect=requests.ConnectionError("timeout")
+        ):
             with patch("collectors.kopis.time.sleep"):
                 result = _fetch_and_merge(concert)
 
@@ -164,12 +171,26 @@ class TestFetchAndMerge:
         """3회 연속 실패 시 poster_url·relates 등이 None·빈배열로 설정되어야 한다."""
         concert = {"kopis_id": "PF123456", "prfnm": "공연명"}
 
-        with patch("collectors.kopis._fetch_detail", side_effect=requests.ConnectionError("timeout")):
+        with patch(
+            "collectors.kopis._fetch_detail", side_effect=requests.ConnectionError("timeout")
+        ):
             with patch("collectors.kopis.time.sleep"):
                 _fetch_and_merge(concert)
 
         assert concert.get("poster_url") is None
         assert concert.get("relates") == []
+
+    def test_fallback_sets_empty_still_urls(self):
+        """3회 연속 실패 시 still_urls가 빈 리스트로 설정되어야 한다."""
+        concert = {"kopis_id": "PF123456", "prfnm": "공연명"}
+
+        with patch(
+            "collectors.kopis._fetch_detail", side_effect=requests.ConnectionError("timeout")
+        ):
+            with patch("collectors.kopis.time.sleep"):
+                _fetch_and_merge(concert)
+
+        assert concert.get("still_urls") == []
 
 
 # ─── TestKopisCollect ─────────────────────────────────────────────────────────
@@ -178,7 +199,9 @@ class TestKopisCollect:
     def test_collect_returns_list(self):
         """collect() 호출 결과가 리스트여야 한다."""
         list_content = _make_list_content(_sample_item())
-        detail_content = _make_detail_content("PF123456", poster="http://poster.jpg", adres="서울", visit="Y")
+        detail_content = _make_detail_content(
+            "PF123456", poster="http://poster.jpg", adres="서울", visit="Y"
+        )
 
         with patch("collectors.kopis.requests.get",
                    side_effect=_mock_get_factory(list_content, {"PF123456": detail_content})):
@@ -243,6 +266,32 @@ class TestKopisCollect:
         params = mock_get.call_args[1].get("params") or mock_get.call_args[0][1]
         assert params.get("eddate") == datetime.date.today().strftime("%Y%m%d")
 
+    def test_collect_includes_still_urls(self):
+        """collect() 결과 concert dict에 still_urls가 포함되어야 한다."""
+        list_content = _make_list_content(_sample_item())
+        detail_content = _make_detail_content(
+            "PF123456",
+            visit="Y",
+            styurls=["http://still1.jpg", "http://still2.jpg"],
+        )
+
+        with patch("collectors.kopis.requests.get",
+                   side_effect=_mock_get_factory(list_content, {"PF123456": detail_content})):
+            result = collect()
+
+        assert result[0]["still_urls"] == ["http://still1.jpg", "http://still2.jpg"]
+
+    def test_collect_still_urls_empty_when_absent(self):
+        """<styurls> 없을 때 still_urls가 빈 리스트여야 한다."""
+        list_content = _make_list_content(_sample_item())
+        detail_content = _make_detail_content("PF123456", visit="Y")
+
+        with patch("collectors.kopis.requests.get",
+                   side_effect=_mock_get_factory(list_content, {"PF123456": detail_content})):
+            result = collect()
+
+        assert result[0]["still_urls"] == []
+
     def test_stores_booking_links(self):
         """relates가 있을 때 파싱되고 없으면 빈 배열이어야 한다."""
         list_content = _make_list_content(
@@ -255,12 +304,15 @@ class TestKopisCollect:
         )
         detail_without = _make_detail_content("PF002", visit="Y")
 
-        with patch("collectors.kopis.requests.get",
-                   side_effect=_mock_get_factory(list_content, {"PF001": detail_with, "PF002": detail_without})):
+        with patch("collectors.kopis.requests.get", side_effect=_mock_get_factory(
+            list_content, {"PF001": detail_with, "PF002": detail_without}
+        )):
             result = collect()
 
         result_by_id = {r["kopis_id"]: r for r in result}
-        assert result_by_id["PF001"]["relates"] == [{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
+        assert result_by_id["PF001"]["relates"] == [
+            {"relatenm": "예스24", "relateurl": "https://yes24.com"}
+        ]
         assert result_by_id["PF002"]["relates"] == []
 
     def test_excludes_concert_when_detail_api_fails(self):
@@ -291,8 +343,9 @@ class TestKopisCollect:
         detail_y = _make_detail_content("PF001", visit="Y")
         detail_n = _make_detail_content("PF002", visit="N")
 
-        with patch("collectors.kopis.requests.get",
-                   side_effect=_mock_get_factory(list_content, {"PF001": detail_y, "PF002": detail_n})):
+        with patch("collectors.kopis.requests.get", side_effect=_mock_get_factory(
+            list_content, {"PF001": detail_y, "PF002": detail_n}
+        )):
             result = collect()
 
         assert len(result) == 1
@@ -307,8 +360,9 @@ class TestKopisCollect:
         detail1 = _make_detail_content("PF001", visit="Y", poster="http://p1.jpg")
         detail2 = _make_detail_content("PF002", visit="Y", poster="http://p2.jpg")
 
-        with patch("collectors.kopis.requests.get",
-                   side_effect=_mock_get_factory(list_content, {"PF001": detail1, "PF002": detail2})):
+        with patch("collectors.kopis.requests.get", side_effect=_mock_get_factory(
+            list_content, {"PF001": detail1, "PF002": detail2}
+        )):
             result = collect()
 
         assert len(result) == 2
@@ -327,7 +381,9 @@ class TestKopisCollect:
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
             update_concert_status(concerts)
 
-        update_calls = [c for c in mock_session.execute.call_args_list if "UPDATE" in str(c.args[0])]
+        update_calls = [
+            c for c in mock_session.execute.call_args_list if "UPDATE" in str(c.args[0])
+        ]
         assert len(update_calls) == 1
 
 
@@ -433,11 +489,33 @@ class TestFetchDetail:
     def test_calls_correct_detail_url(self):
         """상세 API 호출 시 kopis_id를 포함한 URL을 사용해야 한다."""
         content = _make_detail_content("PF123456", visit="Y")
-        with patch("collectors.kopis.requests.get", return_value=self._mock_resp(content)) as mock_get:
+        with patch(
+            "collectors.kopis.requests.get", return_value=self._mock_resp(content)
+        ) as mock_get:
             _fetch_detail("PF123456")
 
         called_url = mock_get.call_args[0][0]
         assert called_url.endswith("/PF123456")
+
+    def test_returns_still_urls(self):
+        """상세 API 응답의 <styurls>/<styurl>이 still_urls 리스트로 파싱되어야 한다."""
+        content = _make_detail_content(
+            "PF123456",
+            visit="Y",
+            styurls=["http://still1.jpg", "http://still2.jpg"],
+        )
+        with patch("collectors.kopis.requests.get", return_value=self._mock_resp(content)):
+            result = _fetch_detail("PF123456")
+
+        assert result["still_urls"] == ["http://still1.jpg", "http://still2.jpg"]
+
+    def test_returns_empty_still_urls_when_absent(self):
+        """<styurls> 요소가 없으면 still_urls가 빈 리스트여야 한다."""
+        content = _make_detail_content("PF123456", visit="Y")
+        with patch("collectors.kopis.requests.get", return_value=self._mock_resp(content)):
+            result = _fetch_detail("PF123456")
+
+        assert result["still_urls"] == []
 
     def test_propagates_http_error(self):
         """상세 API 4xx/5xx 응답 시 HTTPError를 전파해야 한다."""
@@ -546,7 +624,10 @@ class TestSaveConcerts:
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
             save_concerts([self._make_concert()])
 
-        insert_sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list if "INSERT" in str(c.args[0])]
+        insert_sqls = [
+            str(c.args[0]) for c in mock_session.execute.call_args_list
+            if "INSERT" in str(c.args[0])
+        ]
         assert len(insert_sqls) == 1
         assert "ON CONFLICT" in insert_sqls[0]
 
@@ -556,9 +637,14 @@ class TestSaveConcerts:
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(poster_url="http://poster.jpg", venue_address="서울특별시 강남구")])
+            save_concerts([self._make_concert(
+                poster_url="http://poster.jpg", venue_address="서울특별시 강남구"
+            )])
 
-        insert_sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list if "INSERT INTO concert" in str(c.args[0])]
+        insert_sqls = [
+            str(c.args[0]) for c in mock_session.execute.call_args_list
+            if "INSERT INTO concert" in str(c.args[0])
+        ]
         assert "poster_url" in insert_sqls[0]
         assert "venue_address" in insert_sqls[0]
 
@@ -568,9 +654,14 @@ class TestSaveConcerts:
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(poster_url="http://poster.jpg", venue_address="서울특별시 강남구")])
+            save_concerts([self._make_concert(
+                poster_url="http://poster.jpg", venue_address="서울특별시 강남구"
+            )])
 
-        insert_call = [c for c in mock_session.execute.call_args_list if "INSERT INTO concert" in str(c.args[0])][0]
+        insert_call = [
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO concert" in str(c.args[0])
+        ][0]
         params = insert_call.args[1]
         assert params["poster_url"] == "http://poster.jpg"
         assert params["venue_address"] == "서울특별시 강남구"
@@ -583,7 +674,10 @@ class TestSaveConcerts:
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
             save_concerts([self._make_concert(price="전석 110,000원")])
 
-        insert_sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list if "INSERT INTO concert" in str(c.args[0])]
+        insert_sqls = [
+            str(c.args[0]) for c in mock_session.execute.call_args_list
+            if "INSERT INTO concert" in str(c.args[0])
+        ]
         assert "price" in insert_sqls[0]
 
     def test_price_param_passed(self):
@@ -594,7 +688,10 @@ class TestSaveConcerts:
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
             save_concerts([self._make_concert(price="전석 110,000원")])
 
-        insert_call = [c for c in mock_session.execute.call_args_list if "INSERT INTO concert" in str(c.args[0])][0]
+        insert_call = [
+            c for c in mock_session.execute.call_args_list
+            if "INSERT INTO concert" in str(c.args[0])
+        ][0]
         assert insert_call.args[1]["price"] == "전석 110,000원"
 
     def test_booking_links_inserted_for_new_concert(self):
@@ -604,9 +701,14 @@ class TestSaveConcerts:
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}])])
+            save_concerts([self._make_concert(
+                relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
+            )])
 
-        booking_link_inserts = [c for c in mock_session.execute.call_args_list if "concert_booking_link" in str(c.args[0])]
+        booking_link_inserts = [
+            c for c in mock_session.execute.call_args_list
+            if "concert_booking_link" in str(c.args[0])
+        ]
         assert len(booking_link_inserts) == 1
         params = booking_link_inserts[0].args[1]
         assert params["name"] == "예스24"
@@ -619,9 +721,14 @@ class TestSaveConcerts:
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(relates=[{"relatenm": "인터파크", "relateurl": "https://interpark.com"}])])
+            save_concerts([self._make_concert(
+                relates=[{"relatenm": "인터파크", "relateurl": "https://interpark.com"}]
+            )])
 
-        booking_link_inserts = [c for c in mock_session.execute.call_args_list if "concert_booking_link" in str(c.args[0])]
+        booking_link_inserts = [
+            c for c in mock_session.execute.call_args_list
+            if "concert_booking_link" in str(c.args[0])
+        ]
         assert len(booking_link_inserts) == 1
         assert booking_link_inserts[0].args[1]["concert_id"] == 5
 
@@ -632,11 +739,65 @@ class TestSaveConcerts:
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}])])
+            save_concerts([self._make_concert(
+                relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
+            )])
 
-        booking_link_sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list if "concert_booking_link" in str(c.args[0])]
+        booking_link_sqls = [
+            str(c.args[0]) for c in mock_session.execute.call_args_list
+            if "concert_booking_link" in str(c.args[0])
+        ]
         assert len(booking_link_sqls) == 1
         assert "ON CONFLICT" in booking_link_sqls[0]
+
+    def test_concert_image_inserted_for_new_concert(self):
+        """신규 공연 저장 시 still_urls가 concert_image에 position 순으로 INSERT되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (1,)
+        concert = self._make_concert(still_urls=["http://still1.jpg", "http://still2.jpg"])
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([concert])
+
+        image_inserts = [
+            c for c in mock_session.execute.call_args_list if "concert_image" in str(c.args[0])
+        ]
+        assert len(image_inserts) == 2
+        assert image_inserts[0].args[1]["url"] == "http://still1.jpg"
+        assert image_inserts[0].args[1]["position"] == 0
+        assert image_inserts[1].args[1]["url"] == "http://still2.jpg"
+        assert image_inserts[1].args[1]["position"] == 1
+
+    def test_concert_image_not_inserted_for_existing_concert(self):
+        """기존 공연(RETURNING None)이면 concert_image INSERT가 실행되지 않아야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, (5,)]
+        concert = self._make_concert(still_urls=["http://still1.jpg"])
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([concert])
+
+        image_inserts = [
+            c for c in mock_session.execute.call_args_list if "concert_image" in str(c.args[0])
+        ]
+        assert len(image_inserts) == 0
+
+    def test_concert_image_not_inserted_when_still_urls_empty(self):
+        """still_urls가 빈 리스트이면 concert_image INSERT가 실행되지 않아야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (1,)
+        concert = self._make_concert(still_urls=[])
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([concert])
+
+        image_inserts = [
+            c for c in mock_session.execute.call_args_list if "concert_image" in str(c.args[0])
+        ]
+        assert len(image_inserts) == 0
 
 
 # ─── TestUpdateConcertStatus ──────────────────────────────────────────────────
@@ -653,7 +814,9 @@ class TestUpdateConcertStatus:
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
             update_concert_status(concerts)
 
-        update_calls = [c for c in mock_session.execute.call_args_list if "UPDATE" in str(c.args[0])]
+        update_calls = [
+            c for c in mock_session.execute.call_args_list if "UPDATE" in str(c.args[0])
+        ]
         assert len(update_calls) == 0
 
     def test_updates_prfstate_and_updatedate_when_changed(self):
@@ -667,7 +830,9 @@ class TestUpdateConcertStatus:
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
             update_concert_status(concerts)
 
-        update_calls = [c for c in mock_session.execute.call_args_list if "UPDATE" in str(c.args[0])]
+        update_calls = [
+            c for c in mock_session.execute.call_args_list if "UPDATE" in str(c.args[0])
+        ]
         assert len(update_calls) == 1
         update_params = update_calls[0].args[1]
         assert update_params["status"] == "공연완료"

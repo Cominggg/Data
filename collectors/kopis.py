@@ -72,7 +72,7 @@ def _parse_relates(relates_elem: Optional[ET.Element]) -> list[dict]:
 
 _DETAIL_FALLBACK = {
     "prfcast": None, "poster_url": None, "venue_address": None, "price": None,
-    "relates": [], "updatedate": None, "visit": None,
+    "relates": [], "updatedate": None, "visit": None, "still_urls": [],
 }
 _DETAIL_WORKERS = 8
 
@@ -91,6 +91,11 @@ def _fetch_detail(kopis_id: str) -> dict:
     db = root.find("db")
     if db is None:
         return _DETAIL_FALLBACK
+    styurls_elem = db.find("styurls")
+    still_urls = (
+        [el.text for el in styurls_elem.findall("styurl") if el.text]
+        if styurls_elem is not None else []
+    )
     return {
         "prfcast": _text(db, "prfcast"),
         "poster_url": _text(db, "poster"),
@@ -99,6 +104,7 @@ def _fetch_detail(kopis_id: str) -> dict:
         "price": _text(db, "pcseguidance"),
         "updatedate": _parse_kopis_date(_text(db, "updatedate")),
         "visit": _text(db, "visit"),
+        "still_urls": still_urls,
     }
 
 
@@ -129,6 +135,11 @@ def collect_by_id(kopis_id: str) -> Optional[dict]:
     db = root.find("db")
     if db is None:
         return None
+    styurls_elem = db.find("styurls")
+    still_urls = (
+        [el.text for el in styurls_elem.findall("styurl") if el.text]
+        if styurls_elem is not None else []
+    )
     return {
         "kopis_id": _text(db, "mt20id") or kopis_id,
         "prfnm": _text(db, "prfnm"),
@@ -143,6 +154,7 @@ def collect_by_id(kopis_id: str) -> Optional[dict]:
         "relates": _parse_relates(db.find("relates")),
         "updatedate": _parse_kopis_date(_text(db, "updatedate")),
         "visit": _text(db, "visit"),
+        "still_urls": still_urls,
     }
 
 
@@ -162,6 +174,7 @@ def _fetch_and_merge(concert: dict) -> Optional[dict]:
                 concert.update({
                     "poster_url": None, "venue_address": None,
                     "price": None, "relates": [], "updatedate": None, "visit": None,
+                    "still_urls": [],
                 })
             else:
                 logger.debug(
@@ -170,7 +183,9 @@ def _fetch_and_merge(concert: dict) -> Optional[dict]:
                 )
                 time.sleep(5 * attempt)
     if concert.get("visit") != "Y":
-        logger.debug("내한 공연 아님 — 제외: kopis_id=%s, prfnm=%s", concert["kopis_id"], concert["prfnm"])
+        logger.debug(
+            "내한 공연 아님 — 제외: kopis_id=%s, prfnm=%s", concert["kopis_id"], concert["prfnm"]
+        )
         return None
     return concert
 
@@ -195,10 +210,15 @@ def collect() -> list[dict]:
                 status = e.response.status_code if e.response is not None else None
                 if attempt == 3:
                     if status == 400:
-                        logger.info("KOPIS 400 응답 — 마지막 페이지로 간주하고 수집 종료: cpage=%d", cpage)
+                        logger.info(
+                            "KOPIS 400 응답 — 마지막 페이지로 간주하고 수집 종료: cpage=%d", cpage
+                        )
                         return results
                     raise
-                logger.warning("KOPIS 페이지 조회 실패 (attempt %d/3, status=%s): cpage=%d", attempt, status, cpage)
+                logger.warning(
+                    "KOPIS 페이지 조회 실패 (attempt %d/3, status=%s): cpage=%d",
+                    attempt, status, cpage,
+                )
                 time.sleep(2 ** attempt)
 
         batch = root.findall("db")
