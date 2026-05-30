@@ -214,7 +214,7 @@ def save_concerts(concerts: list[dict]) -> None:
 
 
 def get_completed_concerts() -> list[dict]:
-    """setlist 미수집 공연완료 건을 아티스트 MBID와 함께 반환한다."""
+    """setlist 미수집·미시도(또는 7일 경과) 공연완료 건을 아티스트 MBID와 함께 반환한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
@@ -226,6 +226,10 @@ def get_completed_concerts() -> list[dict]:
                 LEFT JOIN setlist s ON s.concert_id = c.id
                 WHERE c.status = '공연완료'
                   AND s.id IS NULL
+                  AND (
+                      c.fetch_attempted_at IS NULL
+                      OR c.fetch_attempted_at < NOW() - INTERVAL '7 days'
+                  )
             """)
         ).fetchall()
     return [
@@ -487,6 +491,22 @@ def update_artist_is_coming() -> int:
         updated = result.rowcount
     logger.info("artist.is_coming 갱신 완료: %d건 변경", updated)
     return updated
+
+
+def get_existing_kopis_ids() -> set:
+    """DB에 저장된 모든 concert.kopis_id를 집합으로 반환한다."""
+    with get_session() as session:
+        rows = session.execute(text("SELECT kopis_id FROM concert")).fetchall()
+    return {row[0] for row in rows}
+
+
+def update_concert_fetch_attempted(concert_id: int) -> None:
+    """concert.fetch_attempted_at을 현재 시각으로 갱신한다."""
+    with get_session() as session:
+        session.execute(
+            text("UPDATE concert SET fetch_attempted_at = NOW() WHERE id = :id"),
+            {"id": concert_id},
+        )
 
 
 def update_concert_status(concerts: list[dict]) -> None:
