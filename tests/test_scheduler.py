@@ -1,5 +1,5 @@
 """scheduler.py 단위 테스트."""
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,14 +15,24 @@ from scheduler import (
 
 
 class TestRunInitialCollect:
+    @pytest.fixture(autouse=True)
+    def mock_sub_jobs(self):
+        with (
+            patch("scheduler.run_wikipedia_collect"),
+            patch("scheduler.run_kopis_collect_and_match"),
+            patch("scheduler.get_matched_artist_mbids", return_value=[]),
+            patch("scheduler.run_cover_art_update"),
+            patch("scheduler.run_artist_image_update"),
+            patch("scheduler.run_setlist_collect"),
+        ):
+            yield
+
     def test_calls_collect_artists(self):
         """collect_artists가 1회 호출되어야 한다."""
         with (
             patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]) as mock_collect,
             patch("scheduler.save_artists"),
-            patch("scheduler.release.collect_releases", return_value=[]),
-            patch("scheduler.save_releases"),
         ):
             run_initial_collect()
 
@@ -35,19 +45,18 @@ class TestRunInitialCollect:
             patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=artists),
             patch("scheduler.save_artists") as mock_save,
-            patch("scheduler.release.collect_releases", return_value=[]),
-            patch("scheduler.save_releases"),
         ):
             run_initial_collect()
 
         mock_save.assert_called_once_with(artists)
 
-    def test_collects_releases_for_each_artist(self):
-        """DB에서 조회한 MBID 목록으로 collect_releases가 호출되어야 한다."""
+    def test_collects_releases_for_matched_artists(self):
+        """매칭 아티스트 MBID 목록으로 collect_releases가 호출되어야 한다."""
         with (
-            patch("scheduler.get_all_artist_mbids", return_value=["mbid-1", "mbid-2"]),
+            patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
+            patch("scheduler.get_matched_artist_mbids", return_value=["mbid-1", "mbid-2"]),
             patch("scheduler.release.collect_releases", return_value=[]) as mock_collect,
             patch("scheduler.save_releases"),
         ):
@@ -57,12 +66,13 @@ class TestRunInitialCollect:
         mock_collect.assert_any_call("mbid-1")
         mock_collect.assert_any_call("mbid-2")
 
-    def test_saves_releases_for_each_artist(self):
-        """각 아티스트 릴리즈가 save_releases로 저장되어야 한다."""
+    def test_saves_releases_for_each_matched_artist(self):
+        """각 매칭 아티스트 릴리즈가 save_releases로 저장되어야 한다."""
         with (
-            patch("scheduler.get_all_artist_mbids", return_value=["mbid-1", "mbid-2"]),
+            patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
+            patch("scheduler.get_matched_artist_mbids", return_value=["mbid-1", "mbid-2"]),
             patch("scheduler.release.collect_releases", return_value=[{"title": "앨범"}]),
             patch("scheduler.save_releases") as mock_save,
         ):
@@ -76,8 +86,6 @@ class TestRunInitialCollect:
             patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists") as mock_collect,
             patch("scheduler.save_artists") as mock_save,
-            patch("scheduler.release.collect_releases", return_value=[]),
-            patch("scheduler.save_releases"),
         ):
             run_initial_collect(skip_artists=True)
 
@@ -160,6 +168,8 @@ class TestRunStatusUpdate:
         with (
             patch("scheduler.kopis.collect", return_value=concerts),
             patch("scheduler.update_concert_status") as mock_update,
+            patch("scheduler.get_existing_kopis_ids", return_value={"PF001"}),
+            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
             run_status_update()
@@ -171,27 +181,63 @@ class TestRunStatusUpdate:
         with (
             patch("scheduler.kopis.collect", return_value=[]),
             patch("scheduler.update_concert_status"),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming") as mock_update,
         ):
             run_status_update()
 
         mock_update.assert_called_once_with()
 
-    def test_does_not_use_alias_based_artist_filter(self):
-        """run_status_update는 get_all_aliases로 아티스트를 필터링하지 않아야 한다.
-
-        alias 미등록 아티스트가 is_coming 갱신에서 누락되지 않도록
-        update_artist_is_coming() 내부 SQL이 concert_artist 전체를 커버한다.
-        """
+    def test_saves_new_concerts_with_alias_match(self):
+        """DB에 없는 신규 공연이 alias 매칭 통과 시 save_concerts로 저장되어야 한다."""
+        new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
         with (
-            patch("scheduler.kopis.collect", return_value=[]),
+            patch("scheduler.kopis.collect", return_value=[new_concert]),
             patch("scheduler.update_concert_status"),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.save_concerts") as mock_save,
+            patch("scheduler.get_unmatched_concerts", return_value=[]),
+            patch("scheduler.save_concert_artists"),
             patch("scheduler.update_artist_is_coming"),
-            patch("scheduler.get_all_aliases") as mock_aliases,
         ):
             run_status_update()
 
-        mock_aliases.assert_not_called()
+        mock_save.assert_called_once_with([new_concert])
+
+    def test_skips_new_concerts_without_alias_match(self):
+        """alias 매칭 없는 신규 공연은 save_concerts가 호출되지 않아야 한다."""
+        new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
+        with (
+            patch("scheduler.kopis.collect", return_value=[new_concert]),
+            patch("scheduler.update_concert_status"),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=False),
+            patch("scheduler.save_concerts") as mock_save,
+            patch("scheduler.update_artist_is_coming"),
+        ):
+            run_status_update()
+
+        mock_save.assert_not_called()
+
+    def test_does_not_save_already_existing_concerts(self):
+        """이미 DB에 있는 공연은 save_concerts가 호출되지 않아야 한다."""
+        existing_concert = {"kopis_id": "PF001", "prfstate": "공연완료"}
+        with (
+            patch("scheduler.kopis.collect", return_value=[existing_concert]),
+            patch("scheduler.update_concert_status"),
+            patch("scheduler.get_existing_kopis_ids", return_value={"PF001"}),
+            patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.save_concerts") as mock_save,
+            patch("scheduler.update_artist_is_coming"),
+        ):
+            run_status_update()
+
+        mock_save.assert_not_called()
 
 
 class TestRunReleaseUpdate:
@@ -257,10 +303,10 @@ class TestRunSetlistCollect:
 
 
 class TestBuildScheduler:
-    def test_registers_six_jobs(self):
-        """스케줄러에 6개의 잡이 등록되어야 한다."""
+    def test_registers_seven_jobs(self):
+        """스케줄러에 7개의 잡이 등록되어야 한다."""
         scheduler = _build_scheduler()
-        assert len(scheduler.get_jobs()) == 6
+        assert len(scheduler.get_jobs()) == 7
 
     def test_includes_monday_job(self):
         """월요일 KOPIS 수집·매칭 잡이 등록되어야 한다."""

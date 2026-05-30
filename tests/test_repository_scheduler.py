@@ -1,14 +1,14 @@
 """repository.py의 스케줄러용 신규 함수 단위 테스트."""
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from db.repository import (
     get_all_aliases,
     get_all_artist_mbids,
+    get_existing_kopis_ids,
     get_unmatched_concerts,
     save_concert_artists,
     update_artist_is_coming,
+    update_concert_fetch_attempted,
 )
 
 
@@ -24,7 +24,9 @@ class TestSaveConcertArtists:
         """INSERT SQL에 ON CONFLICT가 포함되어야 한다."""
         mock_session = MagicMock()
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_concert_artists([{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}])
+            save_concert_artists([
+                {"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}
+            ])
 
         sql = str(mock_session.execute.call_args_list[0].args[0])
         assert "ON CONFLICT" in sql
@@ -175,3 +177,62 @@ class TestGetUnmatchedConcerts:
         sql = str(mock_session.execute.call_args_list[0].args[0])
         assert "LEFT JOIN" in sql
         assert "concert_artist" in sql
+
+
+class TestGetExistingKopisIds:
+    def test_returns_set_of_kopis_ids(self):
+        """DB의 kopis_id를 집합으로 반환해야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [
+            ("PF001",), ("PF002",)
+        ]
+
+        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
+            result = get_existing_kopis_ids()
+
+        assert result == {"PF001", "PF002"}
+
+    def test_returns_empty_set_when_no_concerts(self):
+        """공연이 없으면 빈 집합을 반환해야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = []
+
+        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
+            result = get_existing_kopis_ids()
+
+        assert result == set()
+
+    def test_queries_concert_table(self):
+        """concert 테이블을 SELECT해야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = []
+
+        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
+            get_existing_kopis_ids()
+
+        sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "concert" in sql
+        assert "kopis_id" in sql
+
+
+class TestUpdateConcertFetchAttempted:
+    def test_executes_update_on_concert_table(self):
+        """concert 테이블의 fetch_attempted_at을 UPDATE해야 한다."""
+        mock_session = MagicMock()
+
+        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
+            update_concert_fetch_attempted(42)
+
+        sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "fetch_attempted_at" in sql
+        assert "concert" in sql
+
+    def test_uses_correct_concert_id(self):
+        """전달된 concert_id가 UPDATE 쿼리에 바인딩되어야 한다."""
+        mock_session = MagicMock()
+
+        with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
+            update_concert_fetch_attempted(99)
+
+        params = mock_session.execute.call_args_list[0].args[1]
+        assert params["id"] == 99
