@@ -13,6 +13,7 @@ from db.repository import (
     get_artists_without_image,
     get_concert_by_kopis_id,
     get_concert_with_artist,
+    get_existing_kopis_ids,
     get_matched_artist_mbids,
     get_release_groups_without_cover,
     get_unmatched_concerts,
@@ -133,10 +134,28 @@ def run_kopis_collect_and_match() -> None:
 
 
 def run_status_update() -> None:
-    """공연 상태 갱신 + is_coming 동기화 (매일)."""
+    """공연 상태 갱신 + 신규 공연 저장·매칭 + is_coming 동기화 (매일)."""
     logger.info("=== 공연 상태 갱신 잡 시작 ===")
     concerts = kopis.collect()
     update_concert_status(concerts)
+
+    existing_ids = get_existing_kopis_ids()
+    aliases = get_all_aliases()
+    new_concerts = [
+        c for c in concerts
+        if c["kopis_id"] not in existing_ids and has_match(c, aliases)
+    ]
+    if new_concerts:
+        logger.info("신규 공연 %d건 저장 시작", len(new_concerts))
+        save_concerts(new_concerts)
+        unmatched = get_unmatched_concerts()
+        all_matches: list[dict] = []
+        for concert in unmatched:
+            matches, _ = match_concert(concert, aliases)
+            all_matches.extend(matches)
+        if all_matches:
+            save_concert_artists(all_matches)
+
     update_artist_is_coming()
     logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
