@@ -65,3 +65,45 @@ class TestGetMonthlyListeners:
             result = get_monthly_listeners("mbid-001")
 
         assert result is None
+
+    def test_falls_back_to_name_when_mbid_fails(self):
+        """MBID 조회 실패 시 name으로 재시도해 리스너 수를 반환해야 한다."""
+        with (
+            patch("collectors.lastfm._API_KEY", "dummy-key"),
+            patch("collectors.lastfm._query_listeners", side_effect=[None, 50000]),
+        ):
+            result = get_monthly_listeners("mbid-unknown", name="須田景凪")
+
+        assert result == 50000
+
+    def test_name_not_called_when_mbid_succeeds(self):
+        """MBID 조회 성공 시 name으로 재시도하지 않아야 한다."""
+        with (
+            patch("collectors.lastfm._API_KEY", "dummy-key"),
+            patch("collectors.lastfm._query_listeners", return_value=12345) as mock_query,
+        ):
+            result = get_monthly_listeners("mbid-001", name="テストアーティスト")
+
+        assert result == 12345
+        mock_query.assert_called_once()
+
+    def test_returns_none_when_both_mbid_and_name_fail(self):
+        """MBID와 name 모두 실패하면 None을 반환해야 한다."""
+        with (
+            patch("collectors.lastfm._API_KEY", "dummy-key"),
+            patch("collectors.lastfm._query_listeners", return_value=None),
+        ):
+            result = get_monthly_listeners("mbid-unknown", name="不明アーティスト")
+
+        assert result is None
+
+    def test_skips_name_fallback_when_name_is_none(self):
+        """name이 None이면 MBID 실패 후 name 조회 없이 None을 반환해야 한다."""
+        with (
+            patch("collectors.lastfm._API_KEY", "dummy-key"),
+            patch("collectors.lastfm._query_listeners", return_value=None) as mock_query,
+        ):
+            result = get_monthly_listeners("mbid-unknown", name=None)
+
+        assert result is None
+        mock_query.assert_called_once()
