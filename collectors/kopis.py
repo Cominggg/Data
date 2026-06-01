@@ -24,8 +24,9 @@ _DEFAULT_PARAMS = {
     "visit": "Y",
     "genrenm": "GGGA",
     "rows": 100,
-    "stdate": "20200101",
 }
+
+_DEFAULT_LOOKBACK_DAYS = 180
 
 
 def _parse_kopis_date(raw: Optional[str]) -> Optional[str]:
@@ -190,16 +191,21 @@ def _fetch_and_merge(concert: dict) -> Optional[dict]:
     return concert
 
 
-def collect() -> list[dict]:
-    """KOPIS에서 내한공연 목록을 전 페이지 순회해 반환한다."""
+def collect(stdate: Optional[str] = None) -> list[dict]:
+    """KOPIS에서 내한공연 목록을 전 페이지 순회해 반환한다.
+
+    stdate 미전달 시 오늘 기준 _DEFAULT_LOOKBACK_DAYS일 전을 시작일로 사용한다.
+    """
     logger.info("KOPIS 공연 수집 시작")
     results = []
     cpage = 1
-    eddate = datetime.date.today().strftime("%Y%m%d")
+    today = datetime.date.today()
+    resolved_stdate = stdate or (today - datetime.timedelta(days=_DEFAULT_LOOKBACK_DAYS)).strftime("%Y%m%d")
+    eddate = today.strftime("%Y%m%d")
 
     while True:
         logger.debug("KOPIS 페이지 조회: cpage=%d", cpage)
-        params = {**_DEFAULT_PARAMS, "cpage": cpage, "eddate": eddate}
+        params = {**_DEFAULT_PARAMS, "cpage": cpage, "stdate": resolved_stdate, "eddate": eddate}
 
         root = None
         for attempt in range(1, 4):

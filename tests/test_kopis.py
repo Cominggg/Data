@@ -245,12 +245,25 @@ class TestKopisCollect:
         params = mock_get.call_args[1].get("params") or mock_get.call_args[0][1]
         assert params.get("genrenm") == "GGGA"
 
-    def test_includes_stdate_param(self):
-        """요청 파라미터에 stdate=20200101이 포함되어야 한다."""
+    def test_stdate_defaults_to_180_days_ago(self):
+        """stdate 미전달 시 오늘 기준 180일 전 날짜가 파라미터로 전달되어야 한다."""
+        import datetime
+        expected = (datetime.date.today() - datetime.timedelta(days=180)).strftime("%Y%m%d")
+
         with patch("collectors.kopis.requests.get") as mock_get:
             mock_get.return_value.content = b"<dbs></dbs>"
             mock_get.return_value.raise_for_status = MagicMock()
             collect()
+
+        params = mock_get.call_args[1].get("params") or mock_get.call_args[0][1]
+        assert params.get("stdate") == expected
+
+    def test_stdate_custom_param_is_used(self):
+        """stdate를 직접 전달하면 해당 값이 파라미터로 전달되어야 한다."""
+        with patch("collectors.kopis.requests.get") as mock_get:
+            mock_get.return_value.content = b"<dbs></dbs>"
+            mock_get.return_value.raise_for_status = MagicMock()
+            collect(stdate="20200101")
 
         params = mock_get.call_args[1].get("params") or mock_get.call_args[0][1]
         assert params.get("stdate") == "20200101"
