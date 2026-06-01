@@ -37,20 +37,22 @@ def _query_listeners(params: dict) -> Optional[int]:
         return None
 
 
-def get_monthly_listeners(mbid: str, name: Optional[str] = None) -> Optional[int]:
-    """MBID로 Last.fm 월간 리스너 수를 조회한다. 실패 시 name(일본어명)으로 재시도한다."""
+def get_monthly_listeners(mbid: str, names: Optional[list[str]] = None) -> Optional[int]:
+    """MBID와 후보 이름 목록을 모두 조회해 최댓값 반환."""
     if not _API_KEY:
         logger.warning("LASTFM_API_KEY 환경변수가 설정되지 않아 리스너 수 조회를 건너뜁니다.")
         return None
 
+    results = []
+
     result = _query_listeners({"mbid": mbid})
     if result is not None:
-        return result
+        results.append(result)
 
-    if name:
-        logger.debug("MBID 조회 실패 — 일본어명으로 재시도: %s", name)
+    for name in (names or []):
         result = _query_listeners({"artist": name})
         if result is not None:
-            return result
+            logger.debug("Last.fm 이름 조회 — name=%s, listeners=%d", name, result)
+            results.append(result)
 
-    return None
+    return max(results) if results else None
