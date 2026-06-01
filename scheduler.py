@@ -83,7 +83,7 @@ def run_initial_collect(
     else:
         # KOPIS 수집 + 매칭으로 내한 확정 아티스트를 먼저 파악한다.
         logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
-        run_kopis_collect_and_match()
+        run_status_update()
 
     # 매칭된 아티스트만 즉시 릴리즈 수집, 나머지는 주간 배치가 처리한다.
     matched_mbids = get_matched_artist_mbids()
@@ -108,29 +108,6 @@ def run_wikipedia_collect() -> None:
         save_aliases(aliases)
     logger.info("=== Wikipedia 한국어 alias 수집 잡 완료 ===")
 
-
-def run_kopis_collect_and_match() -> None:
-    """KOPIS 수집 + 공연-아티스트 매칭 (주 1회, 월요일)."""
-    logger.info("=== KOPIS 수집·매칭 잡 시작 ===")
-    concerts = kopis.collect()
-    aliases = get_all_aliases()
-
-    filtered = [c for c in concerts if has_match(c, aliases)]
-    logger.info("alias 매칭 공연 %d건 / 전체 수집 %d건", len(filtered), len(concerts))
-    save_concerts(filtered)
-
-    unmatched = get_unmatched_concerts()
-
-    all_matches: list[dict] = []
-    for concert in unmatched:
-        matches, _ = match_concert(concert, aliases)
-        all_matches.extend(matches)
-
-    if all_matches:
-        save_concert_artists(all_matches)
-        update_artist_is_coming()
-
-    logger.info("=== KOPIS 수집·매칭 잡 완료 ===")
 
 
 def run_status_update() -> None:
@@ -272,7 +249,6 @@ def collect_and_save_setlist(concert_id: int) -> bool:
 
 def _build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-    scheduler.add_job(run_kopis_collect_and_match, "cron", day_of_week="mon", hour=3)
     scheduler.add_job(run_status_update, "cron", hour=4)
     scheduler.add_job(run_release_update, "cron", day_of_week="tue", hour=5)
     scheduler.add_job(run_cover_art_update, "cron", day_of_week="wed", hour=5)

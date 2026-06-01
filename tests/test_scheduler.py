@@ -7,7 +7,6 @@ from scheduler import (
     _build_scheduler,
     _sort_releases,
     run_initial_collect,
-    run_kopis_collect_and_match,
     run_release_update,
     run_setlist_collect,
     run_status_update,
@@ -19,7 +18,7 @@ class TestRunInitialCollect:
     def mock_sub_jobs(self):
         with (
             patch("scheduler.run_wikipedia_collect"),
-            patch("scheduler.run_kopis_collect_and_match"),
+            patch("scheduler.run_status_update"),
             patch("scheduler.get_matched_artist_mbids", return_value=[]),
             patch("scheduler.run_cover_art_update"),
             patch("scheduler.run_artist_image_update"),
@@ -92,73 +91,6 @@ class TestRunInitialCollect:
         mock_collect.assert_not_called()
         mock_save.assert_not_called()
 
-
-class TestRunKopisCollectAndMatch:
-    def test_collects_and_saves_concerts(self):
-        """kopis.collect 후 has_match 통과 공연이 save_concerts로 저장되어야 한다."""
-        concerts = [{"kopis_id": "PF001"}]
-        with (
-            patch("scheduler.kopis.collect", return_value=concerts),
-            patch("scheduler.save_concerts") as mock_save,
-            patch("scheduler.get_all_aliases", return_value=[]),
-            patch("scheduler.has_match", return_value=True),
-            patch("scheduler.get_unmatched_concerts", return_value=[]),
-            patch("scheduler.save_concert_artists"),
-            patch("scheduler.update_artist_is_coming"),
-        ):
-            run_kopis_collect_and_match()
-
-        mock_save.assert_called_once_with(concerts)
-
-    def test_saves_matched_concert_artists(self):
-        """매칭 성공 결과가 save_concert_artists로 저장되어야 한다."""
-        unmatched = [{"concert_id": 1, "title": "아이유 콘서트", "cast": "아이유"}]
-        aliases = [{"artist_id": 10, "name": "아이유"}]
-        with (
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.save_concerts"),
-            patch("scheduler.get_all_aliases", return_value=aliases),
-            patch("scheduler.get_unmatched_concerts", return_value=unmatched),
-            patch("scheduler.save_concert_artists") as mock_save_ca,
-            patch("scheduler.update_artist_is_coming"),
-        ):
-            run_kopis_collect_and_match()
-
-        mock_save_ca.assert_called_once()
-        saved = mock_save_ca.call_args[0][0]
-        assert len(saved) == 1
-        assert saved[0]["concert_id"] == 1
-        assert saved[0]["artist_id"] == 10
-
-    def test_updates_is_coming_after_match(self):
-        """매칭 성공 후 update_artist_is_coming이 인자 없이 호출되어야 한다."""
-        unmatched = [{"concert_id": 1, "title": "아이유 콘서트", "cast": "아이유"}]
-        aliases = [{"artist_id": 10, "name": "아이유"}]
-        with (
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.save_concerts"),
-            patch("scheduler.get_all_aliases", return_value=aliases),
-            patch("scheduler.get_unmatched_concerts", return_value=unmatched),
-            patch("scheduler.save_concert_artists"),
-            patch("scheduler.update_artist_is_coming") as mock_update,
-        ):
-            run_kopis_collect_and_match()
-
-        mock_update.assert_called_once_with()
-
-    def test_skips_save_concert_artists_when_no_matches(self):
-        """매칭 결과가 없으면 save_concert_artists가 호출되지 않아야 한다."""
-        with (
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.save_concerts"),
-            patch("scheduler.get_all_aliases", return_value=[]),
-            patch("scheduler.get_unmatched_concerts", return_value=[]),
-            patch("scheduler.save_concert_artists") as mock_save_ca,
-            patch("scheduler.update_artist_is_coming"),
-        ):
-            run_kopis_collect_and_match()
-
-        mock_save_ca.assert_not_called()
 
 
 class TestRunStatusUpdate:
@@ -303,16 +235,10 @@ class TestRunSetlistCollect:
 
 
 class TestBuildScheduler:
-    def test_registers_seven_jobs(self):
-        """스케줄러에 7개의 잡이 등록되어야 한다."""
+    def test_registers_six_jobs(self):
+        """스케줄러에 6개의 잡이 등록되어야 한다."""
         scheduler = _build_scheduler()
-        assert len(scheduler.get_jobs()) == 7
-
-    def test_includes_monday_job(self):
-        """월요일 KOPIS 수집·매칭 잡이 등록되어야 한다."""
-        scheduler = _build_scheduler()
-        job_funcs = [job.func for job in scheduler.get_jobs()]
-        assert run_kopis_collect_and_match in job_funcs
+        assert len(scheduler.get_jobs()) == 6
 
     def test_includes_tuesday_job(self):
         """화요일 릴리즈 갱신 잡이 등록되어야 한다."""
