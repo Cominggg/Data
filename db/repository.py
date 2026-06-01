@@ -493,6 +493,19 @@ def update_artist_is_coming() -> int:
     return updated
 
 
+def get_active_concerts() -> list[dict]:
+    """status가 '공연예정' 또는 '공연중'인 공연의 kopis_id·kopis_update_date를 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT kopis_id, kopis_update_date
+                FROM concert
+                WHERE status IN ('공연예정', '공연중')
+            """)
+        ).fetchall()
+    return [{"kopis_id": row[0], "kopis_update_date": str(row[1]) if row[1] else None} for row in rows]
+
+
 def get_existing_kopis_ids() -> set:
     """DB에 저장된 모든 concert.kopis_id를 집합으로 반환한다."""
     with get_session() as session:
