@@ -157,12 +157,11 @@ def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
             if detail is None:
                 continue
 
-            ja_name = next(
-                (a.get("name") for a in detail.get("aliases", [])
-                 if (a.get("locale") or "").startswith("ja")),
-                None,
-            )
-            listeners = get_monthly_listeners(mbid, name=ja_name)
+            lastfm_names = [
+                a.get("name") for a in detail.get("aliases", [])
+                if a.get("name") and not (a.get("locale") or "").startswith("ko")
+            ]
+            listeners = get_monthly_listeners(mbid, names=lastfm_names or None)
             if listeners is None:
                 logger.info("리스너 수 조회 실패 — 건너뜀: %s (%s)", item.get("name"), mbid)
                 continue

@@ -185,8 +185,8 @@ class TestCollectArtists:
     @patch("collectors.musicbrainz.get_monthly_listeners", return_value=50000)
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
-    def test_passes_japanese_alias_to_listeners(self, mock_search, mock_detail, mock_listeners):
-        """detail에 일본어 alias가 있으면 get_monthly_listeners에 name으로 전달해야 한다."""
+    def test_passes_non_ko_aliases_to_listeners(self, mock_search, mock_detail, mock_listeners):
+        """ko locale을 제외한 alias를 names 리스트로 get_monthly_listeners에 전달해야 한다."""
         mock_search.return_value = {
             "artists": [{"id": "mbid-1", "name": "Suda Keina"}],
             "count": 1,
@@ -197,18 +197,19 @@ class TestCollectArtists:
             "sort-name": "Suda, Keina",
             "aliases": [
                 {"name": "須田景凪", "locale": "ja"},
+                {"name": "Suda Keina", "locale": "en"},
                 {"name": "수다 케이나", "locale": "ko"},
             ],
             "relations": [],
         }
         collect_artists()
-        mock_listeners.assert_called_once_with("mbid-1", name="須田景凪")
+        mock_listeners.assert_called_once_with("mbid-1", names=["須田景凪", "Suda Keina"])
 
     @patch("collectors.musicbrainz.get_monthly_listeners", return_value=50000)
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
-    def test_passes_none_name_when_no_japanese_alias(self, mock_search, mock_detail, mock_listeners):
-        """일본어 alias가 없으면 name=None으로 get_monthly_listeners를 호출해야 한다."""
+    def test_passes_none_when_all_aliases_are_ko(self, mock_search, mock_detail, mock_listeners):
+        """모든 alias가 ko locale이면 names=None으로 get_monthly_listeners를 호출해야 한다."""
         mock_search.return_value = {
             "artists": [{"id": "mbid-1", "name": "Artist1"}],
             "count": 1,
@@ -221,7 +222,7 @@ class TestCollectArtists:
             "relations": [],
         }
         collect_artists()
-        mock_listeners.assert_called_once_with("mbid-1", name=None)
+        mock_listeners.assert_called_once_with("mbid-1", names=None)
 
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
