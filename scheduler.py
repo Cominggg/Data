@@ -1,12 +1,14 @@
 import argparse
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from collectors import artist_image, kopis, musicbrainz, release, setlist, wikipedia
 from db.repository import (
+    get_active_concerts,
     get_all_aliases,
     get_all_artist_mbids,
     get_all_artists,
@@ -113,9 +115,26 @@ def run_wikipedia_collect() -> None:
 def run_status_update() -> None:
     """공연 상태 갱신 + 신규 공연 저장·매칭 + is_coming 동기화 (매일)."""
     logger.info("=== 공연 상태 갱신 잡 시작 ===")
-    concerts = kopis.collect()
-    update_concert_status(concerts)
 
+    # ① 상태 갱신: DB의 진행 중 공연을 개별 API로 최신 상태 갱신
+    active = get_active_concerts()
+    if active:
+        logger.info("활성 공연 %d건 상태 갱신 시작", len(active))
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(kopis.collect_by_id, c["kopis_id"]): c["kopis_id"] for c in active}
+        fetched = []
+        for future, kopis_id in futures.items():
+            try:
+                result = future.result()
+                if result is not None:
+                    fetched.append(result)
+            except Exception as e:
+                logger.warning("상태 갱신 API 실패 kopis_id=%s: %s", kopis_id, e)
+        if fetched:
+            update_concert_status(fetched)
+
+    # ② 신규 발견: 180일 lookback으로 신규 공연 탐지·저장
+    concerts = kopis.collect()
     existing_ids = get_existing_kopis_ids()
     aliases = get_all_aliases()
     new_concerts = [
