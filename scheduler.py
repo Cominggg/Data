@@ -51,6 +51,10 @@ def run_initial_collect(
     force_artists: bool = False,
     skip_kopis: bool = False,
     skip_wikipedia: bool = False,
+    skip_releases: bool = False,
+    skip_cover_art: bool = False,
+    skip_artist_image: bool = False,
+    skip_setlist: bool = False,
 ) -> None:
     """초기 수집 (1회성 CLI): 아티스트 → KOPIS 매칭 → 매칭 아티스트 릴리즈 순으로 수집.
 
@@ -58,6 +62,10 @@ def run_initial_collect(
     force_artists=True 시 기존 DB 아티스트를 건너뛰지 않고 전체 재수집한다.
     skip_kopis=True 시 KOPIS 수집·매칭을 건너뛰고 릴리즈 수집으로 진행한다.
     skip_wikipedia=True 시 Wikipedia alias 수집을 건너뛴다.
+    skip_releases=True 시 릴리즈 수집을 건너뛴다.
+    skip_cover_art=True 시 커버아트 수집을 건너뛴다.
+    skip_artist_image=True 시 아티스트 이미지 수집을 건너뛴다.
+    skip_setlist=True 시 setlist.fm 수집을 건너뛴다.
     나머지 아티스트 릴리즈는 주간 배치(run_release_update)가 점진적으로 채운다.
     """
     logger.info("=== 초기 수집 시작 ===")
@@ -87,16 +95,29 @@ def run_initial_collect(
         logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
         run_status_update()
 
-    # 매칭된 아티스트만 즉시 릴리즈 수집, 나머지는 주간 배치가 처리한다.
-    matched_mbids = get_matched_artist_mbids()
-    logger.info("매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_mbids))
-    for mbid in matched_mbids:
-        releases = _sort_releases(release.collect_releases(mbid))
-        save_releases(releases)
+    if skip_releases:
+        logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
+    else:
+        matched_mbids = get_matched_artist_mbids()
+        logger.info("매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_mbids))
+        for mbid in matched_mbids:
+            releases = _sort_releases(release.collect_releases(mbid))
+            save_releases(releases)
 
-    run_cover_art_update()
-    run_artist_image_update()
-    run_setlist_collect()
+    if skip_cover_art:
+        logger.info("--skip-cover-art 플래그 감지 — 커버아트 수집 건너뜀")
+    else:
+        run_cover_art_update()
+
+    if skip_artist_image:
+        logger.info("--skip-artist-image 플래그 감지 — 아티스트 이미지 수집 건너뜀")
+    else:
+        run_artist_image_update()
+
+    if skip_setlist:
+        logger.info("--skip-setlist 플래그 감지 — setlist 수집 건너뜀")
+    else:
+        run_setlist_collect()
 
     logger.info("=== 초기 수집 완료 ===")
 
@@ -305,6 +326,26 @@ def main() -> None:
         action="store_true",
         help="Wikipedia alias 수집을 건너뜀 (init 전용)",
     )
+    parser.add_argument(
+        "--skip-releases",
+        action="store_true",
+        help="릴리즈 수집을 건너뜀 (init 전용)",
+    )
+    parser.add_argument(
+        "--skip-cover-art",
+        action="store_true",
+        help="커버아트 수집을 건너뜀 (init 전용)",
+    )
+    parser.add_argument(
+        "--skip-artist-image",
+        action="store_true",
+        help="아티스트 이미지 수집을 건너뜀 (init 전용)",
+    )
+    parser.add_argument(
+        "--skip-setlist",
+        action="store_true",
+        help="setlist.fm 수집을 건너뜀 (init 전용)",
+    )
     args = parser.parse_args()
 
     if args.command == "init":
@@ -313,6 +354,10 @@ def main() -> None:
             force_artists=args.force_artists,
             skip_kopis=args.skip_kopis,
             skip_wikipedia=args.skip_wikipedia,
+            skip_releases=args.skip_releases,
+            skip_cover_art=args.skip_cover_art,
+            skip_artist_image=args.skip_artist_image,
+            skip_setlist=args.skip_setlist,
         )
         return
 
