@@ -1,18 +1,21 @@
 import argparse
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from collectors import artist_image, kopis, musicbrainz, release, setlist, wikipedia
 from db.repository import (
+    get_active_concerts,
     get_all_aliases,
     get_all_artist_mbids,
     get_all_artists,
     get_artists_without_image,
     get_concert_by_kopis_id,
     get_concert_with_artist,
+    get_existing_kopis_ids,
     get_matched_artist_mbids,
     get_release_groups_without_cover,
     get_unmatched_concerts,
@@ -48,6 +51,10 @@ def run_initial_collect(
     force_artists: bool = False,
     skip_kopis: bool = False,
     skip_wikipedia: bool = False,
+    skip_releases: bool = False,
+    skip_cover_art: bool = False,
+    skip_artist_image: bool = False,
+    skip_setlist: bool = False,
 ) -> None:
     """초기 수집 (1회성 CLI): 아티스트 → KOPIS 매칭 → 매칭 아티스트 릴리즈 순으로 수집.
 
@@ -55,6 +62,10 @@ def run_initial_collect(
     force_artists=True 시 기존 DB 아티스트를 건너뛰지 않고 전체 재수집한다.
     skip_kopis=True 시 KOPIS 수집·매칭을 건너뛰고 릴리즈 수집으로 진행한다.
     skip_wikipedia=True 시 Wikipedia alias 수집을 건너뛴다.
+    skip_releases=True 시 릴리즈 수집을 건너뛴다.
+    skip_cover_art=True 시 커버아트 수집을 건너뛴다.
+    skip_artist_image=True 시 아티스트 이미지 수집을 건너뛴다.
+    skip_setlist=True 시 setlist.fm 수집을 건너뛴다.
     나머지 아티스트 릴리즈는 주간 배치(run_release_update)가 점진적으로 채운다.
     """
     logger.info("=== 초기 수집 시작 ===")
@@ -82,18 +93,31 @@ def run_initial_collect(
     else:
         # KOPIS 수집 + 매칭으로 내한 확정 아티스트를 먼저 파악한다.
         logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
-        run_kopis_collect_and_match()
+        run_status_update()
 
-    # 매칭된 아티스트만 즉시 릴리즈 수집, 나머지는 주간 배치가 처리한다.
-    matched_mbids = get_matched_artist_mbids()
-    logger.info("매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_mbids))
-    for mbid in matched_mbids:
-        releases = _sort_releases(release.collect_releases(mbid))
-        save_releases(releases)
+    if skip_releases:
+        logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
+    else:
+        matched_mbids = get_matched_artist_mbids()
+        logger.info("매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_mbids))
+        for mbid in matched_mbids:
+            releases = _sort_releases(release.collect_releases(mbid))
+            save_releases(releases)
 
-    run_cover_art_update()
-    run_artist_image_update()
-    run_setlist_collect()
+    if skip_cover_art:
+        logger.info("--skip-cover-art 플래그 감지 — 커버아트 수집 건너뜀")
+    else:
+        run_cover_art_update()
+
+    if skip_artist_image:
+        logger.info("--skip-artist-image 플래그 감지 — 아티스트 이미지 수집 건너뜀")
+    else:
+        run_artist_image_update()
+
+    if skip_setlist:
+        logger.info("--skip-setlist 플래그 감지 — setlist 수집 건너뜀")
+    else:
+        run_setlist_collect()
 
     logger.info("=== 초기 수집 완료 ===")
 
@@ -108,35 +132,47 @@ def run_wikipedia_collect() -> None:
     logger.info("=== Wikipedia 한국어 alias 수집 잡 완료 ===")
 
 
-def run_kopis_collect_and_match() -> None:
-    """KOPIS 수집 + 공연-아티스트 매칭 (주 1회, 월요일)."""
-    logger.info("=== KOPIS 수집·매칭 잡 시작 ===")
-    concerts = kopis.collect()
-    aliases = get_all_aliases()
-
-    filtered = [c for c in concerts if has_match(c, aliases)]
-    logger.info("alias 매칭 공연 %d건 / 전체 수집 %d건", len(filtered), len(concerts))
-    save_concerts(filtered)
-
-    unmatched = get_unmatched_concerts()
-
-    all_matches: list[dict] = []
-    for concert in unmatched:
-        matches, _ = match_concert(concert, aliases)
-        all_matches.extend(matches)
-
-    if all_matches:
-        save_concert_artists(all_matches)
-        update_artist_is_coming()
-
-    logger.info("=== KOPIS 수집·매칭 잡 완료 ===")
-
 
 def run_status_update() -> None:
-    """공연 상태 갱신 + is_coming 동기화 (매일)."""
+    """공연 상태 갱신 + 신규 공연 저장·매칭 + is_coming 동기화 (매일)."""
     logger.info("=== 공연 상태 갱신 잡 시작 ===")
+
+    # ① 상태 갱신: DB의 진행 중 공연을 개별 API로 최신 상태 갱신
+    active = get_active_concerts()
+    if active:
+        logger.info("활성 공연 %d건 상태 갱신 시작", len(active))
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(kopis.collect_by_id, c["kopis_id"]): c["kopis_id"] for c in active}
+        fetched = []
+        for future, kopis_id in futures.items():
+            try:
+                result = future.result()
+                if result is not None:
+                    fetched.append(result)
+            except Exception as e:
+                logger.warning("상태 갱신 API 실패 kopis_id=%s: %s", kopis_id, e)
+        if fetched:
+            update_concert_status(fetched)
+
+    # ② 신규 발견: 2020-01-01부터 현재 기준 +365일까지 신규 공연 탐지·저장
     concerts = kopis.collect()
-    update_concert_status(concerts)
+    existing_ids = get_existing_kopis_ids()
+    aliases = get_all_aliases()
+    new_concerts = [
+        c for c in concerts
+        if c["kopis_id"] not in existing_ids and has_match(c, aliases)
+    ]
+    if new_concerts:
+        logger.info("신규 공연 %d건 저장 시작", len(new_concerts))
+        save_concerts(new_concerts)
+        unmatched = get_unmatched_concerts()
+        all_matches: list[dict] = []
+        for concert in unmatched:
+            matches, _ = match_concert(concert, aliases)
+            all_matches.extend(matches)
+        if all_matches:
+            save_concert_artists(all_matches)
+
     update_artist_is_coming()
     logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
@@ -253,7 +289,6 @@ def collect_and_save_setlist(concert_id: int) -> bool:
 
 def _build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-    scheduler.add_job(run_kopis_collect_and_match, "cron", day_of_week="mon", hour=3)
     scheduler.add_job(run_status_update, "cron", hour=4)
     scheduler.add_job(run_release_update, "cron", day_of_week="tue", hour=5)
     scheduler.add_job(run_cover_art_update, "cron", day_of_week="wed", hour=5)
@@ -291,6 +326,26 @@ def main() -> None:
         action="store_true",
         help="Wikipedia alias 수집을 건너뜀 (init 전용)",
     )
+    parser.add_argument(
+        "--skip-releases",
+        action="store_true",
+        help="릴리즈 수집을 건너뜀 (init 전용)",
+    )
+    parser.add_argument(
+        "--skip-cover-art",
+        action="store_true",
+        help="커버아트 수집을 건너뜀 (init 전용)",
+    )
+    parser.add_argument(
+        "--skip-artist-image",
+        action="store_true",
+        help="아티스트 이미지 수집을 건너뜀 (init 전용)",
+    )
+    parser.add_argument(
+        "--skip-setlist",
+        action="store_true",
+        help="setlist.fm 수집을 건너뜀 (init 전용)",
+    )
     args = parser.parse_args()
 
     if args.command == "init":
@@ -299,6 +354,10 @@ def main() -> None:
             force_artists=args.force_artists,
             skip_kopis=args.skip_kopis,
             skip_wikipedia=args.skip_wikipedia,
+            skip_releases=args.skip_releases,
+            skip_cover_art=args.skip_cover_art,
+            skip_artist_image=args.skip_artist_image,
+            skip_setlist=args.skip_setlist,
         )
         return
 

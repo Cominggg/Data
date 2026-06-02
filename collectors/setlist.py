@@ -7,7 +7,7 @@ from typing import Optional
 import requests
 from dotenv import load_dotenv
 
-from db.repository import get_completed_concerts
+from db.repository import get_completed_concerts, update_concert_fetch_attempted
 
 load_dotenv()
 
@@ -61,7 +61,9 @@ def _parse_tracks(sets_data: dict) -> list[dict]:
     return tracks
 
 
-def _event_date_in_range(event_date_str: str, prfpdfrom: Optional[str], prfpdto: Optional[str]) -> bool:
+def _event_date_in_range(
+    event_date_str: str, prfpdfrom: Optional[str], prfpdto: Optional[str]
+) -> bool:
     """eventDate (dd-MM-yyyy) 가 공연 기간 (yyyy-MM-dd) 안에 포함되는지 확인."""
     try:
         event_dt = datetime.strptime(event_date_str, "%d-%m-%Y")
@@ -71,7 +73,10 @@ def _event_date_in_range(event_date_str: str, prfpdfrom: Optional[str], prfpdto:
             return False
         return True
     except (ValueError, TypeError) as e:
-        logger.warning("날짜 파싱 실패: event_date=%s, from=%s, to=%s, %s", event_date_str, prfpdfrom, prfpdto, e)
+        logger.warning(
+            "날짜 파싱 실패: event_date=%s, from=%s, to=%s, %s",
+            event_date_str, prfpdfrom, prfpdto, e,
+        )
         return False
 
 
@@ -87,7 +92,10 @@ def collect_for_concert(concert: dict) -> Optional[dict]:
     page = 1
     while True:
         try:
-            data = _get("/search/setlists", {"artistMbid": artist_mbid, "countryCode": "KR", "p": page})
+            data = _get(
+                "/search/setlists",
+                {"artistMbid": artist_mbid, "countryCode": "KR", "p": page},
+            )
         except requests.RequestException as e:
             is_404 = (
                 isinstance(e, requests.HTTPError)
@@ -133,7 +141,10 @@ def collect() -> list[dict]:
         page = 1
         while True:
             try:
-                data = _get("/search/setlists", {"artistMbid": artist_mbid, "countryCode": "KR", "p": page})
+                data = _get(
+                    "/search/setlists",
+                    {"artistMbid": artist_mbid, "countryCode": "KR", "p": page},
+                )
             except requests.RequestException as e:
                 is_404 = (
                     isinstance(e, requests.HTTPError)
@@ -143,11 +154,16 @@ def collect() -> list[dict]:
                 if is_404:
                     logger.debug("셋리스트 없음 — 건너뜀: concert_id=%d, page=%d", concert_id, page)
                 else:
-                    logger.warning("setlist.fm API 오류 (3회 실패): concert_id=%d, page=%d, %s", concert_id, page, e)
+                    logger.warning(
+                        "setlist.fm API 오류 (3회 실패): concert_id=%d, page=%d, %s",
+                        concert_id, page, e,
+                    )
+                update_concert_fetch_attempted(concert_id)
                 break
 
             setlist_items = data.get("setlist", [])
             if not setlist_items:
+                update_concert_fetch_attempted(concert_id)
                 break
 
             matched = False
@@ -167,6 +183,7 @@ def collect() -> list[dict]:
                     "셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
                     concert_id, item.get("id"), len(tracks),
                 )
+                update_concert_fetch_attempted(concert_id)
                 matched = True
                 break
 
@@ -176,6 +193,7 @@ def collect() -> list[dict]:
             total = int(data.get("total", 0))
             items_per_page = int(data.get("itemsPerPage", 20))
             if page * items_per_page >= total or page >= _MAX_PAGES:
+                update_concert_fetch_attempted(concert_id)
                 break
             page += 1
 

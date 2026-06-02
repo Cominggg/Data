@@ -47,6 +47,11 @@ class TestSetlistCollect:
         with patch("collectors.setlist.time.sleep"):
             yield
 
+    @pytest.fixture(autouse=True)
+    def mock_fetch_attempted(self):
+        with patch("collectors.setlist.update_concert_fetch_attempted"):
+            yield
+
     def test_collect_returns_list(self):
         """collect() 호출 결과가 리스트여야 한다."""
         mock_response = MagicMock()
@@ -237,6 +242,11 @@ class TestSetlistRetry:
         with patch("collectors.setlist.time.sleep"):
             yield
 
+    @pytest.fixture(autouse=True)
+    def mock_fetch_attempted(self):
+        with patch("collectors.setlist.update_concert_fetch_attempted"):
+            yield
+
     def test_retries_on_network_error_then_succeeds(self):
         """네트워크 오류 후 재시도 성공 시 셋리스트가 수집되어야 한다."""
         fail_response = MagicMock()
@@ -318,6 +328,96 @@ class TestParseTracks:
 
         assert result[0]["position"] == 1
         assert result[1]["position"] == 2
+
+
+class TestSetlistFetchAttempted:
+    """collect()에서 fetch_attempted_at 갱신 호출 검증."""
+
+    @pytest.fixture(autouse=True)
+    def mock_sleep(self):
+        with patch("collectors.setlist.time.sleep"):
+            yield
+
+    def test_records_attempt_when_setlist_found(self):
+        """셋리스트 수집 성공 시 fetch_attempted_at이 갱신되어야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_api_response([_sample_setlist()])
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", return_value=mock_response):
+                with patch(
+                    "collectors.setlist.update_concert_fetch_attempted"
+                ) as mock_attempted:
+                    collect()
+
+        mock_attempted.assert_called_once_with(1)
+
+    def test_records_attempt_when_no_setlist_found(self):
+        """셋리스트 미수집 시에도 fetch_attempted_at이 갱신되어야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_api_response([])
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", return_value=mock_response):
+                with patch(
+                    "collectors.setlist.update_concert_fetch_attempted"
+                ) as mock_attempted:
+                    collect()
+
+        mock_attempted.assert_called_once_with(1)
+
+    def test_records_attempt_on_404(self):
+        """404 응답 시에도 fetch_attempted_at이 갱신되어야 한다."""
+        http_err = requests.HTTPError()
+        http_err.response = MagicMock(status_code=404)
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = http_err
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", return_value=mock_response):
+                with patch(
+                    "collectors.setlist.update_concert_fetch_attempted"
+                ) as mock_attempted:
+                    collect()
+
+        mock_attempted.assert_called_once_with(1)
+
+    def test_records_attempt_on_api_error(self):
+        """API 오류(5xx) 시에도 fetch_attempted_at이 갱신되어야 한다."""
+        http_err = requests.HTTPError()
+        http_err.response = MagicMock(status_code=500)
+        fail_response = MagicMock()
+        fail_response.raise_for_status.side_effect = http_err
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", return_value=fail_response):
+                with patch(
+                    "collectors.setlist.update_concert_fetch_attempted"
+                ) as mock_attempted:
+                    collect()
+
+        mock_attempted.assert_called_once_with(1)
+
+    def test_records_attempt_when_pagination_exhausted(self):
+        """페이지 소진 시에도 fetch_attempted_at이 갱신되어야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "setlist": [_sample_setlist(eventDate="01-01-2025")],
+            "total": 1,
+            "itemsPerPage": 20,
+        }
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", return_value=mock_response):
+                with patch(
+                    "collectors.setlist.update_concert_fetch_attempted"
+                ) as mock_attempted:
+                    collect()
+
+        mock_attempted.assert_called_once_with(1)
 
 
 class TestEventDateInRange:

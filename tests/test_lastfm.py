@@ -65,3 +65,54 @@ class TestGetMonthlyListeners:
             result = get_monthly_listeners("mbid-001")
 
         assert result is None
+
+    def test_returns_name_result_when_mbid_fails(self):
+        """MBID 조회 실패 시 names 중 유효한 값을 반환해야 한다."""
+        with (
+            patch("collectors.lastfm._API_KEY", "dummy-key"),
+            patch("collectors.lastfm._query_listeners", side_effect=[None, 50000]),
+        ):
+            result = get_monthly_listeners("mbid-unknown", names=["須田景凪"])
+
+        assert result == 50000
+
+    def test_returns_max_across_mbid_and_names(self):
+        """MBID와 names 중 최댓값을 반환해야 한다."""
+        with (
+            patch("collectors.lastfm._API_KEY", "dummy-key"),
+            patch("collectors.lastfm._query_listeners", side_effect=[25000, 353000]),
+        ):
+            result = get_monthly_listeners("mbid-001", names=["ZUTOMAYO"])
+
+        assert result == 353000
+
+    def test_returns_mbid_result_when_names_all_fail(self):
+        """names 조회가 모두 실패해도 MBID 결과가 있으면 반환해야 한다."""
+        with (
+            patch("collectors.lastfm._API_KEY", "dummy-key"),
+            patch("collectors.lastfm._query_listeners", side_effect=[25000, None]),
+        ):
+            result = get_monthly_listeners("mbid-001", names=["unknown-name"])
+
+        assert result == 25000
+
+    def test_returns_none_when_all_fail(self):
+        """MBID와 names 모두 실패하면 None을 반환해야 한다."""
+        with (
+            patch("collectors.lastfm._API_KEY", "dummy-key"),
+            patch("collectors.lastfm._query_listeners", return_value=None),
+        ):
+            result = get_monthly_listeners("mbid-unknown", names=["不明アーティスト"])
+
+        assert result is None
+
+    def test_returns_none_when_names_is_none(self):
+        """names가 None이면 MBID 실패 후 추가 조회 없이 None을 반환해야 한다."""
+        with (
+            patch("collectors.lastfm._API_KEY", "dummy-key"),
+            patch("collectors.lastfm._query_listeners", return_value=None) as mock_query,
+        ):
+            result = get_monthly_listeners("mbid-unknown", names=None)
+
+        assert result is None
+        mock_query.assert_called_once()

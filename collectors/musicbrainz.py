@@ -125,7 +125,9 @@ def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
                 if attempt == 3:
                     logger.error("페이지 수집 실패 (offset=%d), 3회 시도 후 중단: %s", offset, e)
                     return artists
-                logger.warning("페이지 수집 실패 (offset=%d), %d/3회 재시도: %s", offset, attempt, e)
+                logger.warning(
+                    "페이지 수집 실패 (offset=%d), %d/3회 재시도: %s", offset, attempt, e
+                )
                 time.sleep(5 * attempt)
         batch = page.get("artists", [])
         total = page.get("count", 0)
@@ -155,9 +157,16 @@ def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
             if detail is None:
                 continue
 
-            listeners = get_monthly_listeners(mbid)
-            if listeners is not None and listeners < _MIN_LISTENERS:
-                logger.debug(
+            lastfm_names = [
+                a.get("name") for a in detail.get("aliases", [])
+                if a.get("name") and not (a.get("locale") or "").startswith("ko")
+            ]
+            listeners = get_monthly_listeners(mbid, names=lastfm_names or None)
+            if listeners is None:
+                logger.info("리스너 수 조회 실패 — 건너뜀: %s (%s)", item.get("name"), mbid)
+                continue
+            if listeners < _MIN_LISTENERS:
+                logger.info(
                     "리스너 수 미달 — 건너뜀: %s (%s), listeners=%d",
                     item.get("name"), mbid, listeners,
                 )

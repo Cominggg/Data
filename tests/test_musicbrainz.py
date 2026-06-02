@@ -114,7 +114,7 @@ class TestParseArtist:
 
 
 class TestCollectArtists:
-    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=10000)
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=50000)
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
     def test_collects_single_page(self, mock_search, mock_detail, mock_listeners):
@@ -169,8 +169,8 @@ class TestCollectArtists:
     @patch("collectors.musicbrainz.get_monthly_listeners", return_value=None)
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
-    def test_includes_artist_when_listeners_unavailable(self, mock_search, mock_detail, mock_listeners):
-        """Last.fm 조회 실패(None) 시 아티스트를 수집해야 한다."""
+    def test_skips_artist_when_listeners_unavailable(self, mock_search, mock_detail, mock_listeners):
+        """Last.fm 조회 실패(None) 시 아티스트를 건너뛰어야 한다."""
         mock_search.return_value = {
             "artists": [{"id": "mbid-1", "name": "Artist1"}],
             "count": 1,
@@ -180,7 +180,49 @@ class TestCollectArtists:
             "aliases": [], "relations": [],
         }
         result = collect_artists()
-        assert len(result) == 1
+        assert result == []
+
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=50000)
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    @patch("collectors.musicbrainz._search_artists")
+    def test_passes_non_ko_aliases_to_listeners(self, mock_search, mock_detail, mock_listeners):
+        """ko locale을 제외한 alias를 names 리스트로 get_monthly_listeners에 전달해야 한다."""
+        mock_search.return_value = {
+            "artists": [{"id": "mbid-1", "name": "Suda Keina"}],
+            "count": 1,
+        }
+        mock_detail.return_value = {
+            "id": "mbid-1",
+            "name": "Suda Keina",
+            "sort-name": "Suda, Keina",
+            "aliases": [
+                {"name": "須田景凪", "locale": "ja"},
+                {"name": "Suda Keina", "locale": "en"},
+                {"name": "수다 케이나", "locale": "ko"},
+            ],
+            "relations": [],
+        }
+        collect_artists()
+        mock_listeners.assert_called_once_with("mbid-1", names=["須田景凪", "Suda Keina"])
+
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=50000)
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    @patch("collectors.musicbrainz._search_artists")
+    def test_passes_none_when_all_aliases_are_ko(self, mock_search, mock_detail, mock_listeners):
+        """모든 alias가 ko locale이면 names=None으로 get_monthly_listeners를 호출해야 한다."""
+        mock_search.return_value = {
+            "artists": [{"id": "mbid-1", "name": "Artist1"}],
+            "count": 1,
+        }
+        mock_detail.return_value = {
+            "id": "mbid-1",
+            "name": "Artist1",
+            "sort-name": "Artist1",
+            "aliases": [{"name": "아티스트1", "locale": "ko"}],
+            "relations": [],
+        }
+        collect_artists()
+        mock_listeners.assert_called_once_with("mbid-1", names=None)
 
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
@@ -191,7 +233,7 @@ class TestCollectArtists:
         mock_search.assert_called_once()
 
     @patch("collectors.musicbrainz._MAX_ARTISTS", 1)
-    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=10000)
+    @patch("collectors.musicbrainz.get_monthly_listeners", return_value=50000)
     @patch("collectors.musicbrainz._fetch_artist_detail")
     @patch("collectors.musicbrainz._search_artists")
     def test_stops_at_max_artists_limit(self, mock_search, mock_detail, mock_listeners):

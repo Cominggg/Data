@@ -1,10 +1,54 @@
 from unittest.mock import MagicMock, call, patch
 
 from db.repository import (
+    get_active_concerts,
     save_artists,
     save_concert_artists,
     update_artist_is_coming,
 )
+
+
+class TestGetActiveConcerts:
+    def _run(self, mock_rows):
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = mock_rows
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            return get_active_concerts()
+
+    def test_filters_by_active_status(self):
+        """공연예정·공연중 상태 필터가 SQL에 포함되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = []
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            get_active_concerts()
+
+        sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "공연예정" in sql
+        assert "공연중" in sql
+
+    def test_returns_kopis_id_and_update_date(self):
+        """반환값에 kopis_id와 kopis_update_date 키가 포함되어야 한다."""
+        result = self._run([("PF123", "2024-01-01"), ("PF456", "2024-02-01")])
+
+        assert len(result) == 2
+        assert result[0]["kopis_id"] == "PF123"
+        assert result[0]["kopis_update_date"] == "2024-01-01"
+
+    def test_handles_null_update_date(self):
+        """kopis_update_date가 NULL이면 None으로 반환되어야 한다."""
+        result = self._run([("PF789", None)])
+
+        assert result[0]["kopis_update_date"] is None
+
+    def test_returns_empty_list_when_no_active_concerts(self):
+        """활성 공연이 없으면 빈 리스트를 반환해야 한다."""
+        result = self._run([])
+
+        assert result == []
 
 
 class TestSaveArtists:
