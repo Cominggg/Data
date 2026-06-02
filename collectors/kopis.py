@@ -26,7 +26,8 @@ _DEFAULT_PARAMS = {
     "rows": 100,
 }
 
-_DEFAULT_LOOKBACK_DAYS = 180
+_DEFAULT_STDATE = "20200101"
+_DEFAULT_LOOKAHEAD_DAYS = 365
 
 
 def _parse_kopis_date(raw: Optional[str]) -> Optional[str]:
@@ -191,21 +192,22 @@ def _fetch_and_merge(concert: dict) -> Optional[dict]:
     return concert
 
 
-def collect(stdate: Optional[str] = None) -> list[dict]:
+def collect(stdate: Optional[str] = None, eddate: Optional[str] = None) -> list[dict]:
     """KOPIS에서 내한공연 목록을 전 페이지 순회해 반환한다.
 
-    stdate 미전달 시 오늘 기준 _DEFAULT_LOOKBACK_DAYS일 전을 시작일로 사용한다.
+    stdate 미전달 시 _DEFAULT_STDATE(2020-01-01)를 시작일로 사용한다.
+    eddate 미전달 시 오늘 기준 _DEFAULT_LOOKAHEAD_DAYS일 후를 종료일로 사용한다.
     """
     logger.info("KOPIS 공연 수집 시작")
     results = []
     cpage = 1
     today = datetime.date.today()
-    resolved_stdate = stdate or (today - datetime.timedelta(days=_DEFAULT_LOOKBACK_DAYS)).strftime("%Y%m%d")
-    eddate = today.strftime("%Y%m%d")
+    resolved_stdate = stdate or _DEFAULT_STDATE
+    resolved_eddate = eddate or (today + datetime.timedelta(days=_DEFAULT_LOOKAHEAD_DAYS)).strftime("%Y%m%d")
 
     while True:
         logger.debug("KOPIS 페이지 조회: cpage=%d", cpage)
-        params = {**_DEFAULT_PARAMS, "cpage": cpage, "stdate": resolved_stdate, "eddate": eddate}
+        params = {**_DEFAULT_PARAMS, "cpage": cpage, "stdate": resolved_stdate, "eddate": resolved_eddate}
 
         root = None
         for attempt in range(1, 4):
