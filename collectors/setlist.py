@@ -142,9 +142,9 @@ def collect() -> list[dict]:
         while True:
             try:
                 data = _get(
-                "/search/setlists",
-                {"artistMbid": artist_mbid, "countryCode": "KR", "p": page},
-            )
+                    "/search/setlists",
+                    {"artistMbid": artist_mbid, "countryCode": "KR", "p": page},
+                )
             except requests.RequestException as e:
                 is_404 = (
                     isinstance(e, requests.HTTPError)

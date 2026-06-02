@@ -154,7 +154,7 @@ def run_status_update() -> None:
         if fetched:
             update_concert_status(fetched)
 
-    # ② 신규 발견: 180일 lookback으로 신규 공연 탐지·저장
+    # ② 신규 발견: 2020-01-01부터 현재 기준 +365일까지 신규 공연 탐지·저장
     concerts = kopis.collect()
     existing_ids = get_existing_kopis_ids()
     aliases = get_all_aliases()
