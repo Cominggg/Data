@@ -119,6 +119,47 @@ class TestCollectArtistImage:
 
         assert result is None
 
+    def test_skips_mb_api_when_spotify_url_provided(self):
+        """spotify_url 파라미터 제공 시 MB API 호출 없이 Spotify ID 직접 사용."""
+        artist_response = _make_spotify_artist_response(
+            images=[{"url": "https://i.scdn.co/image/direct.jpg", "width": 640, "height": 640}]
+        )
+        mock_get = MagicMock(return_value=artist_response)
+
+        with self._patch_env(), patch("collectors.artist_image.requests.post",
+                                      return_value=_make_token_response()), \
+                patch("collectors.artist_image.requests.get", mock_get):
+            result = collect_artist_image(
+                "mbid-005",
+                spotify_url="https://open.spotify.com/artist/direct-id",
+            )
+
+        assert result == "https://i.scdn.co/image/direct.jpg"
+        # MB API가 아닌 Spotify artists 엔드포인트만 호출됐는지 확인
+        call_url = mock_get.call_args[0][0]
+        assert "spotify.com" in call_url or "api.spotify.com" in call_url
+        assert "musicbrainz" not in call_url
+
+    def test_skips_mb_api_when_name_provided(self):
+        """name 파라미터 제공 시 MB API 호출 없이 이름 검색만 수행."""
+        search_response = MagicMock()
+        search_response.status_code = 200
+        search_response.json.return_value = {"artists": {"items": [{"id": "name-search-id"}]}}
+        artist_response = _make_spotify_artist_response(
+            images=[{"url": "https://i.scdn.co/image/by-name.jpg", "width": 640, "height": 640}]
+        )
+
+        with self._patch_env(), patch("collectors.artist_image.requests.post",
+                                      return_value=_make_token_response()), \
+                patch("collectors.artist_image.requests.get",
+                      side_effect=[search_response, artist_response]) as mock_get:
+            result = collect_artist_image("mbid-006", name="YOASOBI")
+
+        assert result == "https://i.scdn.co/image/by-name.jpg"
+        # 첫 번째 GET 호출이 MusicBrainz가 아닌 Spotify search여야 함
+        first_call_url = mock_get.call_args_list[0][0][0]
+        assert "musicbrainz" not in first_call_url
+
     def test_raises_when_credentials_missing(self):
         """SPOTIFY_CLIENT_ID 또는 SPOTIFY_CLIENT_SECRET 미설정 → ValueError."""
         with patch.dict("os.environ", {}, clear=True):
