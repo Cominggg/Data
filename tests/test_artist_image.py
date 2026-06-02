@@ -7,74 +7,127 @@ import requests
 from collectors.artist_image import collect_artist_image
 
 
+def _make_token_response(token: str = "test-token", expires_in: int = 3600) -> MagicMock:
+    mock = MagicMock()
+    mock.status_code = 200
+    mock.json.return_value = {"access_token": token, "expires_in": expires_in}
+    return mock
+
+
+def _make_mb_response(name: str = "back number", spotify_url: str = None) -> MagicMock:
+    relations = []
+    if spotify_url:
+        relations.append({"url": {"resource": spotify_url}})
+    mock = MagicMock()
+    mock.status_code = 200
+    mock.json.return_value = {"name": name, "relations": relations}
+    return mock
+
+
+def _make_spotify_artist_response(images: list = None) -> MagicMock:
+    mock = MagicMock()
+    mock.status_code = 200
+    mock.json.return_value = {"images": images or []}
+    return mock
+
+
 class TestCollectArtistImage:
-    def test_returns_image_url(self):
-        """정상 응답에서 artistthumb[0].url을 반환해야 한다."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "artistthumb": [{"url": "https://assets.fanart.tv/fanart/music/mbid-001/artistthumb.jpg"}]
-        }
-        with (
-            patch("collectors.artist_image.os.environ.get", return_value="dummy-key"),
-            patch("collectors.artist_image.requests.get", return_value=mock_response),
-        ):
+    def _patch_env(self):
+        return patch.dict(
+            "os.environ",
+            {"SPOTIFY_CLIENT_ID": "test-id", "SPOTIFY_CLIENT_SECRET": "test-secret"},
+        )
+
+    def test_returns_image_url_via_url_rels(self):
+        """MB URL relations에 Spotify ID 있음 → 이미지 URL 반환."""
+        mb_response = _make_mb_response(
+            name="back number",
+            spotify_url="https://open.spotify.com/artist/abc123",
+        )
+        artist_response = _make_spotify_artist_response(
+            images=[{"url": "https://i.scdn.co/image/large.jpg", "width": 640, "height": 640}]
+        )
+
+        with self._patch_env(), patch("collectors.artist_image.requests.post",
+                                      return_value=_make_token_response()), \
+                patch("collectors.artist_image.requests.get",
+                      side_effect=[mb_response, artist_response]):
             result = collect_artist_image("mbid-001")
 
-        assert result == "https://assets.fanart.tv/fanart/music/mbid-001/artistthumb.jpg"
+        assert result == "https://i.scdn.co/image/large.jpg"
 
-    def test_returns_none_on_404(self):
-        """404 응답 시 None을 반환해야 한다."""
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        with (
-            patch("collectors.artist_image.os.environ.get", return_value="dummy-key"),
-            patch("collectors.artist_image.requests.get", return_value=mock_response),
-        ):
+    def test_returns_image_url_via_name_search(self):
+        """MB URL relations에 Spotify 없음 → 이름 검색 fallback → 이미지 반환."""
+        mb_response = _make_mb_response(name="Mrs. GREEN APPLE")
+        search_response = MagicMock()
+        search_response.status_code = 200
+        search_response.json.return_value = {
+            "artists": {"items": [{"id": "spotify-xyz"}]}
+        }
+        artist_response = _make_spotify_artist_response(
+            images=[{"url": "https://i.scdn.co/image/fallback.jpg", "width": 640, "height": 640}]
+        )
+
+        with self._patch_env(), patch("collectors.artist_image.requests.post",
+                                      return_value=_make_token_response()), \
+                patch("collectors.artist_image.requests.get",
+                      side_effect=[mb_response, search_response, artist_response]):
+            result = collect_artist_image("mbid-002")
+
+        assert result == "https://i.scdn.co/image/fallback.jpg"
+
+    def test_returns_none_when_mb_artist_not_found(self):
+        """MusicBrainz 404 → None 반환."""
+        mb_response = MagicMock()
+        mb_response.status_code = 404
+
+        with self._patch_env(), patch("collectors.artist_image.requests.post",
+                                      return_value=_make_token_response()), \
+                patch("collectors.artist_image.requests.get", return_value=mb_response):
             result = collect_artist_image("mbid-unknown")
 
         assert result is None
 
-    def test_returns_none_when_artistthumb_missing(self):
-        """응답에 artistthumb 필드가 없으면 None을 반환해야 한다."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {}
-        with (
-            patch("collectors.artist_image.os.environ.get", return_value="dummy-key"),
-            patch("collectors.artist_image.requests.get", return_value=mock_response),
-        ):
-            result = collect_artist_image("mbid-001")
+    def test_returns_none_when_spotify_id_not_found(self):
+        """Spotify ID 조회 실패 (검색 결과 없음) → None 반환."""
+        mb_response = _make_mb_response(name="Unknown Artist")
+        search_response = MagicMock()
+        search_response.status_code = 200
+        search_response.json.return_value = {"artists": {"items": []}}
+
+        with self._patch_env(), patch("collectors.artist_image.requests.post",
+                                      return_value=_make_token_response()), \
+                patch("collectors.artist_image.requests.get",
+                      side_effect=[mb_response, search_response]):
+            result = collect_artist_image("mbid-003")
 
         assert result is None
 
-    def test_returns_none_when_artistthumb_empty(self):
-        """artistthumb 배열이 비어 있으면 None을 반환해야 한다."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"artistthumb": []}
-        with (
-            patch("collectors.artist_image.os.environ.get", return_value="dummy-key"),
-            patch("collectors.artist_image.requests.get", return_value=mock_response),
-        ):
-            result = collect_artist_image("mbid-001")
+    def test_returns_none_when_images_empty(self):
+        """Spotify images 배열이 비어 있음 → None 반환."""
+        mb_response = _make_mb_response(
+            name="Yoasobi",
+            spotify_url="https://open.spotify.com/artist/yoasobi123",
+        )
+        artist_response = _make_spotify_artist_response(images=[])
+
+        with self._patch_env(), patch("collectors.artist_image.requests.post",
+                                      return_value=_make_token_response()), \
+                patch("collectors.artist_image.requests.get",
+                      side_effect=[mb_response, artist_response]):
+            result = collect_artist_image("mbid-004")
 
         assert result is None
 
-    def test_raises_when_api_key_missing(self):
-        """FANART_TV_API_KEY가 없으면 ValueError를 발생시켜야 한다."""
-        with patch("collectors.artist_image.os.environ.get", return_value=None):
-            with pytest.raises(ValueError, match="FANART_TV_API_KEY"):
+    def test_raises_when_credentials_missing(self):
+        """SPOTIFY_CLIENT_ID 또는 SPOTIFY_CLIENT_SECRET 미설정 → ValueError."""
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(ValueError, match="SPOTIFY_CLIENT_ID"):
                 collect_artist_image("mbid-001")
 
     def test_raises_on_network_error(self):
-        """네트워크 오류 시 RequestException을 전파해야 한다."""
-        with (
-            patch("collectors.artist_image.os.environ.get", return_value="dummy-key"),
-            patch(
-                "collectors.artist_image.requests.get",
-                side_effect=requests.ConnectionError("timeout"),
-            ),
-        ):
+        """네트워크 오류 시 RequestException 전파."""
+        with self._patch_env(), patch("collectors.artist_image.requests.post",
+                                      side_effect=requests.ConnectionError("timeout")):
             with pytest.raises(requests.RequestException):
                 collect_artist_image("mbid-001")
