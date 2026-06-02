@@ -7,7 +7,7 @@ Jpop 아티스트 및 내한공연 수집 파이프라인 (KOPIS / MusicBrainz /
 ```
 coming-data/
 ├── collectors/
-│   ├── artist_image.py    # Fanart.tv 아티스트 프로필 이미지 수집
+│   ├── artist_image.py    # Spotify Web API 아티스트 프로필 이미지 수집
 │   ├── kopis.py           # KOPIS API 수집
 │   ├── lastfm.py          # Last.fm 월간 리스너 수 수집
 │   ├── musicbrainz.py     # MusicBrainz 아티스트·멤버 수집
@@ -66,7 +66,7 @@ python scheduler.py --force-artists  # 아티스트 강제 재수집
 | MusicBrainz | `GET /ws/2/artist/`, `/ws/2/release-group/`, `/ws/2/release/` | **1 req/sec** | `time.sleep(1.1)` 필수 |
 | Cover Art Archive | `GET https://coverartarchive.org/release-group/{mbid}/front` | 1 req/sec | 404 시 null 허용 |
 | setlist.fm | `GET https://api.setlist.fm/rest/1.0/search/setlists` | - | Header: `x-api-key`, `Accept: application/json` 필수 |
-| Fanart.tv | `GET https://webservice.fanart.tv/v3/music/{mbid}` | 1 req/sec | `time.sleep(1.1)` 필수; 404 시 null 허용 |
+| Spotify Web API | `POST https://accounts.spotify.com/api/token`, `GET https://api.spotify.com/v1/artists/{id}`, `GET /v1/search` | rolling 30초 윈도우 (관대함) | Client Credentials Flow; `Authorization: Bearer {token}`; access_token 1h 캐시 |
 | Last.fm | `GET https://ws.audioscrobbler.com/2.0/` | - | method=`artist.getinfo`; 월간 리스너 수 수집 |
 | Wikipedia (ko) | `GET https://ko.wikipedia.org/w/api.php` | 비공식 권장 | `time.sleep(0.5)` 적용 |
 
