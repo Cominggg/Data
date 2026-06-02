@@ -196,7 +196,11 @@ def run_artist_image_update() -> None:
     logger.info("이미지 미수집 아티스트: %d건", len(artists))
     for a in artists:
         try:
-            image_url = artist_image.collect_artist_image(a["mbid"])
+            image_url = artist_image.collect_artist_image(
+                a["mbid"],
+                spotify_url=a.get("spotify_url"),
+                name=a.get("name"),
+            )
         except Exception as e:
             logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", a["mbid"], e)
             continue

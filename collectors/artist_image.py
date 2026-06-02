@@ -98,8 +98,17 @@ def _get_artist_image_url(spotify_id: str, access_token: str) -> Optional[str]:
     return images[0]["url"]
 
 
-def collect_artist_image(mbid: str) -> Optional[str]:
-    """Spotify Web API에서 아티스트 프로필 이미지 URL을 수집한다. 없거나 오류 시 None 반환."""
+def collect_artist_image(
+    mbid: str,
+    spotify_url: Optional[str] = None,
+    name: Optional[str] = None,
+) -> Optional[str]:
+    """Spotify Web API에서 아티스트 프로필 이미지 URL을 수집한다. 없거나 오류 시 None 반환.
+
+    spotify_url: DB artist_url에 저장된 Spotify URL (있으면 MB API 호출 생략)
+    name: 아티스트 이름 (spotify_url 없을 때 이름 검색 fallback에 사용, MB API 호출 생략)
+    둘 다 없으면 MusicBrainz API를 직접 조회한다 (기존 동작).
+    """
     client_id = os.environ.get("SPOTIFY_CLIENT_ID")
     client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET")
     if not client_id or not client_secret:
@@ -107,15 +116,21 @@ def collect_artist_image(mbid: str) -> Optional[str]:
 
     access_token = _get_access_token(client_id, client_secret)
 
-    artist_name, spotify_id = _get_mb_artist_info(mbid)
+    spotify_id: Optional[str] = None
 
-    if not spotify_id:
-        if not artist_name:
-            logger.info("MusicBrainz 아티스트 정보 없음: mbid=%s", mbid)
-            return None
-        logger.info("MB URL relations에 Spotify 없음 — 이름 검색 fallback: mbid=%s name=%s", mbid,
-                    artist_name)
-        spotify_id = _search_spotify_artist(artist_name, access_token)
+    if spotify_url:
+        spotify_id = spotify_url.rstrip("/").split("/")[-1]
+    elif name:
+        spotify_id = _search_spotify_artist(name, access_token)
+    else:
+        mb_name, spotify_id = _get_mb_artist_info(mbid)
+        if not spotify_id:
+            if not mb_name:
+                logger.info("MusicBrainz 아티스트 정보 없음: mbid=%s", mbid)
+                return None
+            logger.info("MB URL relations에 Spotify 없음 — 이름 검색 fallback: mbid=%s name=%s",
+                        mbid, mb_name)
+            spotify_id = _search_spotify_artist(mb_name, access_token)
 
     if not spotify_id:
         logger.info("Spotify ID 조회 실패: mbid=%s", mbid)
