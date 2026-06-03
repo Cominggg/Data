@@ -41,14 +41,35 @@ def _get_access_token() -> str:
     return _token_cache["token"]
 
 
+_MAX_RETRIES = 5
+_REQUEST_INTERVAL = 0.5  # 2req/sec, 30초 윈도우 내 60req — 관측 상한(180req/min)의 33%
+
+
 def spotify_get(path: str, params: Optional[dict] = None) -> dict:
-    """Spotify API GET 요청. Bearer 토큰을 자동으로 주입한다."""
+    """Spotify API GET 요청.
+
+    - 요청 간 0.3초 고정 딜레이로 레이트 리밋 예방
+    - 429 수신 시 Retry-After 헤더 기준 대기 후 최대 5회 재시도
+    """
+    time.sleep(_REQUEST_INTERVAL)
     token = _get_access_token()
-    response = requests.get(
-        f"{_SPOTIFY_API_URL}{path}",
-        headers={"Authorization": f"Bearer {token}"},
-        params=params,
-        timeout=10,
-    )
+    response = None
+    for attempt in range(_MAX_RETRIES):
+        response = requests.get(
+            f"{_SPOTIFY_API_URL}{path}",
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+            timeout=10,
+        )
+        if response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", 30))
+            logger.warning(
+                "Spotify 429 — %d초 대기 후 재시도 (%d/%d): %s",
+                retry_after, attempt + 1, _MAX_RETRIES, path,
+            )
+            time.sleep(retry_after)
+            continue
+        response.raise_for_status()
+        return response.json()
     response.raise_for_status()
-    return response.json()
+    return {}
