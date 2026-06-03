@@ -371,12 +371,17 @@ def update_release_group_cover(mbid: str, cover_url: str) -> None:
 
 
 def get_artists_without_image() -> list[dict]:
-    """image_url이 없는 artist의 id·mbid 목록을 반환한다."""
+    """image_url이 없는 artist의 id·mbid·name·spotify_url 목록을 반환한다."""
     with get_session() as session:
         rows = session.execute(
-            text("SELECT id, mbid FROM artist WHERE image_url IS NULL AND mbid IS NOT NULL")
+            text("""
+                SELECT a.id, a.mbid, a.name, au.url AS spotify_url
+                FROM artist a
+                LEFT JOIN artist_url au ON au.artist_id = a.id AND au.type = 'Spotify'
+                WHERE a.image_url IS NULL AND a.mbid IS NOT NULL
+            """)
         ).fetchall()
-    return [{"id": row[0], "mbid": row[1]} for row in rows]
+    return [{"id": row[0], "mbid": row[1], "name": row[2], "spotify_url": row[3]} for row in rows]
 
 
 def update_artist_image(artist_id: int, image_url: str) -> None:
