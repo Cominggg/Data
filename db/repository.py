@@ -346,6 +346,35 @@ def get_matched_artist_mbids() -> list[str]:
     return [row[0] for row in rows]
 
 
+def get_matched_artists_with_spotify() -> list[dict]:
+    """HIGH confidence 매칭이 있는 아티스트 중 Spotify URL을 보유한 목록을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT DISTINCT a.id, au.url
+                FROM artist a
+                JOIN concert_artist ca ON ca.artist_id = a.id
+                JOIN artist_url au ON au.artist_id = a.id
+                WHERE ca.confidence = 'HIGH'
+                  AND au.url LIKE '%open.spotify.com/artist/%'
+            """)
+        ).fetchall()
+    return [{"artist_id": row[0], "spotify_url": row[1]} for row in rows]
+
+
+def get_all_artists_with_spotify() -> list[dict]:
+    """Spotify URL을 보유한 모든 아티스트 목록을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT a.id, au.url
+                FROM artist a
+                JOIN artist_url au ON au.artist_id = a.id
+                WHERE au.url LIKE '%open.spotify.com/artist/%'
+            """)
+        ).fetchall()
+    return [{"artist_id": row[0], "spotify_url": row[1]} for row in rows]
+
 
 def get_artists_without_image() -> list[dict]:
     """image_url이 없는 artist의 id·mbid·name·spotify_url 목록을 반환한다."""

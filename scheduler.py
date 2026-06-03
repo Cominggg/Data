@@ -12,12 +12,12 @@ from db.repository import (
     get_all_aliases,
     get_all_artist_mbids,
     get_all_artists,
+    get_all_artists_with_spotify,
     get_artists_without_image,
     get_concert_by_kopis_id,
     get_concert_with_artist,
     get_existing_kopis_ids,
-    get_matched_artist_mbids,
-    get_release_groups_without_cover,
+    get_matched_artists_with_spotify,
     get_unmatched_concerts,
     save_aliases,
     save_artists,
@@ -28,7 +28,6 @@ from db.repository import (
     update_artist_image,
     update_artist_is_coming,
     update_concert_status,
-    update_release_group_cover,
 )
 from matchers.artist_matcher import has_match, match_concert
 
@@ -39,11 +38,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_RELEASE_TYPE_ORDER = {"Album": 0, "EP": 1, "Single": 2}
+_RELEASE_TYPE_ORDER = {"Album": 0, "Single": 1}
 
 
 def _sort_releases(releases: List[dict]) -> List[dict]:
     return sorted(releases, key=lambda r: _RELEASE_TYPE_ORDER.get(r.get("type", ""), 9))
+
+
+def _extract_spotify_id(spotify_url: str) -> str:
+    return spotify_url.rstrip("/").split("/")[-1]
 
 
 def run_initial_collect(
@@ -52,7 +55,6 @@ def run_initial_collect(
     skip_kopis: bool = False,
     skip_wikipedia: bool = False,
     skip_releases: bool = False,
-    skip_cover_art: bool = False,
     skip_artist_image: bool = False,
     skip_setlist: bool = False,
 ) -> None:
@@ -63,7 +65,6 @@ def run_initial_collect(
     skip_kopis=True 시 KOPIS 수집·매칭을 건너뛰고 릴리즈 수집으로 진행한다.
     skip_wikipedia=True 시 Wikipedia alias 수집을 건너뛴다.
     skip_releases=True 시 릴리즈 수집을 건너뛴다.
-    skip_cover_art=True 시 커버아트 수집을 건너뛴다.
     skip_artist_image=True 시 아티스트 이미지 수집을 건너뛴다.
     skip_setlist=True 시 setlist.fm 수집을 건너뛴다.
     나머지 아티스트 릴리즈는 주간 배치(run_release_update)가 점진적으로 채운다.
@@ -98,16 +99,12 @@ def run_initial_collect(
     if skip_releases:
         logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
     else:
-        matched_mbids = get_matched_artist_mbids()
-        logger.info("매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_mbids))
-        for mbid in matched_mbids:
-            releases = _sort_releases(release.collect_releases(mbid))
-            save_releases(releases)
-
-    if skip_cover_art:
-        logger.info("--skip-cover-art 플래그 감지 — 커버아트 수집 건너뜀")
-    else:
-        run_cover_art_update()
+        matched_artists = get_matched_artists_with_spotify()
+        logger.info("매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
+        for a in matched_artists:
+            spotify_id = _extract_spotify_id(a["spotify_url"])
+            releases = _sort_releases(release.collect_releases(spotify_id))
+            save_releases(a["artist_id"], releases)
 
     if skip_artist_image:
         logger.info("--skip-artist-image 플래그 감지 — 아티스트 이미지 수집 건너뜀")
@@ -142,7 +139,10 @@ def run_status_update() -> None:
     if active:
         logger.info("활성 공연 %d건 상태 갱신 시작", len(active))
         with ThreadPoolExecutor(max_workers=8) as pool:
-            futures = {pool.submit(kopis.collect_by_id, c["kopis_id"]): c["kopis_id"] for c in active}
+            futures = {
+                pool.submit(kopis.collect_by_id, c["kopis_id"]): c["kopis_id"]
+                for c in active
+            }
         fetched = []
         for future, kopis_id in futures.items():
             try:
@@ -177,17 +177,6 @@ def run_status_update() -> None:
     logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
 
-def run_cover_art_update() -> None:
-    """cover_url 미수집 릴리즈 그룹의 커버아트를 수집한다 (주 1회, 수요일)."""
-    logger.info("=== 커버아트 수집 잡 시작 ===")
-    mbids = get_release_groups_without_cover()
-    logger.info("커버아트 미수집 릴리즈 그룹: %d건", len(mbids))
-    for mbid in mbids:
-        cover_url = release.collect_cover_art(mbid)
-        if cover_url:
-            update_release_group_cover(mbid, cover_url)
-    logger.info("=== 커버아트 수집 잡 완료 ===")
-
 
 def run_artist_image_update() -> None:
     """image_url 미수집 아티스트의 프로필 이미지를 수집한다 (주 1회, 목요일)."""
@@ -212,9 +201,10 @@ def run_artist_image_update() -> None:
 def run_release_update() -> None:
     """릴리즈 갱신 (주 1회, 화요일). 신규 항목만 INSERT."""
     logger.info("=== 릴리즈 갱신 잡 시작 ===")
-    for mbid in get_all_artist_mbids():
-        releases = _sort_releases(release.collect_releases(mbid))
-        save_releases(releases)
+    for a in get_all_artists_with_spotify():
+        spotify_id = _extract_spotify_id(a["spotify_url"])
+        releases = _sort_releases(release.collect_releases(spotify_id))
+        save_releases(a["artist_id"], releases)
     logger.info("=== 릴리즈 갱신 잡 완료 ===")
 
 
@@ -254,27 +244,6 @@ def collect_and_save_concert(kopis_id: str) -> bool:
     return True
 
 
-def collect_and_save_release_group(release_group_mbid: str, artist_mbid: str) -> bool:
-    """단건 릴리즈 그룹을 수집해 DB에 저장한다. 성공 시 True 반환."""
-    rg = release.collect_release_group(release_group_mbid, artist_mbid)
-    if rg is None:
-        logger.warning("릴리즈 그룹 수집 실패: mbid=%s", release_group_mbid)
-        return False
-    save_releases([rg])
-    logger.info("단건 릴리즈 그룹 수집 완료: mbid=%s", release_group_mbid)
-    return True
-
-
-def collect_and_save_cover_art(release_group_mbid: str) -> bool:
-    """단건 릴리즈 그룹의 커버아트를 수집해 DB에 갱신한다. 성공 시 True 반환."""
-    cover_url = release.collect_cover_art(release_group_mbid)
-    if not cover_url:
-        logger.info("커버아트 없음: mbid=%s", release_group_mbid)
-        return False
-    update_release_group_cover(release_group_mbid, cover_url)
-    logger.info("단건 커버아트 수집 완료: mbid=%s", release_group_mbid)
-    return True
-
 
 def collect_and_save_setlist(concert_id: int) -> bool:
     """단건 공연의 셋리스트를 수집해 DB에 저장한다. 성공 시 True 반환."""
@@ -295,7 +264,6 @@ def _build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
     scheduler.add_job(run_status_update, "cron", hour=4)
     scheduler.add_job(run_release_update, "cron", day_of_week="tue", hour=5)
-    scheduler.add_job(run_cover_art_update, "cron", day_of_week="wed", hour=5)
     scheduler.add_job(run_wikipedia_collect, "cron", day_of_week="thu", hour=3)
     scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=5)
     scheduler.add_job(run_setlist_collect, "cron", hour=6)
@@ -336,11 +304,6 @@ def main() -> None:
         help="릴리즈 수집을 건너뜀 (init 전용)",
     )
     parser.add_argument(
-        "--skip-cover-art",
-        action="store_true",
-        help="커버아트 수집을 건너뜀 (init 전용)",
-    )
-    parser.add_argument(
         "--skip-artist-image",
         action="store_true",
         help="아티스트 이미지 수집을 건너뜀 (init 전용)",
@@ -359,7 +322,6 @@ def main() -> None:
             skip_kopis=args.skip_kopis,
             skip_wikipedia=args.skip_wikipedia,
             skip_releases=args.skip_releases,
-            skip_cover_art=args.skip_cover_art,
             skip_artist_image=args.skip_artist_image,
             skip_setlist=args.skip_setlist,
         )
