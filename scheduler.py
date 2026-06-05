@@ -14,6 +14,7 @@ from db.repository import (
     get_all_artists,
     get_all_artists_with_spotify,
     get_artists_without_image,
+    get_artists_without_releases,
     get_concert_by_kopis_id,
     get_concert_with_artist,
     get_existing_kopis_ids,
@@ -208,6 +209,32 @@ def run_release_update() -> None:
     logger.info("=== 릴리즈 갱신 잡 완료 ===")
 
 
+def run_missing_release_update() -> None:
+    """릴리즈가 없는 아티스트만 대상으로 릴리즈를 수집한다 (복구 전용)."""
+    logger.info("=== 누락 릴리즈 수집 잡 시작 ===")
+    artists = get_artists_without_releases()
+    logger.info("릴리즈 미수집 아티스트: %d건", len(artists))
+    for a in artists:
+        spotify_id = _extract_spotify_id(a["spotify_url"])
+        releases = _sort_releases(release.collect_releases(spotify_id))
+        save_releases(a["artist_id"], releases)
+    logger.info("=== 누락 릴리즈 수집 잡 완료 ===")
+
+
+def run_recover(skip_releases: bool = False, skip_artist_image: bool = False) -> None:
+    """이전 수집 실패(429 등)로 누락된 이미지·릴리즈만 재수집한다."""
+    logger.info("=== 복구 수집 시작 ===")
+    if skip_artist_image:
+        logger.info("--skip-artist-image 플래그 감지 — 이미지 수집 건너뜀")
+    else:
+        run_artist_image_update()
+    if skip_releases:
+        logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
+    else:
+        run_missing_release_update()
+    logger.info("=== 복구 수집 완료 ===")
+
+
 def run_setlist_collect() -> None:
     """setlist.fm 수집 (매일)."""
     logger.info("=== setlist 수집 잡 시작 ===")
@@ -275,8 +302,8 @@ def main() -> None:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["init"],
-        help="init: 초기 아티스트·릴리즈 수집 후 종료",
+        choices=["init", "recover"],
+        help="init: 초기 아티스트·릴리즈 수집 후 종료 / recover: 누락 이미지·릴리즈 재수집",
     )
     parser.add_argument(
         "--skip-artists",
@@ -324,6 +351,13 @@ def main() -> None:
             skip_releases=args.skip_releases,
             skip_artist_image=args.skip_artist_image,
             skip_setlist=args.skip_setlist,
+        )
+        return
+
+    if args.command == "recover":
+        run_recover(
+            skip_releases=args.skip_releases,
+            skip_artist_image=args.skip_artist_image,
         )
         return
 

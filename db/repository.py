@@ -367,10 +367,28 @@ def get_all_artists_with_spotify() -> list[dict]:
     with get_session() as session:
         rows = session.execute(
             text("""
-                SELECT a.id, au.url
+                SELECT DISTINCT ON (a.id) a.id, au.url
                 FROM artist a
                 JOIN artist_url au ON au.artist_id = a.id
                 WHERE au.url LIKE '%open.spotify.com/artist/%'
+                ORDER BY a.id
+            """)
+        ).fetchall()
+    return [{"artist_id": row[0], "spotify_url": row[1]} for row in rows]
+
+
+def get_artists_without_releases() -> list[dict]:
+    """Spotify URL을 보유하지만 릴리즈가 하나도 없는 아티스트 목록을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT DISTINCT ON (a.id) a.id, au.url AS spotify_url
+                FROM artist a
+                JOIN artist_url au ON au.artist_id = a.id
+                    AND au.url LIKE '%open.spotify.com/artist/%'
+                LEFT JOIN release_group rg ON rg.artist_id = a.id
+                WHERE rg.id IS NULL
+                ORDER BY a.id
             """)
         ).fetchall()
     return [{"artist_id": row[0], "spotify_url": row[1]} for row in rows]
@@ -381,10 +399,11 @@ def get_artists_without_image() -> list[dict]:
     with get_session() as session:
         rows = session.execute(
             text("""
-                SELECT a.id, a.mbid, a.name, au.url AS spotify_url
+                SELECT DISTINCT ON (a.id) a.id, a.mbid, a.name, au.url AS spotify_url
                 FROM artist a
                 LEFT JOIN artist_url au ON au.artist_id = a.id AND au.type = 'Spotify'
                 WHERE a.image_url IS NULL AND a.mbid IS NOT NULL
+                ORDER BY a.id
             """)
         ).fetchall()
     return [{"id": row[0], "mbid": row[1], "name": row[2], "spotify_url": row[3]} for row in rows]
