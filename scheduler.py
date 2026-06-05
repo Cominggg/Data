@@ -18,7 +18,6 @@ from db.repository import (
     get_concert_by_kopis_id,
     get_concert_with_artist,
     get_existing_kopis_ids,
-    get_matched_artists_with_spotify,
     get_unmatched_concerts,
     save_aliases,
     save_artists,
@@ -100,8 +99,8 @@ def run_initial_collect(
     if skip_releases:
         logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
     else:
-        matched_artists = get_matched_artists_with_spotify()
-        logger.info("매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
+        matched_artists = get_all_artists_with_spotify()
+        logger.info("Spotify 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
         for a in matched_artists:
             spotify_id = _extract_spotify_id(a["spotify_url"])
             releases = _sort_releases(release.collect_releases(spotify_id))

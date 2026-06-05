@@ -194,7 +194,11 @@ def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
                 )
                 continue
 
-            artists.append(_parse_artist(detail))
+            parsed = _parse_artist(detail)
+            if not any(u["type"] == "Spotify" for u in parsed["url_rels"]):
+                logger.info("Spotify URL 없음 — 건너뜀: %s (%s)", item.get("name"), mbid)
+                continue
+            artists.append(parsed)
             logger.info("수집 완료: %s (%s)", item.get("name"), mbid)
 
         offset += len(batch)
