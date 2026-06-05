@@ -147,7 +147,13 @@ class TestCollectArtists:
             "name": "Artist1",
             "sort-name": "Artist1",
             "aliases": [],
-            "relations": [],
+            "relations": [
+                {
+                    "target-type": "url",
+                    "type": "streaming music",
+                    "url": {"resource": "https://open.spotify.com/artist/abc123"},
+                }
+            ],
         }
         result = collect_artists()
         assert len(result) == 1
@@ -264,7 +270,14 @@ class TestCollectArtists:
         }
         mock_detail.return_value = {
             "id": "mbid-1", "name": "Artist1", "sort-name": "Artist1",
-            "aliases": [], "relations": [],
+            "aliases": [],
+            "relations": [
+                {
+                    "target-type": "url",
+                    "type": "streaming music",
+                    "url": {"resource": "https://open.spotify.com/artist/abc123"},
+                }
+            ],
         }
         result = collect_artists()
         assert len(result) == 1

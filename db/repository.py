@@ -215,7 +215,7 @@ def get_completed_concerts() -> list[dict]:
                 SELECT DISTINCT c.id AS concert_id, c.title, c.start_date, c.end_date,
                                 a.mbid AS artist_mbid
                 FROM concert c
-                JOIN concert_artist ca ON ca.concert_id = c.id AND ca.confidence = 'HIGH'
+                JOIN concert_artist ca ON ca.concert_id = c.id
                 JOIN artist a ON a.id = ca.artist_id
                 LEFT JOIN setlist s ON s.concert_id = c.id
                 WHERE c.status = '공연완료'
@@ -333,21 +333,20 @@ def save_aliases(aliases: list[dict]) -> None:
 
 
 def get_matched_artist_mbids() -> list[str]:
-    """HIGH confidence 매칭이 있는 아티스트 MBID를 반환한다."""
+    """매칭이 있는 아티스트 MBID를 반환한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
                 SELECT DISTINCT a.mbid
                 FROM artist a
                 JOIN concert_artist ca ON ca.artist_id = a.id
-                WHERE ca.confidence = 'HIGH'
             """)
         ).fetchall()
     return [row[0] for row in rows]
 
 
 def get_matched_artists_with_spotify() -> list[dict]:
-    """HIGH confidence 매칭이 있는 아티스트 중 Spotify URL을 보유한 목록을 반환한다."""
+    """매칭이 있는 아티스트 중 Spotify URL을 보유한 목록을 반환한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
@@ -355,8 +354,7 @@ def get_matched_artists_with_spotify() -> list[dict]:
                 FROM artist a
                 JOIN concert_artist ca ON ca.artist_id = a.id
                 JOIN artist_url au ON au.artist_id = a.id
-                WHERE ca.confidence = 'HIGH'
-                  AND au.url LIKE '%open.spotify.com/artist/%'
+                WHERE au.url LIKE '%open.spotify.com/artist/%'
             """)
         ).fetchall()
     return [{"artist_id": row[0], "spotify_url": row[1]} for row in rows]
@@ -455,7 +453,7 @@ def get_concert_by_kopis_id(kopis_id: str) -> Optional[dict]:
 
 
 def get_unmatched_concerts() -> list[dict]:
-    """concert_artist 매칭이 없는 공연을 반환한다."""
+    """concert_artist 매칭이 없는 공연을 반환한다. EXCLUDED 상태 공연은 제외한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
@@ -463,6 +461,7 @@ def get_unmatched_concerts() -> list[dict]:
                 FROM concert c
                 LEFT JOIN concert_artist ca ON ca.concert_id = c.id
                 WHERE ca.concert_id IS NULL
+                  AND c.status != 'EXCLUDED'
             """)
         ).fetchall()
     return [{"concert_id": row[0], "title": row[1], "cast": row[2]} for row in rows]
@@ -474,17 +473,13 @@ def save_concert_artists(matches: list[dict]) -> None:
         for match in matches:
             session.execute(
                 text("""
-                    INSERT INTO concert_artist
-                        (concert_id, artist_id, confidence, matched_by)
-                    VALUES
-                        (:concert_id, :artist_id, :confidence, :matched_by)
+                    INSERT INTO concert_artist (concert_id, artist_id)
+                    VALUES (:concert_id, :artist_id)
                     ON CONFLICT (concert_id, artist_id) DO NOTHING
                 """),
                 {
                     "concert_id": match["concert_id"],
                     "artist_id": match["artist_id"],
-                    "confidence": match["confidence"],
-                    "matched_by": match["matched_by"],
                 },
             )
     logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
@@ -492,8 +487,9 @@ def save_concert_artists(matches: list[dict]) -> None:
 
 
 def update_artist_is_coming() -> int:
-    """오늘 이후 HIGH confidence 공연 보유 여부에 따라 artist.is_coming을 갱신한다.
+    """오늘 이후 공연 보유 여부에 따라 artist.is_coming을 갱신한다.
 
+    EXCLUDED 상태 공연은 제외한다.
     값이 실제로 바뀌는 행만 UPDATE해 불필요한 쓰기 I/O를 줄인다.
     반환값: 갱신된 행 수
     """
@@ -509,7 +505,7 @@ def update_artist_is_coming() -> int:
                                FROM concert_artist ca
                                JOIN concert c ON c.id = ca.concert_id
                                WHERE ca.artist_id = a.id
-                                 AND ca.confidence = 'HIGH'
+                                 AND c.status != 'EXCLUDED'
                                  AND c.end_date >= CURRENT_DATE
                            ) AS is_coming
                     FROM artist a

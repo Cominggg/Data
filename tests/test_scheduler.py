@@ -19,7 +19,7 @@ class TestRunInitialCollect:
         with (
             patch("scheduler.run_wikipedia_collect"),
             patch("scheduler.run_status_update"),
-            patch("scheduler.get_matched_artists_with_spotify", return_value=[]),
+            patch("scheduler.get_all_artists_with_spotify", return_value=[]),
             patch("scheduler.run_artist_image_update"),
             patch("scheduler.run_setlist_collect"),
         ):
@@ -58,7 +58,7 @@ class TestRunInitialCollect:
             patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
-            patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=[]) as mock_collect,
             patch("scheduler.save_releases"),
         ):
@@ -78,7 +78,7 @@ class TestRunInitialCollect:
             patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
-            patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=[{"title": "앨범"}]),
             patch("scheduler.save_releases") as mock_save,
         ):
