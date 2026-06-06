@@ -43,6 +43,7 @@ def _get_access_token() -> str:
 
 _MAX_RETRIES = 5
 _REQUEST_INTERVAL = 1.0  # 1req/sec, 30초 윈도우 내 30req — 안전 마진 확보
+_RATE_LIMIT_ABORT_THRESHOLD = 300  # Retry-After가 이 값(초) 초과 시 재시도 포기
 
 
 def spotify_get(path: str, params: Optional[dict] = None) -> dict:
@@ -50,6 +51,7 @@ def spotify_get(path: str, params: Optional[dict] = None) -> dict:
 
     - 요청 간 1.0초 고정 딜레이로 레이트 리밋 예방
     - 429 수신 시 Retry-After + 선형 백오프(attempt * 10s) 후 최대 5회 재시도
+    - Retry-After > _RATE_LIMIT_ABORT_THRESHOLD 이면 즉시 HTTPError 발생 (재시도 없음)
     """
     time.sleep(_REQUEST_INTERVAL)
     token = _get_access_token()
@@ -63,6 +65,12 @@ def spotify_get(path: str, params: Optional[dict] = None) -> dict:
         )
         if response.status_code == 429:
             retry_after = int(response.headers.get("Retry-After", 30))
+            if retry_after > _RATE_LIMIT_ABORT_THRESHOLD:
+                logger.error(
+                    "Spotify 429 — Retry-After %d초가 임계값(%d초) 초과, 재시도 포기: %s",
+                    retry_after, _RATE_LIMIT_ABORT_THRESHOLD, path,
+                )
+                response.raise_for_status()
             wait = retry_after + attempt * 10
             logger.warning(
                 "Spotify 429 — %d초 대기 후 재시도 (%d/%d): %s",
