@@ -102,9 +102,12 @@ def run_initial_collect(
         matched_artists = get_all_artists_with_spotify()
         logger.info("Spotify 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
         for a in matched_artists:
-            spotify_id = _extract_spotify_id(a["spotify_url"])
-            releases = _sort_releases(release.collect_releases(spotify_id))
-            save_releases(a["artist_id"], releases)
+            try:
+                spotify_id = _extract_spotify_id(a["spotify_url"])
+                releases = _sort_releases(release.collect_releases(spotify_id))
+                save_releases(a["artist_id"], releases)
+            except Exception as e:
+                logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
 
     if skip_artist_image:
         logger.info("--skip-artist-image 플래그 감지 — 아티스트 이미지 수집 건너뜀")
@@ -202,9 +205,12 @@ def run_release_update() -> None:
     """릴리즈 갱신 (주 1회, 화요일). 신규 항목만 INSERT."""
     logger.info("=== 릴리즈 갱신 잡 시작 ===")
     for a in get_all_artists_with_spotify():
-        spotify_id = _extract_spotify_id(a["spotify_url"])
-        releases = _sort_releases(release.collect_releases(spotify_id))
-        save_releases(a["artist_id"], releases)
+        try:
+            spotify_id = _extract_spotify_id(a["spotify_url"])
+            releases = _sort_releases(release.collect_releases(spotify_id))
+            save_releases(a["artist_id"], releases)
+        except Exception as e:
+            logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
     logger.info("=== 릴리즈 갱신 잡 완료 ===")
 
 
@@ -214,9 +220,12 @@ def run_missing_release_update() -> None:
     artists = get_artists_without_releases()
     logger.info("릴리즈 미수집 아티스트: %d건", len(artists))
     for a in artists:
-        spotify_id = _extract_spotify_id(a["spotify_url"])
-        releases = _sort_releases(release.collect_releases(spotify_id))
-        save_releases(a["artist_id"], releases)
+        try:
+            spotify_id = _extract_spotify_id(a["spotify_url"])
+            releases = _sort_releases(release.collect_releases(spotify_id))
+            save_releases(a["artist_id"], releases)
+        except Exception as e:
+            logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
     logger.info("=== 누락 릴리즈 수집 잡 완료 ===")
 
 
