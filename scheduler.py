@@ -15,6 +15,7 @@ from db.repository import (
     get_all_artists_with_spotify,
     get_artists_without_image,
     get_artists_without_releases,
+    get_matched_artists_with_spotify,
     get_concert_by_kopis_id,
     get_concert_with_artist,
     get_existing_kopis_ids,
@@ -99,8 +100,8 @@ def run_initial_collect(
     if skip_releases:
         logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
     else:
-        matched_artists = get_all_artists_with_spotify()
-        logger.info("Spotify 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
+        matched_artists = get_matched_artists_with_spotify()
+        logger.info("내한 공연 매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
         for a in matched_artists:
             try:
                 spotify_id = _extract_spotify_id(a["spotify_url"])
@@ -202,9 +203,9 @@ def run_artist_image_update() -> None:
 
 
 def run_release_update() -> None:
-    """릴리즈 갱신 (주 1회, 화요일). 신규 항목만 INSERT."""
+    """릴리즈 갱신 (주 1회, 화요일). 내한 공연 매칭 아티스트만 대상."""
     logger.info("=== 릴리즈 갱신 잡 시작 ===")
-    for a in get_all_artists_with_spotify():
+    for a in get_matched_artists_with_spotify():
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
             releases = _sort_releases(release.collect_releases(spotify_id))
@@ -280,6 +281,27 @@ def collect_and_save_concert(kopis_id: str) -> bool:
 
 
 
+def collect_and_save_releases_for_artist(artist_id: int) -> bool:
+    """단건 아티스트의 릴리즈를 수집해 DB에 저장한다. 성공 시 True 반환."""
+    artists = get_matched_artists_with_spotify()
+    target = next((a for a in artists if a["artist_id"] == artist_id), None)
+    if target is None:
+        all_sp = get_all_artists_with_spotify()
+        target = next((a for a in all_sp if a["artist_id"] == artist_id), None)
+    if target is None:
+        logger.warning("Spotify URL 없는 아티스트 — 건너뜀: artist_id=%d", artist_id)
+        return False
+    try:
+        spotify_id = _extract_spotify_id(target["spotify_url"])
+        releases = _sort_releases(release.collect_releases(spotify_id))
+        save_releases(artist_id, releases)
+    except Exception as e:
+        logger.warning("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
+        return False
+    logger.info("단건 릴리즈 수집 완료: artist_id=%d, %d건", artist_id, len(releases))
+    return True
+
+
 def collect_and_save_setlist(concert_id: int) -> bool:
     """단건 공연의 셋리스트를 수집해 DB에 저장한다. 성공 시 True 반환."""
     concert = get_concert_with_artist(concert_id)
@@ -310,8 +332,12 @@ def main() -> None:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["init", "recover"],
-        help="init: 초기 아티스트·릴리즈 수집 후 종료 / recover: 누락 이미지·릴리즈 재수집",
+        choices=["init", "recover", "collect-release"],
+        help=(
+            "init: 초기 아티스트·릴리즈 수집 후 종료 / "
+            "recover: 누락 이미지·릴리즈 재수집 / "
+            "collect-release: 단건 아티스트 릴리즈 수집"
+        ),
     )
     parser.add_argument(
         "--skip-artists",
@@ -348,6 +374,11 @@ def main() -> None:
         action="store_true",
         help="setlist.fm 수집을 건너뜀 (init 전용)",
     )
+    parser.add_argument(
+        "--artist-id",
+        type=int,
+        help="단건 릴리즈 수집 대상 artist.id (collect-release 전용)",
+    )
     args = parser.parse_args()
 
     if args.command == "init":
@@ -367,6 +398,12 @@ def main() -> None:
             skip_releases=args.skip_releases,
             skip_artist_image=args.skip_artist_image,
         )
+        return
+
+    if args.command == "collect-release":
+        if not args.artist_id:
+            parser.error("collect-release 커맨드는 --artist-id 가 필요합니다.")
+        collect_and_save_releases_for_artist(args.artist_id)
         return
 
     scheduler = _build_scheduler()

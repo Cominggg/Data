@@ -376,12 +376,13 @@ def get_all_artists_with_spotify() -> list[dict]:
 
 
 def get_artists_without_releases() -> list[dict]:
-    """Spotify URL을 보유하지만 릴리즈가 하나도 없는 아티스트 목록을 반환한다."""
+    """내한 공연 매칭 아티스트 중 Spotify URL을 보유하지만 릴리즈가 없는 목록을 반환한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
                 SELECT DISTINCT ON (a.id) a.id, au.url AS spotify_url
                 FROM artist a
+                JOIN concert_artist ca ON ca.artist_id = a.id
                 JOIN artist_url au ON au.artist_id = a.id
                     AND au.url LIKE '%open.spotify.com/artist/%'
                 LEFT JOIN release_group rg ON rg.artist_id = a.id
