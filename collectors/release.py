@@ -77,7 +77,7 @@ def _fetch_albums_individual(album_ids: List[str]) -> List[dict]:
     results: List[dict] = []
     for album_id in album_ids:
         try:
-            data = spotify_get(f"/albums/{album_id}")
+            data = spotify_get(f"/albums/{album_id}", {"market": "JP"})
             results.append(data)
         except requests.RequestException as e:
             logger.warning("앨범 상세 조회 실패 (album_id=%s): %s", album_id, e)
