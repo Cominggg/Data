@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from collectors.release import (
     _fetch_album_ids,
-    _fetch_albums_batch,
+    _fetch_albums_individual,
     _parse_release_date,
     _parse_tracks,
     collect_releases,
@@ -127,43 +127,51 @@ class TestFetchAlbumIds:
 
 
 # ---------------------------------------------------------------------------
-# _fetch_albums_batch
+# _fetch_albums_individual
 # ---------------------------------------------------------------------------
-class TestFetchAlbumsBatch:
+class TestFetchAlbumsIndividual:
     @patch("collectors.release.spotify_get")
-    def test_single_batch_when_ids_under_20(self, mock_get):
-        ids = [f"id{i}" for i in range(5)]
-        mock_get.return_value = {"albums": [{"id": i} for i in ids]}
+    def test_single_id_makes_one_call(self, mock_get):
+        mock_get.return_value = {"id": "a1"}
 
-        result = _fetch_albums_batch(ids)
+        result = _fetch_albums_individual(["a1"])
 
-        mock_get.assert_called_once()
-        assert len(result) == 5
-
-    @patch("collectors.release.spotify_get")
-    def test_splits_into_batches_of_20(self, mock_get):
-        ids = [f"id{i}" for i in range(25)]
-        mock_get.side_effect = [
-            {"albums": [{"id": i} for i in ids[:20]]},
-            {"albums": [{"id": i} for i in ids[20:]]},
-        ]
-
-        result = _fetch_albums_batch(ids)
-
-        assert mock_get.call_count == 2
-        assert len(result) == 25
+        mock_get.assert_called_once_with("/albums/a1", {"market": "JP"})
+        assert len(result) == 1
 
     @patch("collectors.release.spotify_get")
-    def test_skips_failed_batch_and_continues(self, mock_get):
-        ids = [f"id{i}" for i in range(21)]
-        mock_get.side_effect = [
-            requests.ConnectionError("fail"),
-            {"albums": [{"id": ids[20]}]},
-        ]
+    def test_multiple_ids_make_individual_calls(self, mock_get):
+        mock_get.side_effect = [{"id": "a1"}, {"id": "a2"}, {"id": "a3"}]
 
-        result = _fetch_albums_batch(ids)
+        result = _fetch_albums_individual(["a1", "a2", "a3"])
+
+        assert mock_get.call_count == 3
+        assert len(result) == 3
+
+    @patch("collectors.release.spotify_get")
+    def test_market_jp_passed_in_each_call(self, mock_get):
+        mock_get.side_effect = [{"id": "a1"}, {"id": "a2"}]
+
+        _fetch_albums_individual(["a1", "a2"])
+
+        for call_args in mock_get.call_args_list:
+            assert call_args[0][1] == {"market": "JP"}
+
+    @patch("collectors.release.spotify_get")
+    def test_skips_failed_and_continues(self, mock_get):
+        mock_get.side_effect = [requests.ConnectionError("fail"), {"id": "a2"}]
+
+        result = _fetch_albums_individual(["a1", "a2"])
 
         assert len(result) == 1
+        assert result[0]["id"] == "a2"
+
+    @patch("collectors.release.spotify_get")
+    def test_returns_empty_for_empty_list(self, mock_get):
+        result = _fetch_albums_individual([])
+
+        mock_get.assert_not_called()
+        assert result == []
 
 
 # ---------------------------------------------------------------------------
@@ -182,15 +190,15 @@ class TestCollectReleases:
             "tracks": {"items": tracks or [], "next": None},
         }
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
-    def test_returns_correct_structure(self, mock_ids, mock_batch):
+    def test_returns_correct_structure(self, mock_ids, mock_individual):
         track_item = {
             "id": "t1", "name": "Song A", "track_number": 1,
             "disc_number": 1, "duration_ms": 200000, "explicit": False,
         }
         mock_ids.return_value = ["alb1"]
-        mock_batch.return_value = [self._make_album("alb1", tracks=[track_item])]
+        mock_individual.return_value = [self._make_album("alb1", tracks=[track_item])]
 
         result = collect_releases("artist-spotify-id")
 
@@ -204,11 +212,11 @@ class TestCollectReleases:
         assert r["total_tracks"] == 1
         assert len(r["tracks"]) == 1
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
-    def test_compilation_is_excluded(self, mock_ids, mock_batch):
+    def test_compilation_is_excluded(self, mock_ids, mock_individual):
         mock_ids.return_value = ["c1", "a1"]
-        mock_batch.return_value = [
+        mock_individual.return_value = [
             self._make_album("c1", album_type="compilation"),
             self._make_album("a1", album_type="album"),
         ]
@@ -218,11 +226,11 @@ class TestCollectReleases:
         assert len(result) == 1
         assert result[0]["spotify_id"] == "a1"
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
-    def test_single_type_mapped_correctly(self, mock_ids, mock_batch):
+    def test_single_type_mapped_correctly(self, mock_ids, mock_individual):
         mock_ids.return_value = ["s1"]
-        mock_batch.return_value = [self._make_album("s1", album_type="single")]
+        mock_individual.return_value = [self._make_album("s1", album_type="single")]
 
         result = collect_releases("artist-spotify-id")
 
@@ -233,48 +241,48 @@ class TestCollectReleases:
         mock_ids.return_value = []
         assert collect_releases("artist-spotify-id") == []
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
-    def test_cover_url_none_when_images_empty(self, mock_ids, mock_batch):
+    def test_cover_url_none_when_images_empty(self, mock_ids, mock_individual):
         album = self._make_album("a1")
         album["images"] = []
         mock_ids.return_value = ["a1"]
-        mock_batch.return_value = [album]
+        mock_individual.return_value = [album]
 
         result = collect_releases("artist-spotify-id")
 
         assert result[0]["cover_url"] is None
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
-    def test_partial_release_date_stored_as_none(self, mock_ids, mock_batch):
+    def test_partial_release_date_stored_as_none(self, mock_ids, mock_individual):
         album = self._make_album("a1")
         album["release_date"] = "2023-11"
         mock_ids.return_value = ["a1"]
-        mock_batch.return_value = [album]
+        mock_individual.return_value = [album]
 
         result = collect_releases("artist-spotify-id")
 
         assert result[0]["first_release_date"] is None
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
-    def test_warns_when_tracks_exceed_50(self, mock_ids, mock_batch):
+    def test_warns_when_tracks_exceed_50(self, mock_ids, mock_individual):
         album = self._make_album("a1")
         album["tracks"]["next"] = "https://api.spotify.com/v1/albums/a1/tracks?offset=50"
         mock_ids.return_value = ["a1"]
-        mock_batch.return_value = [album]
+        mock_individual.return_value = [album]
 
         import logging
         with patch.object(logging.getLogger("collectors.release"), "warning") as mock_warn:
             collect_releases("artist-spotify-id")
             mock_warn.assert_called_once()
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
-    def test_none_album_in_batch_is_skipped(self, mock_ids, mock_batch):
+    def test_none_album_in_batch_is_skipped(self, mock_ids, mock_individual):
         mock_ids.return_value = ["a1", "a2"]
-        mock_batch.return_value = [None, self._make_album("a2")]
+        mock_individual.return_value = [None, self._make_album("a2")]
 
         result = collect_releases("artist-spotify-id")
 
