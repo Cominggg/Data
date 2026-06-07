@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from urllib.parse import urlparse
 
@@ -31,9 +32,17 @@ _DOMAIN_TO_TYPE = {
     "twitter.com": "Twitter",
     "x.com": "Twitter",
     "youtube.com": "YouTube",
-    "youtu.be": "YouTube",
     "open.spotify.com": "Spotify",
     "music.apple.com": "AppleMusic",
+}
+# youtu.be는 영상 단축 URL이므로 아티스트 채널로 부적합 → 제외
+
+_URL_PATTERNS: dict = {
+    "Spotify":    re.compile(r"open\.spotify\.com/artist/[A-Za-z0-9]+"),
+    "YouTube":    re.compile(r"youtube\.com/(@|channel/|c/|user/)"),
+    "Instagram":  re.compile(r"instagram\.com/[^/?#]+"),
+    "Twitter":    re.compile(r"(?:twitter|x)\.com/[^/?#]+"),
+    "AppleMusic": re.compile(r"music\.apple\.com/"),
 }
 
 
@@ -76,21 +85,34 @@ def _parse_aliases(raw_aliases: list) -> list[dict]:
 
 
 def _parse_url_rels(relations: list) -> list[dict]:
-    result = []
+    seen: dict[str, str] = {}  # type → url (타입당 1개만 유지)
     for rel in relations:
         if rel.get("target-type") != "url":
             continue
         resource = rel.get("url", {}).get("resource", "")
-        if rel.get("type") == "official homepage":
-            result.append({"type": "Official", "url": resource})
+        if not resource:
             continue
+
+        if rel.get("type") == "official homepage":
+            if "Official" not in seen:
+                seen["Official"] = resource
+            continue
+
         netloc = urlparse(resource).netloc.lower()
         if netloc.startswith("www."):
             netloc = netloc[4:]
         site_type = _DOMAIN_TO_TYPE.get(netloc)
-        if site_type:
-            result.append({"type": site_type, "url": resource})
-    return result
+        if not site_type or site_type in seen:
+            continue
+
+        pattern = _URL_PATTERNS.get(site_type)
+        if pattern and not pattern.search(resource):
+            logger.debug("URL 패턴 불일치 — 건너뜀: type=%s, url=%s", site_type, resource)
+            continue
+
+        seen[site_type] = resource
+
+    return [{"type": t, "url": u} for t, u in seen.items()]
 
 
 def _parse_artist(detail: dict) -> dict:
@@ -172,7 +194,11 @@ def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
                 )
                 continue
 
-            artists.append(_parse_artist(detail))
+            parsed = _parse_artist(detail)
+            if not any(u["type"] == "Spotify" for u in parsed["url_rels"]):
+                logger.info("Spotify URL 없음 — 건너뜀: %s (%s)", item.get("name"), mbid)
+                continue
+            artists.append(parsed)
             logger.info("수집 완료: %s (%s)", item.get("name"), mbid)
 
         offset += len(batch)

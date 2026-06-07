@@ -19,8 +19,7 @@ class TestRunInitialCollect:
         with (
             patch("scheduler.run_wikipedia_collect"),
             patch("scheduler.run_status_update"),
-            patch("scheduler.get_matched_artist_mbids", return_value=[]),
-            patch("scheduler.run_cover_art_update"),
+            patch("scheduler.get_all_artists_with_spotify", return_value=[]),
             patch("scheduler.run_artist_image_update"),
             patch("scheduler.run_setlist_collect"),
         ):
@@ -50,28 +49,36 @@ class TestRunInitialCollect:
         mock_save.assert_called_once_with(artists)
 
     def test_collects_releases_for_matched_artists(self):
-        """매칭 아티스트 MBID 목록으로 collect_releases가 호출되어야 한다."""
+        """매칭 아티스트 Spotify ID로 collect_releases가 호출되어야 한다."""
+        artists = [
+            {"artist_id": 1, "spotify_url": "https://open.spotify.com/artist/sp-1"},
+            {"artist_id": 2, "spotify_url": "https://open.spotify.com/artist/sp-2"},
+        ]
         with (
             patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
-            patch("scheduler.get_matched_artist_mbids", return_value=["mbid-1", "mbid-2"]),
+            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=[]) as mock_collect,
             patch("scheduler.save_releases"),
         ):
             run_initial_collect()
 
         assert mock_collect.call_count == 2
-        mock_collect.assert_any_call("mbid-1")
-        mock_collect.assert_any_call("mbid-2")
+        mock_collect.assert_any_call("sp-1")
+        mock_collect.assert_any_call("sp-2")
 
     def test_saves_releases_for_each_matched_artist(self):
         """각 매칭 아티스트 릴리즈가 save_releases로 저장되어야 한다."""
+        artists = [
+            {"artist_id": 1, "spotify_url": "https://open.spotify.com/artist/sp-1"},
+            {"artist_id": 2, "spotify_url": "https://open.spotify.com/artist/sp-2"},
+        ]
         with (
             patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
-            patch("scheduler.get_matched_artist_mbids", return_value=["mbid-1", "mbid-2"]),
+            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=[{"title": "앨범"}]),
             patch("scheduler.save_releases") as mock_save,
         ):
@@ -234,36 +241,40 @@ class TestRunStatusUpdate:
 
 
 class TestRunReleaseUpdate:
-    def test_collects_releases_for_all_mbids(self):
-        """DB의 모든 MBID에 대해 collect_releases가 호출되어야 한다."""
-        mbids = ["mbid-1", "mbid-2"]
+    def test_collects_releases_for_all_spotify_artists(self):
+        """Spotify URL을 보유한 모든 아티스트에 대해 collect_releases가 호출되어야 한다."""
+        artists = [
+            {"artist_id": 1, "spotify_url": "https://open.spotify.com/artist/sp-1"},
+            {"artist_id": 2, "spotify_url": "https://open.spotify.com/artist/sp-2"},
+        ]
         with (
-            patch("scheduler.get_all_artist_mbids", return_value=mbids),
+            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=[]) as mock_collect,
             patch("scheduler.save_releases"),
         ):
             run_release_update()
 
         assert mock_collect.call_count == 2
-        mock_collect.assert_any_call("mbid-1")
-        mock_collect.assert_any_call("mbid-2")
+        mock_collect.assert_any_call("sp-1")
+        mock_collect.assert_any_call("sp-2")
 
-    def test_saves_releases_for_each_mbid(self):
-        """각 MBID의 릴리즈가 save_releases로 저장되어야 한다."""
-        releases = [{"release_group_mbid": "rg-1"}]
+    def test_saves_releases_with_artist_id(self):
+        """릴리즈가 artist_id와 함께 save_releases로 저장되어야 한다."""
+        releases = [{"spotify_id": "alb-1"}]
+        artists = [{"artist_id": 99, "spotify_url": "https://open.spotify.com/artist/sp-1"}]
         with (
-            patch("scheduler.get_all_artist_mbids", return_value=["mbid-1"]),
+            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=releases),
             patch("scheduler.save_releases") as mock_save,
         ):
             run_release_update()
 
-        mock_save.assert_called_once_with(releases)
+        mock_save.assert_called_once_with(99, releases)
 
     def test_no_db_calls_when_no_artists(self):
         """아티스트가 없으면 collect_releases가 호출되지 않아야 한다."""
         with (
-            patch("scheduler.get_all_artist_mbids", return_value=[]),
+            patch("scheduler.get_all_artists_with_spotify", return_value=[]),
             patch("scheduler.release.collect_releases") as mock_collect,
             patch("scheduler.save_releases"),
         ):
@@ -296,10 +307,10 @@ class TestRunSetlistCollect:
 
 
 class TestBuildScheduler:
-    def test_registers_six_jobs(self):
-        """스케줄러에 6개의 잡이 등록되어야 한다."""
+    def test_registers_five_jobs(self):
+        """스케줄러에 5개의 잡이 등록되어야 한다."""
         scheduler = _build_scheduler()
-        assert len(scheduler.get_jobs()) == 6
+        assert len(scheduler.get_jobs()) == 5
 
     def test_includes_tuesday_job(self):
         """화요일 릴리즈 갱신 잡이 등록되어야 한다."""
@@ -331,15 +342,14 @@ class TestSortReleases:
         assert result[0]["type"] == "Album"
         assert result[1]["type"] == "Single"
 
-    def test_album_ep_single_order(self):
-        """Album → EP → Single 순서여야 한다."""
+    def test_album_single_order(self):
+        """Album → Single 순서여야 한다 (EP는 Spotify에서 미지원)."""
         releases = [
             {"type": "Single", "title": "S"},
-            {"type": "EP", "title": "E"},
             {"type": "Album", "title": "A"},
         ]
         result = _sort_releases(releases)
-        assert [r["type"] for r in result] == ["Album", "EP", "Single"]
+        assert [r["type"] for r in result] == ["Album", "Single"]
 
     def test_unknown_type_goes_last(self):
         """알 수 없는 타입은 맨 뒤에 위치해야 한다."""
@@ -353,8 +363,8 @@ class TestSortReleases:
 
     def test_preserves_all_releases(self):
         """정렬 후 릴리즈 개수가 유지되어야 한다."""
-        releases = [{"type": t} for t in ["Single", "Album", "EP", "Live"]]
-        assert len(_sort_releases(releases)) == 4
+        releases = [{"type": t} for t in ["Single", "Album", "Live"]]
+        assert len(_sort_releases(releases)) == 3
 
     def test_empty_list(self):
         """빈 리스트를 넘기면 빈 리스트를 반환해야 한다."""

@@ -48,6 +48,7 @@ class TestParseUrlRels:
         assert result == [{"type": "Instagram", "url": "https://www.instagram.com/artist"}]
 
     def test_allows_all_target_platforms(self):
+        """타입별 1개씩 총 5개 플랫폼이 수집되어야 한다."""
         relations = [
             {"target-type": "url", "type": "social network", "url": {"resource": "https://twitter.com/artist"}},
             {"target-type": "url", "type": "social network", "url": {"resource": "https://x.com/artist"}},
@@ -57,10 +58,10 @@ class TestParseUrlRels:
             {"target-type": "url", "type": "free streaming", "url": {"resource": "https://music.apple.com/artist/abc"}},
         ]
         result = _parse_url_rels(relations)
-        assert len(result) == 6
+        assert len(result) == 5
 
     def test_maps_domains_to_site_names(self):
-        """도메인 기반으로 사이트 이름이 type에 저장되어야 한다."""
+        """도메인 기반으로 사이트 이름이 type에 저장되고, 타입 중복 시 첫 번째만 유지된다."""
         relations = [
             {"target-type": "url", "type": "social network", "url": {"resource": "https://twitter.com/artist"}},
             {"target-type": "url", "type": "social network", "url": {"resource": "https://x.com/artist"}},
@@ -71,7 +72,26 @@ class TestParseUrlRels:
         ]
         result = _parse_url_rels(relations)
         types = [r["type"] for r in result]
-        assert types == ["Twitter", "Twitter", "Instagram", "YouTube", "Spotify", "AppleMusic"]
+        assert types == ["Twitter", "Instagram", "YouTube", "Spotify", "AppleMusic"]
+
+    def test_deduplicates_same_type(self):
+        """동일 type의 URL이 여러 개일 때 첫 번째만 저장된다."""
+        relations = [
+            {"target-type": "url", "type": "youtube", "url": {"resource": "https://www.youtube.com/channel/first"}},
+            {"target-type": "url", "type": "youtube", "url": {"resource": "https://www.youtube.com/channel/second"}},
+        ]
+        result = _parse_url_rels(relations)
+        assert len(result) == 1
+        assert result[0]["url"] == "https://www.youtube.com/channel/first"
+
+    def test_filters_invalid_url_patterns(self):
+        """패턴 불일치 URL은 필터링된다."""
+        relations = [
+            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://open.spotify.com/playlist/abc"}},
+            {"target-type": "url", "type": "youtube", "url": {"resource": "https://youtu.be/videoId"}},
+        ]
+        result = _parse_url_rels(relations)
+        assert result == []
 
     def test_official_homepage_stored_as_official(self):
         """official homepage type은 도메인과 무관하게 'Official'로 저장되어야 한다."""
@@ -127,7 +147,13 @@ class TestCollectArtists:
             "name": "Artist1",
             "sort-name": "Artist1",
             "aliases": [],
-            "relations": [],
+            "relations": [
+                {
+                    "target-type": "url",
+                    "type": "streaming music",
+                    "url": {"resource": "https://open.spotify.com/artist/abc123"},
+                }
+            ],
         }
         result = collect_artists()
         assert len(result) == 1
@@ -244,7 +270,14 @@ class TestCollectArtists:
         }
         mock_detail.return_value = {
             "id": "mbid-1", "name": "Artist1", "sort-name": "Artist1",
-            "aliases": [], "relations": [],
+            "aliases": [],
+            "relations": [
+                {
+                    "target-type": "url",
+                    "type": "streaming music",
+                    "url": {"resource": "https://open.spotify.com/artist/abc123"},
+                }
+            ],
         }
         result = collect_artists()
         assert len(result) == 1

@@ -162,9 +162,11 @@ class TestCollectArtistImage:
 
     def test_raises_when_credentials_missing(self):
         """SPOTIFY_CLIENT_ID 또는 SPOTIFY_CLIENT_SECRET 미설정 → ValueError."""
-        with patch.dict("os.environ", {}, clear=True):
+        empty_cache = {"token": None, "expires_at": 0.0}
+        with patch.dict("os.environ", {}, clear=True), \
+                patch("collectors.spotify_client._token_cache", empty_cache):
             with pytest.raises(ValueError, match="SPOTIFY_CLIENT_ID"):
-                collect_artist_image("mbid-001")
+                collect_artist_image("mbid-001", name="Test Artist")
 
     def test_raises_on_network_error(self):
         """네트워크 오류 시 RequestException 전파."""

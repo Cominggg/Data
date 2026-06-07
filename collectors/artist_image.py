@@ -1,4 +1,3 @@
-import base64
 import logging
 import os
 import time
@@ -7,34 +6,14 @@ from typing import Optional, Tuple
 import requests
 from dotenv import load_dotenv
 
+from collectors.spotify_client import spotify_get
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 _MB_BASE_URL = "https://musicbrainz.org/ws/2"
-_SPOTIFY_AUTH_URL = "https://accounts.spotify.com/api/token"
-_SPOTIFY_API_URL = "https://api.spotify.com/v1"
 _MB_RATE_LIMIT_SLEEP = 1.1
-
-_token_cache: dict = {"token": None, "expires_at": 0.0}
-
-
-def _get_access_token(client_id: str, client_secret: str) -> str:
-    """Spotify Client Credentials Flow로 access_token을 발급한다 (모듈 레벨 1h 캐시)."""
-    if _token_cache["token"] and time.time() < _token_cache["expires_at"] - 60:
-        return _token_cache["token"]
-    credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-    response = requests.post(
-        _SPOTIFY_AUTH_URL,
-        headers={"Authorization": f"Basic {credentials}"},
-        data={"grant_type": "client_credentials"},
-        timeout=10,
-    )
-    response.raise_for_status()
-    data = response.json()
-    _token_cache["token"] = data["access_token"]
-    _token_cache["expires_at"] = time.time() + data["expires_in"]
-    return _token_cache["token"]
 
 
 def _get_mb_artist_info(mbid: str) -> Tuple[Optional[str], Optional[str]]:
@@ -67,32 +46,24 @@ def _get_mb_artist_info(mbid: str) -> Tuple[Optional[str], Optional[str]]:
     return artist_name, spotify_id
 
 
-def _search_spotify_artist(name: str, access_token: str) -> Optional[str]:
+def _search_spotify_artist(name: str) -> Optional[str]:
     """Spotify 이름 검색으로 아티스트 ID를 반환한다 (fallback)."""
-    response = requests.get(
-        f"{_SPOTIFY_API_URL}/search",
-        headers={"Authorization": f"Bearer {access_token}"},
-        params={"q": name, "type": "artist", "limit": 1},
-        timeout=10,
-    )
-    response.raise_for_status()
-    items = response.json().get("artists", {}).get("items", [])
+    data = spotify_get("/search", {"q": name, "type": "artist", "limit": 1})
+    items = data.get("artists", {}).get("items", [])
     if not items:
         return None
     return items[0]["id"]
 
 
-def _get_artist_image_url(spotify_id: str, access_token: str) -> Optional[str]:
+def _get_artist_image_url(spotify_id: str) -> Optional[str]:
     """Spotify 아티스트 ID로 가장 큰 이미지 URL을 반환한다."""
-    response = requests.get(
-        f"{_SPOTIFY_API_URL}/artists/{spotify_id}",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=10,
-    )
-    if response.status_code == 404:
-        return None
-    response.raise_for_status()
-    images = response.json().get("images", [])
+    try:
+        data = spotify_get(f"/artists/{spotify_id}")
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return None
+        raise
+    images = data.get("images", [])
     if not images:
         return None
     return images[0]["url"]
@@ -109,19 +80,12 @@ def collect_artist_image(
     name: 아티스트 이름 (spotify_url 없을 때 이름 검색 fallback에 사용, MB API 호출 생략)
     둘 다 없으면 MusicBrainz API를 직접 조회한다 (기존 동작).
     """
-    client_id = os.environ.get("SPOTIFY_CLIENT_ID")
-    client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET")
-    if not client_id or not client_secret:
-        raise ValueError("SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET 환경변수가 설정되지 않았습니다.")
-
-    access_token = _get_access_token(client_id, client_secret)
-
     spotify_id: Optional[str] = None
 
     if spotify_url:
         spotify_id = spotify_url.rstrip("/").split("/")[-1]
     elif name:
-        spotify_id = _search_spotify_artist(name, access_token)
+        spotify_id = _search_spotify_artist(name)
     else:
         mb_name, spotify_id = _get_mb_artist_info(mbid)
         if not spotify_id:
@@ -130,10 +94,10 @@ def collect_artist_image(
                 return None
             logger.info("MB URL relations에 Spotify 없음 — 이름 검색 fallback: mbid=%s name=%s",
                         mbid, mb_name)
-            spotify_id = _search_spotify_artist(mb_name, access_token)
+            spotify_id = _search_spotify_artist(mb_name)
 
     if not spotify_id:
         logger.info("Spotify ID 조회 실패: mbid=%s", mbid)
         return None
 
-    return _get_artist_image_url(spotify_id, access_token)
+    return _get_artist_image_url(spotify_id)
