@@ -6,6 +6,7 @@ import pytest
 from scheduler import (
     _build_scheduler,
     _sort_releases,
+    register_artist_by_mbid,
     run_initial_collect,
     run_release_update,
     run_setlist_collect,
@@ -369,3 +370,81 @@ class TestSortReleases:
     def test_empty_list(self):
         """빈 리스트를 넘기면 빈 리스트를 반환해야 한다."""
         assert _sort_releases([]) == []
+
+
+class TestRegisterArtistByMbid:
+    _ARTIST = {
+        "mbid": "mbid-test",
+        "name": "TestArtist",
+        "sort_name": "TestArtist",
+        "aliases": [],
+        "url_rels": [{"type": "Spotify", "url": "https://open.spotify.com/artist/sp999"}],
+    }
+    _SAVED = {"id": 42, "name": "TestArtist", "spotify_url": "https://open.spotify.com/artist/sp999"}
+
+    def test_returns_true_on_success(self):
+        """모든 단계 성공 시 True를 반환해야 한다."""
+        with (
+            patch("scheduler.musicbrainz.collect_single_artist", return_value=self._ARTIST),
+            patch("scheduler.save_artists"),
+            patch("scheduler.get_artist_by_mbid", return_value=self._SAVED),
+            patch("scheduler.artist_image.collect_artist_image", return_value="http://img.url"),
+            patch("scheduler.update_artist_image"),
+            patch("scheduler.release.collect_releases", return_value=[]),
+            patch("scheduler.save_releases"),
+        ):
+            assert register_artist_by_mbid("mbid-test") is True
+
+    def test_returns_false_when_collect_fails(self):
+        """MusicBrainz 수집 실패 시 False를 반환해야 한다."""
+        with patch("scheduler.musicbrainz.collect_single_artist", return_value=None):
+            assert register_artist_by_mbid("mbid-bad") is False
+
+    def test_returns_false_when_db_lookup_fails(self):
+        """DB에서 아티스트를 찾지 못하면 False를 반환해야 한다."""
+        with (
+            patch("scheduler.musicbrainz.collect_single_artist", return_value=self._ARTIST),
+            patch("scheduler.save_artists"),
+            patch("scheduler.get_artist_by_mbid", return_value=None),
+        ):
+            assert register_artist_by_mbid("mbid-test") is False
+
+    def test_saves_artist_before_image_and_releases(self):
+        """save_artists가 이미지·릴리즈 수집보다 먼저 호출되어야 한다."""
+        call_order = []
+        with (
+            patch(
+                "scheduler.musicbrainz.collect_single_artist", return_value=self._ARTIST
+            ),
+            patch("scheduler.save_artists", side_effect=lambda _: call_order.append("save")),
+            patch("scheduler.get_artist_by_mbid", return_value=self._SAVED),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                side_effect=lambda *a, **kw: call_order.append("image") or "http://img",
+            ),
+            patch("scheduler.update_artist_image"),
+            patch(
+                "scheduler.release.collect_releases",
+                side_effect=lambda _: call_order.append("releases") or [],
+            ),
+            patch("scheduler.save_releases"),
+        ):
+            register_artist_by_mbid("mbid-test")
+
+        assert call_order[0] == "save"
+
+    def test_skips_image_and_releases_without_spotify(self):
+        """Spotify URL이 없으면 이미지·릴리즈 수집을 건너뛰어야 한다."""
+        saved_no_spotify = {"id": 99, "name": "NoSpot", "spotify_url": None}
+        with (
+            patch("scheduler.musicbrainz.collect_single_artist", return_value=self._ARTIST),
+            patch("scheduler.save_artists"),
+            patch("scheduler.get_artist_by_mbid", return_value=saved_no_spotify),
+            patch("scheduler.artist_image.collect_artist_image") as mock_img,
+            patch("scheduler.release.collect_releases") as mock_rel,
+        ):
+            result = register_artist_by_mbid("mbid-test")
+
+        assert result is True
+        mock_img.assert_not_called()
+        mock_rel.assert_not_called()

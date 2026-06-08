@@ -8,6 +8,7 @@ from collectors.musicbrainz import (
     _parse_artist,
     _parse_url_rels,
     collect_artists,
+    collect_single_artist,
 )
 from db.repository import save_artists
 
@@ -415,3 +416,74 @@ class TestSaveArtists:
         mock_session = self._make_session_mock()
         self._run([], mock_session)
         mock_session.execute.assert_not_called()
+
+
+class TestCollectSingleArtist:
+    _DETAIL = {
+        "id": "mbid-single",
+        "name": "SoloArtist",
+        "sort-name": "Artist, Solo",
+        "aliases": [{"name": "솔로", "locale": "ko"}],
+        "relations": [
+            {
+                "target-type": "url",
+                "type": "streaming music",
+                "url": {"resource": "https://open.spotify.com/artist/sp123"},
+            }
+        ],
+    }
+
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    def test_returns_parsed_artist_on_success(self, mock_detail):
+        """성공 시 _parse_artist 결과 dict를 반환해야 한다."""
+        mock_detail.return_value = self._DETAIL
+        result = collect_single_artist("mbid-single")
+
+        assert result is not None
+        assert result["mbid"] == "mbid-single"
+        assert result["name"] == "SoloArtist"
+
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    def test_includes_spotify_url_in_url_rels(self, mock_detail):
+        """Spotify URL이 url_rels에 포함되어야 한다."""
+        mock_detail.return_value = self._DETAIL
+        result = collect_single_artist("mbid-single")
+
+        assert result is not None
+        spotify = next((u for u in result["url_rels"] if u["type"] == "Spotify"), None)
+        assert spotify is not None
+
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    def test_returns_none_on_request_exception(self, mock_detail):
+        """네트워크 오류 시 None을 반환해야 한다."""
+        mock_detail.side_effect = requests.RequestException("timeout")
+        result = collect_single_artist("mbid-fail")
+        assert result is None
+
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    def test_skips_no_listener_filter(self, mock_detail):
+        """Last.fm 리스너 수 조건 없이 아티스트를 반환해야 한다."""
+        mock_detail.return_value = {
+            "id": "mbid-nolisten",
+            "name": "NicheArtist",
+            "sort-name": "NicheArtist",
+            "aliases": [],
+            "relations": [],
+        }
+        result = collect_single_artist("mbid-nolisten")
+        assert result is not None
+        assert result["name"] == "NicheArtist"
+
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    def test_returns_artist_without_spotify(self, mock_detail):
+        """Spotify URL이 없어도 아티스트를 반환해야 한다."""
+        mock_detail.return_value = {
+            "id": "mbid-nospot",
+            "name": "NoSpotArtist",
+            "sort-name": "NoSpotArtist",
+            "aliases": [],
+            "relations": [],
+        }
+        result = collect_single_artist("mbid-nospot")
+        assert result is not None
+        assert result["url_rels"] == []
