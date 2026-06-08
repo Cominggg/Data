@@ -128,6 +128,24 @@ def _parse_artist(detail: dict) -> dict:
     }
 
 
+def search_artists(name: str) -> list[dict]:
+    """아티스트명으로 MusicBrainz 검색. 최대 10건 반환."""
+    try:
+        data = _get("/artist/", {"query": f"artist:{name}", "fmt": "json", "limit": 10})
+    except requests.RequestException as e:
+        logger.error("아티스트 검색 실패 name=%s: %s", name, e)
+        return []
+    return [
+        {
+            "mbid": item.get("id"),
+            "name": item.get("name"),
+            "country": item.get("country"),
+            "type": item.get("type"),
+        }
+        for item in data.get("artists", [])
+    ]
+
+
 def collect_single_artist(mbid: str) -> Optional[dict]:
     """MBID 하나로 아티스트 상세 정보를 수집해 반환한다.
 

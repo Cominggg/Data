@@ -124,6 +124,36 @@ def _parse_concert(item: ET.Element) -> dict:
     }
 
 
+def search_concerts(title: str) -> list[dict]:
+    """공연명으로 KOPIS 검색. 오늘~2년 후 범위, 최대 20건 반환."""
+    today = datetime.date.today()
+    stdate = today.strftime("%Y%m%d")
+    eddate = (today + datetime.timedelta(days=730)).strftime("%Y%m%d")
+    params = {
+        **_DEFAULT_PARAMS,
+        "prfnm": title,
+        "stdate": stdate,
+        "eddate": eddate,
+        "cpage": 1,
+        "rows": 20,
+    }
+    try:
+        root = _get(params)
+    except (requests.RequestException, ET.ParseError) as e:
+        logger.error("KOPIS 공연 검색 실패 title=%s: %s", title, e)
+        return []
+    return [
+        {
+            "kopis_id": _text(item, "mt20id"),
+            "title": _text(item, "prfnm"),
+            "start_date": _parse_kopis_date(_text(item, "prfpdfrom")),
+            "end_date": _parse_kopis_date(_text(item, "prfpdto")),
+            "venue": _text(item, "fcltynm"),
+        }
+        for item in root.findall("db")
+    ]
+
+
 def collect_by_id(kopis_id: str) -> Optional[dict]:
     """단건 kopis_id로 공연 상세 데이터를 수집한다. 데이터 없거나 파싱 실패 시 None 반환."""
     url = f"{_BASE_URL}/{kopis_id}"
@@ -203,11 +233,15 @@ def collect(stdate: Optional[str] = None, eddate: Optional[str] = None) -> list[
     cpage = 1
     today = datetime.date.today()
     resolved_stdate = stdate or _DEFAULT_STDATE
-    resolved_eddate = eddate or (today + datetime.timedelta(days=_DEFAULT_LOOKAHEAD_DAYS)).strftime("%Y%m%d")
+    lookahead = today + datetime.timedelta(days=_DEFAULT_LOOKAHEAD_DAYS)
+    resolved_eddate = eddate or lookahead.strftime("%Y%m%d")
 
     while True:
         logger.debug("KOPIS 페이지 조회: cpage=%d", cpage)
-        params = {**_DEFAULT_PARAMS, "cpage": cpage, "stdate": resolved_stdate, "eddate": resolved_eddate}
+        params = {
+            **_DEFAULT_PARAMS, "cpage": cpage,
+            "stdate": resolved_stdate, "eddate": resolved_eddate,
+        }
 
         root = None
         for attempt in range(1, 4):
