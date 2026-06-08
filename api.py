@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+from collectors import kopis, musicbrainz
 from scheduler import (
     collect_and_save_concert,
     collect_and_save_releases_for_artist,
@@ -70,3 +71,19 @@ def trigger_register_artist(
 ) -> dict:
     background_tasks.add_task(register_artist_by_mbid, req.mbid)
     return {"accepted": True}
+
+
+@app.get("/search/artists")
+def search_artists_endpoint(
+    name: str,
+    _: None = Depends(_verify_secret),
+) -> list:
+    return musicbrainz.search_artists(name)
+
+
+@app.get("/search/concerts")
+def search_concerts_endpoint(
+    title: str,
+    _: None = Depends(_verify_secret),
+) -> list:
+    return kopis.search_concerts(title)

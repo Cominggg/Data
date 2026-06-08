@@ -107,3 +107,58 @@ class TestRegisterArtistEndpoint:
         with patch("api.register_artist_by_mbid") as mock_fn:
             client.post("/collect/artist", json={"mbid": "mbid-xyz"}, headers=_AUTH)
         mock_fn.assert_called_once_with("mbid-xyz")
+
+
+class TestSearchArtistsEndpoint:
+    def test_returns_200(self, client):
+        """GET /search/artists?name= 는 200을 반환해야 한다."""
+        with patch("collectors.musicbrainz.search_artists", return_value=[]):
+            res = client.get("/search/artists?name=YOASOBI", headers=_AUTH)
+        assert res.status_code == 200
+
+    def test_missing_name_returns_422(self, client):
+        """name 파라미터 없으면 422이어야 한다."""
+        res = client.get("/search/artists", headers=_AUTH)
+        assert res.status_code == 422
+
+    def test_returns_artist_list(self, client):
+        """검색 결과 리스트를 그대로 반환해야 한다."""
+        artists = [{"mbid": "abc-123", "name": "YOASOBI", "country": "JP", "type": "Group"}]
+        with patch("collectors.musicbrainz.search_artists", return_value=artists) as mock_fn:
+            res = client.get("/search/artists?name=YOASOBI", headers=_AUTH)
+        mock_fn.assert_called_once_with("YOASOBI")
+        assert res.json() == artists
+
+    def test_unauthorized_returns_401(self, client):
+        """인증 없으면 401이어야 한다."""
+        res = client.get("/search/artists?name=BTS")
+        assert res.status_code == 401
+
+
+class TestSearchConcertsEndpoint:
+    def test_returns_200(self, client):
+        """GET /search/concerts?title= 는 200을 반환해야 한다."""
+        with patch("collectors.kopis.search_concerts", return_value=[]):
+            res = client.get("/search/concerts?title=BTS", headers=_AUTH)
+        assert res.status_code == 200
+
+    def test_missing_title_returns_422(self, client):
+        """title 파라미터 없으면 422이어야 한다."""
+        res = client.get("/search/concerts", headers=_AUTH)
+        assert res.status_code == 422
+
+    def test_returns_concert_list(self, client):
+        """검색 결과 리스트를 그대로 반환해야 한다."""
+        concerts = [{
+            "kopis_id": "PF001", "title": "BTS WORLD TOUR",
+            "start_date": "2024-06-01", "end_date": "2024-06-02", "venue": "KSPO DOME",
+        }]
+        with patch("collectors.kopis.search_concerts", return_value=concerts) as mock_fn:
+            res = client.get("/search/concerts?title=BTS", headers=_AUTH)
+        mock_fn.assert_called_once_with("BTS")
+        assert res.json() == concerts
+
+    def test_unauthorized_returns_401(self, client):
+        """인증 없으면 401이어야 한다."""
+        res = client.get("/search/concerts?title=BTS")
+        assert res.status_code == 401
