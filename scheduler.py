@@ -14,6 +14,7 @@ from db.repository import (
     get_all_artist_mbids,
     get_all_artists,
     get_all_artists_with_spotify,
+    get_artist_by_mbid,
     get_artists_without_image,
     get_artists_without_releases,
     get_concert_by_kopis_id,
@@ -253,6 +254,54 @@ def run_recover(skip_releases: bool = False, skip_artist_image: bool = False) ->
     else:
         run_missing_release_update()
     logger.info("=== 복구 수집 완료 ===")
+
+
+def register_artist_by_mbid(mbid: str) -> bool:
+    """어드민 요청으로 단일 아티스트를 등록한다.
+
+    1) MusicBrainz에서 아티스트 상세 수집 후 DB 저장
+    2) Spotify URL이 있으면 이미지·릴리즈 수집
+    Last.fm 리스너 수 필터를 적용하지 않는다.
+    성공 시 True, 수집 실패 시 False 반환.
+    """
+    logger.info("어드민 아티스트 등록 시작: mbid=%s", mbid)
+
+    artist = musicbrainz.collect_single_artist(mbid)
+    if artist is None:
+        logger.error("아티스트 수집 실패 — 등록 중단: mbid=%s", mbid)
+        return False
+
+    save_artists([artist])
+
+    saved = get_artist_by_mbid(mbid)
+    if saved is None:
+        logger.error("아티스트 DB 조회 실패 — 이후 수집 건너뜀: mbid=%s", mbid)
+        return False
+
+    artist_id = saved["id"]
+    spotify_url = saved.get("spotify_url")
+
+    if spotify_url:
+        try:
+            image_url = artist_image.collect_artist_image(
+                mbid, spotify_url=spotify_url, name=saved.get("name")
+            )
+            if image_url:
+                update_artist_image(artist_id, image_url)
+        except Exception as e:
+            logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", mbid, e)
+
+        try:
+            spotify_id = _extract_spotify_id(spotify_url)
+            releases = _sort_releases(release.collect_releases(spotify_id))
+            save_releases(artist_id, releases)
+        except Exception as e:
+            logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
+    else:
+        logger.info("Spotify URL 없음 — 이미지·릴리즈 수집 건너뜀: mbid=%s", mbid)
+
+    logger.info("어드민 아티스트 등록 완료: mbid=%s, artist_id=%s", mbid, artist_id)
+    return True
 
 
 def run_setlist_collect() -> None:

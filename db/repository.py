@@ -400,6 +400,25 @@ def get_artists_without_releases() -> list[dict]:
     return [{"artist_id": row[0], "spotify_url": row[1]} for row in rows]
 
 
+def get_artist_by_mbid(mbid: str) -> Optional[dict]:
+    """mbid로 아티스트 id·name·spotify_url을 반환한다. 없으면 None."""
+    with get_session() as session:
+        row = session.execute(
+            text("""
+                SELECT DISTINCT ON (a.id) a.id, a.name, au.url AS spotify_url
+                FROM artist a
+                LEFT JOIN artist_url au ON au.artist_id = a.id AND au.type = 'Spotify'
+                WHERE a.mbid = :mbid
+                ORDER BY a.id
+                LIMIT 1
+            """),
+            {"mbid": mbid},
+        ).fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "name": row[1], "spotify_url": row[2]}
+
+
 def get_artists_without_image() -> list[dict]:
     """image_url이 없는 artist의 id·mbid·name·spotify_url 목록을 반환한다."""
     with get_session() as session:
