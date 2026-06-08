@@ -1,5 +1,7 @@
 import argparse
 import logging
+import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
@@ -468,6 +470,20 @@ def main() -> None:
             parser.error("collect-release 커맨드는 --artist-id 가 필요합니다.")
         collect_and_save_releases_for_artist(args.artist_id)
         return
+
+    import uvicorn
+
+    api_host = os.environ.get("API_HOST", "0.0.0.0")
+    api_port = int(os.environ.get("API_PORT", "8000"))
+
+    api_thread = threading.Thread(
+        target=uvicorn.run,
+        args=("api:app",),
+        kwargs={"host": api_host, "port": api_port, "log_level": "warning"},
+        daemon=True,
+    )
+    api_thread.start()
+    logger.info("API 서버 시작: http://%s:%d", api_host, api_port)
 
     scheduler = _build_scheduler()
     scheduler.start()
