@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+from typing import Optional
 from urllib.parse import urlparse
 
 import requests
@@ -127,7 +128,23 @@ def _parse_artist(detail: dict) -> dict:
     }
 
 
-def collect_artists(skip_mbids: set[str] | None = None) -> list[dict]:
+def collect_single_artist(mbid: str) -> Optional[dict]:
+    """MBID 하나로 아티스트 상세 정보를 수집해 반환한다.
+
+    Last.fm 리스너 수 필터 및 Spotify URL 필수 조건을 적용하지 않는다 (어드민 직접 등록 용도).
+    수집 실패 시 None을 반환한다.
+    """
+    try:
+        detail = _fetch_artist_detail(mbid)
+    except requests.RequestException as e:
+        logger.error("단건 아티스트 수집 실패 mbid=%s: %s", mbid, e)
+        return None
+    parsed = _parse_artist(detail)
+    logger.info("단건 아티스트 수집 완료: %s (%s)", parsed.get("name"), mbid)
+    return parsed
+
+
+def collect_artists(skip_mbids: Optional[set] = None) -> list[dict]:
     """country=JP, tag=j-pop 조건으로 아티스트 전체 수집 후 파싱된 리스트 반환.
 
     skip_mbids: 이미 DB에 저장된 MBID 집합. 상세 조회를 건너뛰어 재개 시 시간을 절약한다.
