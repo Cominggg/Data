@@ -848,7 +848,7 @@ class TestUpdateConcertStatus:
         ]
         assert len(update_calls) == 1
         update_params = update_calls[0].args[1]
-        assert update_params["status"] == "공연완료"
+        assert update_params["status"] == "ENDED"
         assert update_params["kopis_update_date"] == "2024-01-20"
 
 

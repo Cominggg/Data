@@ -27,8 +27,8 @@ class TestGetActiveConcerts:
             get_active_concerts()
 
         sql = str(mock_session.execute.call_args_list[0].args[0])
-        assert "공연예정" in sql
-        assert "공연중" in sql
+        assert "UPCOMING" in sql
+        assert "ONGOING" in sql
 
     def test_returns_kopis_id_and_update_date(self):
         """반환값에 kopis_id와 kopis_update_date 키가 포함되어야 한다."""

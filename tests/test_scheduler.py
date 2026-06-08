@@ -19,7 +19,7 @@ class TestRunInitialCollect:
         with (
             patch("scheduler.run_wikipedia_collect"),
             patch("scheduler.run_status_update"),
-            patch("scheduler.get_all_artists_with_spotify", return_value=[]),
+            patch("scheduler.get_matched_artists_with_spotify", return_value=[]),
             patch("scheduler.run_artist_image_update"),
             patch("scheduler.run_setlist_collect"),
         ):
@@ -58,7 +58,7 @@ class TestRunInitialCollect:
             patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
-            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=[]) as mock_collect,
             patch("scheduler.save_releases"),
         ):
@@ -78,7 +78,7 @@ class TestRunInitialCollect:
             patch("scheduler.get_all_artist_mbids", return_value=[]),
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
-            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=[{"title": "앨범"}]),
             patch("scheduler.save_releases") as mock_save,
         ):
@@ -242,13 +242,13 @@ class TestRunStatusUpdate:
 
 class TestRunReleaseUpdate:
     def test_collects_releases_for_all_spotify_artists(self):
-        """Spotify URL을 보유한 모든 아티스트에 대해 collect_releases가 호출되어야 한다."""
+        """내한 매칭 아티스트에 대해 collect_releases가 호출되어야 한다."""
         artists = [
             {"artist_id": 1, "spotify_url": "https://open.spotify.com/artist/sp-1"},
             {"artist_id": 2, "spotify_url": "https://open.spotify.com/artist/sp-2"},
         ]
         with (
-            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=[]) as mock_collect,
             patch("scheduler.save_releases"),
         ):
@@ -263,7 +263,7 @@ class TestRunReleaseUpdate:
         releases = [{"spotify_id": "alb-1"}]
         artists = [{"artist_id": 99, "spotify_url": "https://open.spotify.com/artist/sp-1"}]
         with (
-            patch("scheduler.get_all_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
             patch("scheduler.release.collect_releases", return_value=releases),
             patch("scheduler.save_releases") as mock_save,
         ):
@@ -274,7 +274,7 @@ class TestRunReleaseUpdate:
     def test_no_db_calls_when_no_artists(self):
         """아티스트가 없으면 collect_releases가 호출되지 않아야 한다."""
         with (
-            patch("scheduler.get_all_artists_with_spotify", return_value=[]),
+            patch("scheduler.get_matched_artists_with_spotify", return_value=[]),
             patch("scheduler.release.collect_releases") as mock_collect,
             patch("scheduler.save_releases"),
         ):

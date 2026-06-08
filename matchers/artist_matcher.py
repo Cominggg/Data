@@ -2,32 +2,9 @@ import logging
 import re
 from typing import Optional
 
-from rapidfuzz import fuzz
-
 logger = logging.getLogger(__name__)
 
-_FUZZY_THRESHOLD = 85
 _MIN_ALIAS_LEN = 3
-
-
-def _exact_match(name: str, alias_map: dict) -> Optional[dict]:
-    return alias_map.get(name.lower())
-
-
-def _fuzzy_match(text: str, aliases: list[dict]) -> Optional[dict]:
-    best_score = 0
-    best_alias = None
-    text_lower = text.lower()
-    for alias in aliases:
-        if len(alias["name"]) < _MIN_ALIAS_LEN:
-            continue
-        score = fuzz.token_set_ratio(text_lower, alias["name"].lower())
-        if score > best_score:
-            best_score = score
-            best_alias = alias
-    if best_score >= _FUZZY_THRESHOLD:
-        return best_alias
-    return None
 
 
 def _phrase_match_title(title: str, aliases: list[dict]) -> Optional[dict]:
