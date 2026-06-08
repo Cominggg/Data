@@ -493,6 +493,26 @@ def save_concert_artists(matches: list[dict]) -> None:
     logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
 
 
+def save_concert_artist_candidates(matches: list[dict]) -> None:
+    """자동 매칭 결과를 concert_artist_candidate 테이블에 저장한다. 중복 시 무시."""
+    with get_session() as session:
+        for match in matches:
+            session.execute(
+                text("""
+                    INSERT INTO concert_artist_candidate
+                        (concert_id, artist_id, matched_by)
+                    VALUES (:concert_id, :artist_id, :matched_by)
+                    ON CONFLICT (concert_id, artist_id) DO NOTHING
+                """),
+                {
+                    "concert_id": match["concert_id"],
+                    "artist_id": match["artist_id"],
+                    "matched_by": match.get("matched_by", "title"),
+                },
+            )
+    logger.info("공연-아티스트 후보 저장 완료: %d건 처리", len(matches))
+
+
 
 def update_artist_is_coming() -> int:
     """오늘 이후 공연 보유 여부에 따라 artist.is_coming을 갱신한다.

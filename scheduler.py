@@ -23,6 +23,7 @@ from db.repository import (
     get_unmatched_concerts,
     save_aliases,
     save_artists,
+    save_concert_artist_candidates,
     save_concert_artists,
     save_concerts,
     save_releases,
@@ -179,7 +180,7 @@ def run_status_update() -> None:
             matches, _ = match_concert(concert, aliases)
             all_matches.extend(matches)
         if all_matches:
-            save_concert_artists(all_matches)
+            save_concert_artist_candidates(all_matches)
 
     update_artist_is_coming()
     logger.info("=== 공연 상태 갱신 잡 완료 ===")

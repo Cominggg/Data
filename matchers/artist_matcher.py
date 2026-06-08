@@ -79,7 +79,8 @@ def match_concert(concert: dict, aliases: list[dict]) -> tuple[list[dict], list[
             "매칭(title): concert_id=%s, artist_id=%s, title=%s",
             concert_id, alias["artist_id"], title,
         )
-        return [{"concert_id": concert_id, "artist_id": alias["artist_id"]}], []
+        match = {"concert_id": concert_id, "artist_id": alias["artist_id"], "matched_by": "title"}
+        return [match], []
 
     logger.debug("매칭 실패: concert_id=%s", concert_id)
     return [], [{"concert_id": concert_id}]
