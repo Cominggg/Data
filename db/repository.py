@@ -154,10 +154,10 @@ def save_concerts(concerts: list[dict]) -> None:
                 text("""
                     INSERT INTO concert
                         (kopis_id, title, "cast", start_date, end_date,
-                         venue_name, venue_address, poster_url, price, status, kopis_update_date)
+                         venue_name, poster_url, price, status, kopis_update_date)
                     VALUES
                         (:kopis_id, :title, :cast, :start_date, :end_date,
-                         :venue_name, :venue_address, :poster_url, :price,
+                         :venue_name, :poster_url, :price,
                          :status, :kopis_update_date)
                     ON CONFLICT (kopis_id) DO NOTHING
                     RETURNING id
@@ -169,7 +169,6 @@ def save_concerts(concerts: list[dict]) -> None:
                     "start_date": concert["prfpdfrom"],
                     "end_date": concert["prfpdto"],
                     "venue_name": concert["fcltynm"],
-                    "venue_address": concert.get("venue_address"),
                     "poster_url": concert.get("poster_url"),
                     "price": concert.get("price"),
                     "status": "PENDING",
