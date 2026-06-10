@@ -4,7 +4,7 @@ from typing import List, Optional
 
 import requests
 
-from collectors.spotify_client import spotify_get
+from collectors.spotify_client import SpotifyRateLimitError, spotify_get
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,8 @@ def _fetch_album_ids(spotify_artist_id: str) -> List[str]:
                     "offset": offset,
                 },
             )
+        except SpotifyRateLimitError:
+            raise
         except requests.RequestException as e:
             logger.warning("앨범 목록 조회 실패: artist_id=%s, %s", spotify_artist_id, e)
             break
@@ -77,8 +79,10 @@ def _fetch_albums_individual(album_ids: List[str]) -> List[dict]:
     results: List[dict] = []
     for album_id in album_ids:
         try:
-            data = spotify_get(f"/albums/{album_id}")
+            data = spotify_get(f"/albums/{album_id}", {"market": "JP"})
             results.append(data)
+        except SpotifyRateLimitError:
+            raise
         except requests.RequestException as e:
             logger.warning("앨범 상세 조회 실패 (album_id=%s): %s", album_id, e)
     return results

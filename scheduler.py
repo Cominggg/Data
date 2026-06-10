@@ -7,6 +7,7 @@ from typing import List
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from collectors import artist_image, kopis, musicbrainz, release, setlist, wikipedia
+from collectors.spotify_client import SpotifyRateLimitError
 from db.repository import (
     get_active_concerts,
     get_all_aliases,
@@ -15,10 +16,10 @@ from db.repository import (
     get_all_artists_with_spotify,
     get_artists_without_image,
     get_artists_without_releases,
-    get_matched_artists_with_spotify,
     get_concert_by_kopis_id,
     get_concert_with_artist,
     get_existing_kopis_ids,
+    get_matched_artists_with_spotify,
     get_unmatched_concerts,
     save_aliases,
     save_artists,
@@ -107,8 +108,11 @@ def run_initial_collect(
                 spotify_id = _extract_spotify_id(a["spotify_url"])
                 releases = _sort_releases(release.collect_releases(spotify_id))
                 save_releases(a["artist_id"], releases)
+            except SpotifyRateLimitError:
+                logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])
+                break
             except Exception as e:
-                logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
+                logger.error("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
 
     if skip_artist_image:
         logger.info("--skip-artist-image 플래그 감지 — 아티스트 이미지 수집 건너뜀")
@@ -210,8 +214,11 @@ def run_release_update() -> None:
             spotify_id = _extract_spotify_id(a["spotify_url"])
             releases = _sort_releases(release.collect_releases(spotify_id))
             save_releases(a["artist_id"], releases)
+        except SpotifyRateLimitError:
+            logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%s)", a["artist_id"])
+            break
         except Exception as e:
-            logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
+            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
     logger.info("=== 릴리즈 갱신 잡 완료 ===")
 
 
@@ -225,8 +232,11 @@ def run_missing_release_update() -> None:
             spotify_id = _extract_spotify_id(a["spotify_url"])
             releases = _sort_releases(release.collect_releases(spotify_id))
             save_releases(a["artist_id"], releases)
+        except SpotifyRateLimitError:
+            logger.error("Spotify 429 — 누락 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])
+            break
         except Exception as e:
-            logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
+            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
     logger.info("=== 누락 릴리즈 수집 잡 완료 ===")
 
 
@@ -295,8 +305,11 @@ def collect_and_save_releases_for_artist(artist_id: int) -> bool:
         spotify_id = _extract_spotify_id(target["spotify_url"])
         releases = _sort_releases(release.collect_releases(spotify_id))
         save_releases(artist_id, releases)
+    except SpotifyRateLimitError:
+        logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%d)", artist_id)
+        return False
     except Exception as e:
-        logger.warning("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
+        logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
         return False
     logger.info("단건 릴리즈 수집 완료: artist_id=%d, %d건", artist_id, len(releases))
     return True
