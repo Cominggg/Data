@@ -141,6 +141,7 @@ def search_artists(name: str) -> list[dict]:
             "name": item.get("name"),
             "country": item.get("country"),
             "type": item.get("type"),
+            "url": f"https://musicbrainz.org/artist/{item.get('id')}",
         }
         for item in data.get("artists", [])
     ]

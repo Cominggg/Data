@@ -124,13 +124,13 @@ def _parse_concert(item: ET.Element) -> dict:
 
 
 def search_concerts(title: str) -> list[dict]:
-    """공연명으로 KOPIS 검색. 오늘~2년 후 범위, 최대 20건 반환."""
+    """공연명으로 KOPIS 검색. 2020-01-01~2년 후 범위, 최대 20건 반환."""
     today = datetime.date.today()
-    stdate = today.strftime("%Y%m%d")
+    stdate = _DEFAULT_STDATE
     eddate = (today + datetime.timedelta(days=730)).strftime("%Y%m%d")
     params = {
         **_DEFAULT_PARAMS,
-        "prfnm": title,
+        "shprfnm": title,
         "stdate": stdate,
         "eddate": eddate,
         "cpage": 1,
@@ -148,6 +148,7 @@ def search_concerts(title: str) -> list[dict]:
             "start_date": _parse_kopis_date(_text(item, "prfpdfrom")),
             "end_date": _parse_kopis_date(_text(item, "prfpdto")),
             "venue": _text(item, "fcltynm"),
+            "url": f"https://kopis.or.kr/por/db/pblprfr/pblprfrView.do?mt20Id={_text(item, 'mt20id')}",
         }
         for item in root.findall("db")
     ]
