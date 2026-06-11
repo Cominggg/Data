@@ -9,7 +9,8 @@ from collectors.spotify_client import SpotifyRateLimitError, spotify_get
 logger = logging.getLogger(__name__)
 
 _ALBUM_TYPE_MAP = {"album": "Album", "single": "Single"}
-_PAGE_LIMIT = 10  # Spotify API limit lowered from 50 to 10
+_PAGE_LIMIT = 10        # 레이트리밋 예방을 위해 페이지당 10개로 제한
+_ALBUM_BATCH_SIZE = 20  # /albums?ids=... 배치 최대 크기
 
 
 def _parse_release_date(raw: Optional[str]) -> Optional[str]:
@@ -74,17 +75,19 @@ def _fetch_album_ids(spotify_artist_id: str) -> List[str]:
     return album_ids
 
 
-def _fetch_albums_individual(album_ids: List[str]) -> List[dict]:
-    """앨범 ID별로 개별 상세 정보(트랙·레이블 포함)를 조회."""
+def _fetch_albums_batch(album_ids: List[str]) -> List[dict]:
+    """20개 단위 배치로 앨범 상세 정보(트랙·레이블 포함)를 조회."""
     results: List[dict] = []
-    for album_id in album_ids:
-        try:
-            data = spotify_get(f"/albums/{album_id}", {"market": "JP"})
-            results.append(data)
-        except SpotifyRateLimitError:
-            raise
-        except requests.RequestException as e:
-            logger.warning("앨범 상세 조회 실패 (album_id=%s): %s", album_id, e)
+    for i in range(0, len(album_ids), _ALBUM_BATCH_SIZE):
+        chunk = album_ids[i : i + _ALBUM_BATCH_SIZE]
+        for album_id in chunk:
+            try:
+                data = spotify_get(f"/albums/{album_id}", {"market": "JP"})
+                results.append(data)
+            except SpotifyRateLimitError:
+                raise
+            except requests.RequestException as e:
+                logger.warning("앨범 조회 실패 (id=%s): %s", album_id, e)
     return results
 
 
@@ -97,7 +100,7 @@ def collect_releases(spotify_artist_id: str) -> List[dict]:
         logger.info("수집된 앨범 없음: spotify_artist_id=%s", spotify_artist_id)
         return []
 
-    albums = _fetch_albums_individual(album_ids)
+    albums = _fetch_albums_batch(album_ids)
     results: List[dict] = []
     for album in albums:
         if album is None:

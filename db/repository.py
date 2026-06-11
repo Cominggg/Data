@@ -8,6 +8,13 @@ from db.connection import get_session
 
 logger = logging.getLogger(__name__)
 
+_KOPIS_STATUS_MAP = {
+    "공연예정": "UPCOMING",
+    "공연중": "ONGOING",
+    "공연완료": "ENDED",
+    "공연취소": "CANCELLED",
+}
+
 
 def save_artists(artists: list[dict]) -> None:
     """수집된 아티스트 목록을 artist, artist_alias, artist_url 테이블에 저장한다.
@@ -59,7 +66,7 @@ def save_artists(artists: list[dict]) -> None:
                         text("""
                             INSERT INTO artist_url (artist_id, type, url)
                             VALUES (:artist_id, :type, :url)
-                            ON CONFLICT (artist_id, url) DO NOTHING
+                            ON CONFLICT (artist_id, type) DO NOTHING
                         """),
                         {"artist_id": artist_id, "type": url_rel["type"], "url": url_rel["url"]},
                     )
@@ -147,10 +154,10 @@ def save_concerts(concerts: list[dict]) -> None:
                 text("""
                     INSERT INTO concert
                         (kopis_id, title, "cast", start_date, end_date,
-                         venue_name, venue_address, poster_url, price, status, kopis_update_date)
+                         venue_name, poster_url, price, status, kopis_update_date)
                     VALUES
                         (:kopis_id, :title, :cast, :start_date, :end_date,
-                         :venue_name, :venue_address, :poster_url, :price,
+                         :venue_name, :poster_url, :price,
                          :status, :kopis_update_date)
                     ON CONFLICT (kopis_id) DO NOTHING
                     RETURNING id
@@ -162,10 +169,9 @@ def save_concerts(concerts: list[dict]) -> None:
                     "start_date": concert["prfpdfrom"],
                     "end_date": concert["prfpdto"],
                     "venue_name": concert["fcltynm"],
-                    "venue_address": concert.get("venue_address"),
                     "poster_url": concert.get("poster_url"),
                     "price": concert.get("price"),
-                    "status": concert["prfstate"],
+                    "status": "PENDING",
                     "kopis_update_date": concert["updatedate"],
                 },
             ).fetchone()
@@ -218,7 +224,7 @@ def get_completed_concerts() -> list[dict]:
                 JOIN concert_artist ca ON ca.concert_id = c.id
                 JOIN artist a ON a.id = ca.artist_id
                 LEFT JOIN setlist s ON s.concert_id = c.id
-                WHERE c.status = '공연완료'
+                WHERE c.status = 'ENDED'
                   AND s.id IS NULL
                   AND (
                       c.fetch_attempted_at IS NULL
@@ -393,6 +399,25 @@ def get_artists_without_releases() -> list[dict]:
     return [{"artist_id": row[0], "spotify_url": row[1]} for row in rows]
 
 
+def get_artist_by_mbid(mbid: str) -> Optional[dict]:
+    """mbid로 아티스트 id·name·spotify_url을 반환한다. 없으면 None."""
+    with get_session() as session:
+        row = session.execute(
+            text("""
+                SELECT DISTINCT ON (a.id) a.id, a.name, au.url AS spotify_url
+                FROM artist a
+                LEFT JOIN artist_url au ON au.artist_id = a.id AND au.type = 'Spotify'
+                WHERE a.mbid = :mbid
+                ORDER BY a.id
+                LIMIT 1
+            """),
+            {"mbid": mbid},
+        ).fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "name": row[1], "spotify_url": row[2]}
+
+
 def get_artists_without_image() -> list[dict]:
     """image_url이 없는 artist의 id·mbid·name·spotify_url 목록을 반환한다."""
     with get_session() as session:
@@ -486,6 +511,26 @@ def save_concert_artists(matches: list[dict]) -> None:
     logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
 
 
+def save_concert_artist_candidates(matches: list[dict]) -> None:
+    """자동 매칭 결과를 concert_artist_candidate 테이블에 저장한다. 중복 시 무시."""
+    with get_session() as session:
+        for match in matches:
+            session.execute(
+                text("""
+                    INSERT INTO concert_artist_candidate
+                        (concert_id, artist_id, matched_by)
+                    VALUES (:concert_id, :artist_id, :matched_by)
+                    ON CONFLICT (concert_id, artist_id) DO NOTHING
+                """),
+                {
+                    "concert_id": match["concert_id"],
+                    "artist_id": match["artist_id"],
+                    "matched_by": match.get("matched_by", "title"),
+                },
+            )
+    logger.info("공연-아티스트 후보 저장 완료: %d건 처리", len(matches))
+
+
 
 def update_artist_is_coming() -> int:
     """오늘 이후 공연 보유 여부에 따라 artist.is_coming을 갱신한다.
@@ -506,7 +551,7 @@ def update_artist_is_coming() -> int:
                                FROM concert_artist ca
                                JOIN concert c ON c.id = ca.concert_id
                                WHERE ca.artist_id = a.id
-                                 AND c.status != 'EXCLUDED'
+                                 AND c.status NOT IN ('EXCLUDED', 'PENDING')
                                  AND c.end_date >= CURRENT_DATE
                            ) AS is_coming
                     FROM artist a
@@ -521,13 +566,13 @@ def update_artist_is_coming() -> int:
 
 
 def get_active_concerts() -> list[dict]:
-    """status가 '공연예정' 또는 '공연중'인 공연의 kopis_id·kopis_update_date를 반환한다."""
+    """status가 UPCOMING 또는 ONGOING인 공연의 kopis_id·kopis_update_date를 반환한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
                 SELECT kopis_id, kopis_update_date
                 FROM concert
-                WHERE status IN ('공연예정', '공연중')
+                WHERE status IN ('UPCOMING', 'ONGOING')
             """)
         ).fetchall()
     return [
@@ -573,7 +618,7 @@ def update_concert_status(concerts: list[dict]) -> None:
                         WHERE kopis_id = :kopis_id
                     """),
                     {
-                        "status": concert["prfstate"],
+                        "status": _KOPIS_STATUS_MAP.get(concert["prfstate"], "PENDING"),
                         "kopis_update_date": concert["updatedate"],
                         "kopis_id": concert["kopis_id"],
                     },

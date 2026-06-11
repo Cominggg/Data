@@ -73,7 +73,7 @@ def _parse_relates(relates_elem: Optional[ET.Element]) -> list[dict]:
 
 
 _DETAIL_FALLBACK = {
-    "prfcast": None, "poster_url": None, "venue_address": None, "price": None,
+    "prfcast": None, "poster_url": None, "price": None,
     "relates": [], "updatedate": None, "visit": None, "still_urls": [],
 }
 _DETAIL_WORKERS = 8
@@ -101,7 +101,6 @@ def _fetch_detail(kopis_id: str) -> dict:
     return {
         "prfcast": _text(db, "prfcast"),
         "poster_url": _text(db, "poster"),
-        "venue_address": _text(db, "adres"),
         "relates": _parse_relates(db.find("relates")),
         "price": _text(db, "pcseguidance"),
         "updatedate": _parse_kopis_date(_text(db, "updatedate")),
@@ -122,6 +121,37 @@ def _parse_concert(item: ET.Element) -> dict:
         "updatedate": _parse_kopis_date(_text(item, "updatedate")),
         "relates": _parse_relates(item.find("relates")),
     }
+
+
+def search_concerts(title: str) -> list[dict]:
+    """공연명으로 KOPIS 검색. 2020-01-01~2년 후 범위, 최대 20건 반환."""
+    today = datetime.date.today()
+    stdate = _DEFAULT_STDATE
+    eddate = (today + datetime.timedelta(days=730)).strftime("%Y%m%d")
+    params = {
+        **_DEFAULT_PARAMS,
+        "shprfnm": title,
+        "stdate": stdate,
+        "eddate": eddate,
+        "cpage": 1,
+        "rows": 20,
+    }
+    try:
+        root = _get(params)
+    except (requests.RequestException, ET.ParseError) as e:
+        logger.error("KOPIS 공연 검색 실패 title=%s: %s", title, e)
+        return []
+    return [
+        {
+            "kopis_id": _text(item, "mt20id"),
+            "title": _text(item, "prfnm"),
+            "start_date": _parse_kopis_date(_text(item, "prfpdfrom")),
+            "end_date": _parse_kopis_date(_text(item, "prfpdto")),
+            "venue": _text(item, "fcltynm"),
+            "url": f"https://kopis.or.kr/por/db/pblprfr/pblprfrView.do?mt20Id={_text(item, 'mt20id')}",
+        }
+        for item in root.findall("db")
+    ]
 
 
 def collect_by_id(kopis_id: str) -> Optional[dict]:
@@ -151,7 +181,6 @@ def collect_by_id(kopis_id: str) -> Optional[dict]:
         "fcltynm": _text(db, "fcltynm"),
         "prfstate": _text(db, "prfstate"),
         "poster_url": _text(db, "poster"),
-        "venue_address": _text(db, "adres"),
         "price": _text(db, "pcseguidance"),
         "relates": _parse_relates(db.find("relates")),
         "updatedate": _parse_kopis_date(_text(db, "updatedate")),
@@ -174,8 +203,8 @@ def _fetch_and_merge(concert: dict) -> Optional[dict]:
                     concert["kopis_id"], e,
                 )
                 concert.update({
-                    "poster_url": None, "venue_address": None,
-                    "price": None, "relates": [], "updatedate": None, "visit": None,
+                    "poster_url": None, "price": None,
+                    "relates": [], "updatedate": None, "visit": None,
                     "still_urls": [],
                 })
             else:
@@ -203,11 +232,15 @@ def collect(stdate: Optional[str] = None, eddate: Optional[str] = None) -> list[
     cpage = 1
     today = datetime.date.today()
     resolved_stdate = stdate or _DEFAULT_STDATE
-    resolved_eddate = eddate or (today + datetime.timedelta(days=_DEFAULT_LOOKAHEAD_DAYS)).strftime("%Y%m%d")
+    lookahead = today + datetime.timedelta(days=_DEFAULT_LOOKAHEAD_DAYS)
+    resolved_eddate = eddate or lookahead.strftime("%Y%m%d")
 
     while True:
         logger.debug("KOPIS 페이지 조회: cpage=%d", cpage)
-        params = {**_DEFAULT_PARAMS, "cpage": cpage, "stdate": resolved_stdate, "eddate": resolved_eddate}
+        params = {
+            **_DEFAULT_PARAMS, "cpage": cpage,
+            "stdate": resolved_stdate, "eddate": resolved_eddate,
+        }
 
         root = None
         for attempt in range(1, 4):
