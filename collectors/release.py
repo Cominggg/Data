@@ -80,13 +80,14 @@ def _fetch_albums_batch(album_ids: List[str]) -> List[dict]:
     results: List[dict] = []
     for i in range(0, len(album_ids), _ALBUM_BATCH_SIZE):
         chunk = album_ids[i : i + _ALBUM_BATCH_SIZE]
-        try:
-            data = spotify_get(f"/albums/{album_id}", {"market": "JP"})
-            results.append(data)
-        except SpotifyRateLimitError:
-            raise
-        except requests.RequestException as e:
-            logger.warning("앨범 배치 조회 실패 (ids=%s...): %s", chunk[0], e)
+        for album_id in chunk:
+            try:
+                data = spotify_get(f"/albums/{album_id}", {"market": "JP"})
+                results.append(data)
+            except SpotifyRateLimitError:
+                raise
+            except requests.RequestException as e:
+                logger.warning("앨범 조회 실패 (id=%s): %s", album_id, e)
     return results
 
 
