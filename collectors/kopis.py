@@ -131,7 +131,7 @@ def search_concerts(title: str) -> list[dict]:
     eddate = (today + datetime.timedelta(days=_DEFAULT_LOOKAHEAD_DAYS)).strftime("%Y%m%d")
     params = {
         **_DEFAULT_PARAMS,
-        "prfnm": title,
+        "shprfnm": title,
         "stdate": stdate,
         "eddate": eddate,
         "cpage": 1,
