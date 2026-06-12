@@ -125,10 +125,10 @@ def _parse_concert(item: ET.Element) -> dict:
 
 
 def search_concerts(title: str) -> list[dict]:
-    """공연명으로 KOPIS 검색. 2020-01-01~2년 후 범위, 최대 20건 반환."""
+    """공연명으로 KOPIS 검색. 2020-01-01~1년 후 범위, 최대 20건 반환."""
     today = datetime.date.today()
     stdate = _SEARCH_STDATE
-    eddate = (today + datetime.timedelta(days=730)).strftime("%Y%m%d")
+    eddate = (today + datetime.timedelta(days=_DEFAULT_LOOKAHEAD_DAYS)).strftime("%Y%m%d")
     params = {
         **_DEFAULT_PARAMS,
         "prfnm": title,
