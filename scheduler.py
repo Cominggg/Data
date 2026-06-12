@@ -22,6 +22,7 @@ from db.repository import (
     get_concert_by_kopis_id,
     get_concert_with_artist,
     get_existing_kopis_ids,
+    get_existing_release_spotify_ids,
     get_matched_artists_with_spotify,
     get_unmatched_concerts,
     save_aliases,
@@ -110,7 +111,9 @@ def run_initial_collect(
         for a in matched_artists:
             try:
                 spotify_id = _extract_spotify_id(a["spotify_url"])
-                releases = _sort_releases(release.collect_releases(spotify_id))
+                existing_ids = get_existing_release_spotify_ids(a["artist_id"])
+                raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+                releases = _sort_releases(raw)
                 save_releases(a["artist_id"], releases)
             except SpotifyRateLimitError:
                 logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])
@@ -216,7 +219,9 @@ def run_release_update() -> None:
     for a in get_matched_artists_with_spotify():
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
-            releases = _sort_releases(release.collect_releases(spotify_id))
+            existing_ids = get_existing_release_spotify_ids(a["artist_id"])
+            raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+            releases = _sort_releases(raw)
             save_releases(a["artist_id"], releases)
         except SpotifyRateLimitError:
             logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%s)", a["artist_id"])
@@ -357,7 +362,9 @@ def collect_and_save_releases_for_artist(artist_id: int) -> bool:
         return False
     try:
         spotify_id = _extract_spotify_id(target["spotify_url"])
-        releases = _sort_releases(release.collect_releases(spotify_id))
+        existing_ids = get_existing_release_spotify_ids(artist_id)
+        raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+        releases = _sort_releases(raw)
         save_releases(artist_id, releases)
     except SpotifyRateLimitError:
         logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%d)", artist_id)

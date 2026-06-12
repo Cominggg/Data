@@ -91,13 +91,31 @@ def _fetch_albums_batch(album_ids: List[str]) -> List[dict]:
     return results
 
 
-def collect_releases(spotify_artist_id: str) -> List[dict]:
-    """아티스트의 릴리즈(앨범·싱글) 수집. compilation은 제외."""
+def collect_releases(
+    spotify_artist_id: str,
+    skip_spotify_ids: Optional[set] = None,
+) -> List[dict]:
+    """아티스트의 릴리즈(앨범·싱글) 수집. compilation은 제외.
+
+    skip_spotify_ids: 이미 수집된 spotify_id 집합. 해당 앨범은 상세 API 호출을 건너뜀.
+    """
     logger.info("릴리즈 수집 시작: spotify_artist_id=%s", spotify_artist_id)
 
     album_ids = _fetch_album_ids(spotify_artist_id)
     if not album_ids:
         logger.info("수집된 앨범 없음: spotify_artist_id=%s", spotify_artist_id)
+        return []
+
+    if skip_spotify_ids:
+        before = len(album_ids)
+        album_ids = [aid for aid in album_ids if aid not in skip_spotify_ids]
+        skipped = before - len(album_ids)
+        if skipped:
+            logger.info(
+                "기수집 릴리즈 %d건 건너뜀: spotify_artist_id=%s", skipped, spotify_artist_id
+            )
+    if not album_ids:
+        logger.info("신규 릴리즈 없음: spotify_artist_id=%s", spotify_artist_id)
         return []
 
     albums = _fetch_albums_batch(album_ids)

@@ -407,6 +407,16 @@ def get_artists_without_releases() -> list[dict]:
     return [{"artist_id": row[0], "spotify_url": row[1]} for row in rows]
 
 
+def get_existing_release_spotify_ids(artist_id: int) -> set:
+    """특정 아티스트의 이미 수집된 릴리즈 spotify_id 집합을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT spotify_id FROM release_group WHERE artist_id = :artist_id"),
+            {"artist_id": artist_id},
+        ).fetchall()
+    return {row[0] for row in rows}
+
+
 def get_artist_by_mbid(mbid: str) -> Optional[dict]:
     """mbid로 아티스트 id·name·spotify_url을 반환한다. 없으면 None."""
     with get_session() as session:
