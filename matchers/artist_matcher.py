@@ -7,25 +7,31 @@ logger = logging.getLogger(__name__)
 _MIN_ALIAS_LEN = 3
 
 
+def _normalize(text: str) -> str:
+    return re.sub(r"\W+", " ", text.lower()).strip()
+
+
 def _phrase_match_title(title: str, aliases: list[dict]) -> Optional[dict]:
     """제목 내 구문 일치 기반 매칭.
 
-    단일 단어 alias: 제목을 단어 집합으로 분리 후 exact match.
-    다중 단어 alias: 제목 내 구문 포함 여부 확인.
+    단일 단어 alias: 정규화된 title token set에서 exact match.
+    다중 단어 alias: 공백 padding 기반 구문 포함 검사 (단어 경계 보장).
     가장 긴 매칭 alias를 반환해 특이도를 최대화한다.
     """
-    title_lower = title.lower()
-    title_tokens = set(re.split(r"\W+", title_lower))
+    title_norm = _normalize(title)
+    title_tokens = set(title_norm.split())
+    title_padded = f" {title_norm} "
     best: Optional[dict] = None
     for alias in aliases:
         name = alias["name"]
         if len(name) < _MIN_ALIAS_LEN:
             continue
-        name_lower = name.lower()
+        name_norm = _normalize(name)
+        name_words = name_norm.split()
         matched = (
-            name_lower in title_tokens          # 단일 단어: 단어 경계 exact
-            if " " not in name_lower
-            else name_lower in title_lower      # 다중 단어: 구문 포함
+            name_norm in title_tokens                       # 단일 단어: token exact
+            if len(name_words) == 1
+            else f" {name_norm} " in title_padded           # 다중 단어: 단어 경계 구문 포함
         )
         if matched and (best is None or len(name) > len(best["name"])):
             best = alias
