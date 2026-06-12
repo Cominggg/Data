@@ -66,7 +66,7 @@ def save_artists(artists: list[dict]) -> None:
                         text("""
                             INSERT INTO artist_url (artist_id, type, url)
                             VALUES (:artist_id, :type, :url)
-                            ON CONFLICT (artist_id, url) DO NOTHING
+                            ON CONFLICT (artist_id, type) DO NOTHING
                         """),
                         {"artist_id": artist_id, "type": url_rel["type"], "url": url_rel["url"]},
                     )

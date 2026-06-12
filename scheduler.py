@@ -297,6 +297,8 @@ def register_artist_by_mbid(mbid: str) -> bool:
             spotify_id = _extract_spotify_id(spotify_url)
             releases = _sort_releases(release.collect_releases(spotify_id))
             save_releases(artist_id, releases)
+        except SpotifyRateLimitError:
+            logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", artist_id)
         except Exception as e:
             logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
     else:

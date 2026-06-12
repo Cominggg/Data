@@ -149,6 +149,7 @@ def search_concerts(title: str) -> list[dict]:
             "start_date": _parse_kopis_date(_text(item, "prfpdfrom")),
             "end_date": _parse_kopis_date(_text(item, "prfpdto")),
             "venue": _text(item, "fcltynm"),
+            "url": f"https://kopis.or.kr/por/db/pblprfr/pblprfrView.do?mt20Id={_text(item, 'mt20id')}",
         }
         for item in root.findall("db")
     ]
