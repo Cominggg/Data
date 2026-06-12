@@ -45,7 +45,7 @@ def _get_access_token() -> str:
     return _token_cache["token"]
 
 
-_REQUEST_INTERVAL = 1.0  # 1req/sec, 30초 윈도우 내 30req — 안전 마진 확보
+_REQUEST_INTERVAL = 2.0  # 0.5req/sec, 30초 윈도우 내 15req — 50% 안전 마진
 
 
 def spotify_get(path: str, params: Optional[dict] = None) -> dict:
