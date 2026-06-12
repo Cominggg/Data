@@ -152,73 +152,73 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> None:
     use_prfstate=True이면 prfstate → _KOPIS_STATUS_MAP으로 status를 결정한다.
     기본값(False)은 배치 수집용 PENDING을 사용한다.
     """
-    with get_session() as session:
-        for concert in concerts:
-            if use_prfstate:
-                status = _KOPIS_STATUS_MAP.get(concert.get("prfstate"), "PENDING")
-            else:
-                status = "PENDING"
-            new_row = session.execute(
-                text("""
-                    INSERT INTO concert
-                        (kopis_id, title, "cast", start_date, end_date,
-                         venue_name, poster_url, price, status, kopis_update_date)
-                    VALUES
-                        (:kopis_id, :title, :cast, :start_date, :end_date,
-                         :venue_name, :poster_url, :price,
-                         :status, :kopis_update_date)
-                    ON CONFLICT (kopis_id) DO NOTHING
-                    RETURNING id
-                """),
-                {
-                    "kopis_id": concert["kopis_id"],
-                    "title": concert["prfnm"],
-                    "cast": concert["prfcast"],
-                    "start_date": concert["prfpdfrom"],
-                    "end_date": concert["prfpdto"],
-                    "venue_name": concert["fcltynm"],
-                    "poster_url": concert.get("poster_url"),
-                    "price": concert.get("price"),
-                    "status": status,
-                    "kopis_update_date": concert["updatedate"],
-                },
-            ).fetchone()
-
-            if new_row is not None:
-                concert_id = new_row[0]
-                for position, url in enumerate(concert.get("still_urls", [])):
-                    session.execute(
-                        text("""
-                            INSERT INTO concert_image (concert_id, url, position)
-                            VALUES (:concert_id, :url, :position)
-                        """),
-                        {"concert_id": concert_id, "url": url, "position": position},
-                    )
-                row = new_row
-            else:
-                row = session.execute(
-                    text("SELECT id FROM concert WHERE kopis_id = :kopis_id"),
-                    {"kopis_id": concert["kopis_id"]},
-                ).fetchone()
-
-            if not row or not concert.get("relates"):
-                continue
-
-            concert_id = row[0]
-            for link in concert["relates"]:
-                session.execute(
+    saved = 0
+    for concert in concerts:
+        try:
+            with get_session() as session:
+                status = _KOPIS_STATUS_MAP.get(concert.get("prfstate"), "PENDING") if use_prfstate else "PENDING"
+                new_row = session.execute(
                     text("""
-                        INSERT INTO concert_booking_link (concert_id, name, url)
-                        VALUES (:concert_id, :name, :url)
-                        ON CONFLICT (concert_id, url) DO NOTHING
+                        INSERT INTO concert
+                            (kopis_id, title, "cast", start_date, end_date,
+                             venue_name, poster_url, price, status, kopis_update_date)
+                        VALUES
+                            (:kopis_id, :title, :cast, :start_date, :end_date,
+                             :venue_name, :poster_url, :price,
+                             :status, :kopis_update_date)
+                        ON CONFLICT (kopis_id) DO NOTHING
+                        RETURNING id
                     """),
                     {
-                        "concert_id": concert_id,
-                        "name": link["relatenm"],
-                        "url": link["relateurl"],
+                        "kopis_id": concert["kopis_id"],
+                        "title": concert["prfnm"],
+                        "cast": concert["prfcast"],
+                        "start_date": concert["prfpdfrom"],
+                        "end_date": concert["prfpdto"],
+                        "venue_name": concert["fcltynm"],
+                        "poster_url": concert.get("poster_url"),
+                        "price": concert.get("price"),
+                        "status": status,
+                        "kopis_update_date": concert["updatedate"],
                     },
-                )
-    logger.info("공연 저장 완료: %d건 처리", len(concerts))
+                ).fetchone()
+
+                if new_row is not None:
+                    concert_id = new_row[0]
+                    for position, url in enumerate(concert.get("still_urls", [])):
+                        session.execute(
+                            text("""
+                                INSERT INTO concert_image (concert_id, url, position)
+                                VALUES (:concert_id, :url, :position)
+                            """),
+                            {"concert_id": concert_id, "url": url, "position": position},
+                        )
+                    row = new_row
+                else:
+                    row = session.execute(
+                        text("SELECT id FROM concert WHERE kopis_id = :kopis_id"),
+                        {"kopis_id": concert["kopis_id"]},
+                    ).fetchone()
+
+                if row and concert.get("relates"):
+                    concert_id = row[0]
+                    for link in concert["relates"]:
+                        session.execute(
+                            text("""
+                                INSERT INTO concert_booking_link (concert_id, name, url)
+                                VALUES (:concert_id, :name, :url)
+                                ON CONFLICT (concert_id, url) DO NOTHING
+                            """),
+                            {
+                                "concert_id": concert_id,
+                                "name": link["relatenm"],
+                                "url": link["relateurl"],
+                            },
+                        )
+                saved += 1
+        except SQLAlchemyError as e:
+            logger.error("공연 저장 실패 — 건너뜀: kopis_id=%s, 오류=%s", concert["kopis_id"], e)
+    logger.info("공연 저장 완료: %d / %d건 처리", saved, len(concerts))
 
 
 def get_completed_concerts() -> list[dict]:
