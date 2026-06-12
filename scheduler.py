@@ -331,7 +331,7 @@ def collect_and_save_concert(kopis_id: str) -> bool:
         logger.info("alias 매칭 없음 — 저장 건너뜀: kopis_id=%s", kopis_id)
         return False
 
-    save_concerts([concert])
+    save_concerts([concert], use_prfstate=True)
 
     concert_row = get_concert_by_kopis_id(kopis_id)
     if concert_row:

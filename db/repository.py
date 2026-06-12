@@ -146,10 +146,18 @@ def save_releases(artist_id: int, releases: list[dict]) -> None:
     logger.info("릴리즈 저장 완료: %d / %d건 처리", saved, len(releases))
 
 
-def save_concerts(concerts: list[dict]) -> None:
-    """수집된 공연 목록을 concert 테이블에 저장한다. kopis_id 중복 시 무시."""
+def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> None:
+    """수집된 공연 목록을 concert 테이블에 저장한다. kopis_id 중복 시 무시.
+
+    use_prfstate=True이면 prfstate → _KOPIS_STATUS_MAP으로 status를 결정한다.
+    기본값(False)은 배치 수집용 PENDING을 사용한다.
+    """
     with get_session() as session:
         for concert in concerts:
+            if use_prfstate:
+                status = _KOPIS_STATUS_MAP.get(concert.get("prfstate"), "PENDING")
+            else:
+                status = "PENDING"
             new_row = session.execute(
                 text("""
                     INSERT INTO concert
@@ -171,7 +179,7 @@ def save_concerts(concerts: list[dict]) -> None:
                     "venue_name": concert["fcltynm"],
                     "poster_url": concert.get("poster_url"),
                     "price": concert.get("price"),
-                    "status": "PENDING",
+                    "status": status,
                     "kopis_update_date": concert["updatedate"],
                 },
             ).fetchone()
