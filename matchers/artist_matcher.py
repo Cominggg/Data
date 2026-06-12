@@ -4,7 +4,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_MIN_ALIAS_LEN = 3
+_MIN_ALIAS_LEN = 2
 
 
 def _normalize(text: str) -> str:
@@ -24,7 +24,7 @@ def _phrase_match_title(title: str, aliases: list[dict]) -> Optional[dict]:
     best: Optional[dict] = None
     for alias in aliases:
         name = alias["name"]
-        if len(name) < _MIN_ALIAS_LEN:
+        if len(re.sub(r"\W", "", name)) < _MIN_ALIAS_LEN:
             continue
         name_norm = _normalize(name)
         name_words = name_norm.split()
