@@ -239,7 +239,9 @@ def run_missing_release_update() -> None:
     for a in artists:
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
-            releases = _sort_releases(release.collect_releases(spotify_id))
+            existing_ids = get_existing_release_spotify_ids(a["artist_id"])
+            raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+            releases = _sort_releases(raw)
             save_releases(a["artist_id"], releases)
         except SpotifyRateLimitError:
             logger.error("Spotify 429 — 누락 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])

@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from collectors.release import (
     _fetch_album_ids,
-    _fetch_albums_batch,
+    _fetch_albums_individual,
     _parse_release_date,
     _parse_tracks,
     collect_releases,
@@ -127,14 +127,14 @@ class TestFetchAlbumIds:
 
 
 # ---------------------------------------------------------------------------
-# _fetch_albums_batch
+# _fetch_albums_individual
 # ---------------------------------------------------------------------------
-class TestFetchAlbumsBatch:
+class TestFetchAlbumsIndividual:
     @patch("collectors.release.spotify_get")
     def test_single_id_makes_one_call(self, mock_get):
         mock_get.return_value = {"id": "a1"}
 
-        result = _fetch_albums_batch(["a1"])
+        result = _fetch_albums_individual(["a1"])
 
         mock_get.assert_called_once_with("/albums/a1", {"market": "JP"})
         assert len(result) == 1
@@ -143,7 +143,7 @@ class TestFetchAlbumsBatch:
     def test_multiple_ids_make_individual_calls(self, mock_get):
         mock_get.side_effect = [{"id": "a1"}, {"id": "a2"}, {"id": "a3"}]
 
-        result = _fetch_albums_batch(["a1", "a2", "a3"])
+        result = _fetch_albums_individual(["a1", "a2", "a3"])
 
         assert mock_get.call_count == 3
         assert len(result) == 3
@@ -152,7 +152,7 @@ class TestFetchAlbumsBatch:
     def test_market_jp_passed_in_each_call(self, mock_get):
         mock_get.side_effect = [{"id": "a1"}, {"id": "a2"}]
 
-        _fetch_albums_batch(["a1", "a2"])
+        _fetch_albums_individual(["a1", "a2"])
 
         for call_args in mock_get.call_args_list:
             assert call_args[0][1] == {"market": "JP"}
@@ -161,14 +161,14 @@ class TestFetchAlbumsBatch:
     def test_skips_failed_and_continues(self, mock_get):
         mock_get.side_effect = [requests.ConnectionError("fail"), {"id": "a2"}]
 
-        result = _fetch_albums_batch(["a1", "a2"])
+        result = _fetch_albums_individual(["a1", "a2"])
 
         assert len(result) == 1
         assert result[0]["id"] == "a2"
 
     @patch("collectors.release.spotify_get")
     def test_returns_empty_for_empty_list(self, mock_get):
-        result = _fetch_albums_batch([])
+        result = _fetch_albums_individual([])
 
         mock_get.assert_not_called()
         assert result == []
@@ -190,7 +190,7 @@ class TestCollectReleases:
             "tracks": {"items": tracks or [], "next": None},
         }
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
     def test_returns_correct_structure(self, mock_ids, mock_individual):
         track_item = {
@@ -212,7 +212,7 @@ class TestCollectReleases:
         assert r["total_tracks"] == 1
         assert len(r["tracks"]) == 1
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
     def test_compilation_is_excluded(self, mock_ids, mock_individual):
         mock_ids.return_value = ["c1", "a1"]
@@ -226,7 +226,7 @@ class TestCollectReleases:
         assert len(result) == 1
         assert result[0]["spotify_id"] == "a1"
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
     def test_single_type_mapped_correctly(self, mock_ids, mock_individual):
         mock_ids.return_value = ["s1"]
@@ -241,7 +241,7 @@ class TestCollectReleases:
         mock_ids.return_value = []
         assert collect_releases("artist-spotify-id") == []
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
     def test_cover_url_none_when_images_empty(self, mock_ids, mock_individual):
         album = self._make_album("a1")
@@ -253,7 +253,7 @@ class TestCollectReleases:
 
         assert result[0]["cover_url"] is None
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
     def test_partial_release_date_stored_as_none(self, mock_ids, mock_individual):
         album = self._make_album("a1")
@@ -265,7 +265,7 @@ class TestCollectReleases:
 
         assert result[0]["first_release_date"] is None
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
     def test_warns_when_tracks_exceed_50(self, mock_ids, mock_individual):
         album = self._make_album("a1")
@@ -278,7 +278,7 @@ class TestCollectReleases:
             collect_releases("artist-spotify-id")
             mock_warn.assert_called_once()
 
-    @patch("collectors.release._fetch_albums_batch")
+    @patch("collectors.release._fetch_albums_individual")
     @patch("collectors.release._fetch_album_ids")
     def test_none_album_in_batch_is_skipped(self, mock_ids, mock_individual):
         mock_ids.return_value = ["a1", "a2"]
