@@ -1,6 +1,7 @@
 import logging
 import os
-from typing import Optional
+import threading
+from typing import Optional, Tuple
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
@@ -18,6 +19,31 @@ logger = logging.getLogger(__name__)
 _INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 app = FastAPI(title="Coming Data Internal API", docs_url=None, redoc_url=None)
+
+_running_tasks: set = set()
+_running_lock = threading.Lock()
+
+
+def _acquire_task(key: Tuple) -> bool:
+    """키가 이미 실행 중이면 False 반환. 아니면 등록 후 True 반환."""
+    with _running_lock:
+        if key in _running_tasks:
+            return False
+        _running_tasks.add(key)
+        return True
+
+
+def _release_task(key: Tuple) -> None:
+    with _running_lock:
+        _running_tasks.discard(key)
+
+
+def _wrap(fn, key: Tuple, *args):
+    """BackgroundTasks용 래퍼 — 작업 완료 후 키를 해제한다."""
+    try:
+        fn(*args)
+    finally:
+        _release_task(key)
 
 
 def _verify_secret(x_internal_secret: Optional[str] = Header(default=None)) -> None:
@@ -39,7 +65,10 @@ def trigger_collect_concert(
     background_tasks: BackgroundTasks,
     _: None = Depends(_verify_secret),
 ) -> dict:
-    background_tasks.add_task(collect_and_save_concert, req.kopis_id)
+    key = ("concert", req.kopis_id)
+    if not _acquire_task(key):
+        return {"accepted": False, "reason": "already running"}
+    background_tasks.add_task(_wrap, collect_and_save_concert, key, req.kopis_id)
     return {"accepted": True}
 
 
@@ -49,7 +78,10 @@ def trigger_collect_releases(
     background_tasks: BackgroundTasks,
     _: None = Depends(_verify_secret),
 ) -> dict:
-    background_tasks.add_task(collect_and_save_releases_for_artist, artist_id)
+    key = ("releases", artist_id)
+    if not _acquire_task(key):
+        return {"accepted": False, "reason": "already running"}
+    background_tasks.add_task(_wrap, collect_and_save_releases_for_artist, key, artist_id)
     return {"accepted": True}
 
 
@@ -59,7 +91,10 @@ def trigger_collect_setlist(
     background_tasks: BackgroundTasks,
     _: None = Depends(_verify_secret),
 ) -> dict:
-    background_tasks.add_task(collect_and_save_setlist, concert_id)
+    key = ("setlist", concert_id)
+    if not _acquire_task(key):
+        return {"accepted": False, "reason": "already running"}
+    background_tasks.add_task(_wrap, collect_and_save_setlist, key, concert_id)
     return {"accepted": True}
 
 
@@ -69,7 +104,10 @@ def trigger_register_artist(
     background_tasks: BackgroundTasks,
     _: None = Depends(_verify_secret),
 ) -> dict:
-    background_tasks.add_task(register_artist_by_mbid, req.mbid)
+    key = ("artist", req.mbid)
+    if not _acquire_task(key):
+        return {"accepted": False, "reason": "already running"}
+    background_tasks.add_task(_wrap, register_artist_by_mbid, key, req.mbid)
     return {"accepted": True}
 
 
