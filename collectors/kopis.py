@@ -81,7 +81,7 @@ _DETAIL_WORKERS = 8
 
 
 def _fetch_detail(kopis_id: str) -> dict:
-    """단건 상세 API를 호출해 poster_url, venue_address, relates, price, updatedate를 반환한다."""
+    """단건 상세 API를 호출해 poster_url, relates, price, updatedate 등을 반환한다."""
     url = f"{_BASE_URL}/{kopis_id}"
     response = requests.get(url, params={"service": _API_KEY}, timeout=30)
     response.raise_for_status()

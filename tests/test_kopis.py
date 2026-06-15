@@ -111,7 +111,7 @@ class TestFetchAndMerge:
         concert = {"kopis_id": "PF123456", "prfnm": "공연명"}
         detail = {
             "visit": "Y", "poster_url": "http://poster.jpg",
-            "venue_address": None, "price": None, "relates": [],
+            "price": None, "relates": [],
             "updatedate": "2024-01-15", "prfcast": "아티스트",
         }
         with patch("collectors.kopis._fetch_detail", return_value=detail):
@@ -125,7 +125,7 @@ class TestFetchAndMerge:
         """visit!=Y이면 None을 반환해야 한다."""
         concert = {"kopis_id": "PF123456", "prfnm": "공연명"}
         detail = {
-            "visit": "N", "poster_url": None, "venue_address": None,
+            "visit": "N", "poster_url": None,
             "price": None, "relates": [], "updatedate": None, "prfcast": None,
         }
         with patch("collectors.kopis._fetch_detail", return_value=detail):
@@ -144,7 +144,7 @@ class TestFetchAndMerge:
                 raise requests.ConnectionError("timeout")
             return {
                 "visit": "Y", "poster_url": "http://poster.jpg",
-                "venue_address": None, "price": None, "relates": [],
+                "price": None, "relates": [],
                 "updatedate": None, "prfcast": None,
             }
 
@@ -212,10 +212,10 @@ class TestKopisCollect:
         assert result[0]["kopis_id"] == "PF123456"
 
     def test_collect_merges_detail_fields(self):
-        """collect() 결과에 poster_url, venue_address가 포함되어야 한다."""
+        """collect() 결과에 poster_url이 포함되어야 한다."""
         list_content = _make_list_content(_sample_item())
         detail_content = _make_detail_content(
-            "PF123456", poster="http://poster.jpg", adres="서울특별시 강남구", visit="Y"
+            "PF123456", poster="http://poster.jpg", visit="Y"
         )
 
         with patch("collectors.kopis.requests.get",
@@ -223,7 +223,6 @@ class TestKopisCollect:
             result = collect()
 
         assert result[0]["poster_url"] == "http://poster.jpg"
-        assert result[0]["venue_address"] == "서울특별시 강남구"
 
     def test_filters_visit_concerts_only(self):
         """요청 파라미터에 visit=Y가 포함되어야 한다."""
@@ -245,18 +244,15 @@ class TestKopisCollect:
         params = mock_get.call_args[1].get("params") or mock_get.call_args[0][1]
         assert params.get("genrenm") == "GGGA"
 
-    def test_stdate_defaults_to_180_days_ago(self):
-        """stdate 미전달 시 오늘 기준 180일 전 날짜가 파라미터로 전달되어야 한다."""
-        import datetime
-        expected = (datetime.date.today() - datetime.timedelta(days=180)).strftime("%Y%m%d")
-
+    def test_stdate_defaults_to_hardcoded_start_date(self):
+        """stdate 미전달 시 _DEFAULT_STDATE('20250101')가 파라미터로 전달되어야 한다."""
         with patch("collectors.kopis.requests.get") as mock_get:
             mock_get.return_value.content = b"<dbs></dbs>"
             mock_get.return_value.raise_for_status = MagicMock()
             collect()
 
         params = mock_get.call_args[1].get("params") or mock_get.call_args[0][1]
-        assert params.get("stdate") == expected
+        assert params.get("stdate") == "20250101"
 
     def test_stdate_custom_param_is_used(self):
         """stdate를 직접 전달하면 해당 값이 파라미터로 전달되어야 한다."""
@@ -269,15 +265,19 @@ class TestKopisCollect:
         assert params.get("stdate") == "20200101"
 
     def test_includes_eddate_param(self):
-        """요청 파라미터에 eddate가 YYYYMMDD 형식으로 포함되어야 한다."""
+        """eddate 미전달 시 오늘 기준 365일 후 날짜가 파라미터로 전달되어야 한다."""
         import datetime
+        expected = (
+            datetime.date.today() + datetime.timedelta(days=365)
+        ).strftime("%Y%m%d")
+
         with patch("collectors.kopis.requests.get") as mock_get:
             mock_get.return_value.content = b"<dbs></dbs>"
             mock_get.return_value.raise_for_status = MagicMock()
             collect()
 
         params = mock_get.call_args[1].get("params") or mock_get.call_args[0][1]
-        assert params.get("eddate") == datetime.date.today().strftime("%Y%m%d")
+        assert params.get("eddate") == expected
 
     def test_collect_includes_still_urls(self):
         """collect() 결과 concert dict에 still_urls가 포함되어야 한다."""
@@ -447,14 +447,6 @@ class TestFetchDetail:
 
         assert result["poster_url"] == "http://poster.jpg"
 
-    def test_returns_venue_address(self):
-        """상세 API 응답에서 venue_address(adres)를 파싱해야 한다."""
-        content = _make_detail_content("PF123456", adres="서울특별시 강남구 테헤란로", visit="Y")
-        with patch("collectors.kopis.requests.get", return_value=self._mock_resp(content)):
-            result = _fetch_detail("PF123456")
-
-        assert result["venue_address"] == "서울특별시 강남구 테헤란로"
-
     def test_returns_relates(self):
         """상세 API 응답에서 relates를 파싱해야 한다."""
         content = _make_detail_content(
@@ -475,13 +467,12 @@ class TestFetchDetail:
         assert result["price"] == "전석 110,000원"
 
     def test_returns_none_when_fields_missing(self):
-        """상세 API 응답에 필드가 없으면 poster_url, venue_address, price는 None이어야 한다."""
+        """상세 API 응답에 필드가 없으면 poster_url, price는 None이어야 한다."""
         content = _make_detail_content("PF123456", visit="Y")
         with patch("collectors.kopis.requests.get", return_value=self._mock_resp(content)):
             result = _fetch_detail("PF123456")
 
         assert result["poster_url"] is None
-        assert result["venue_address"] is None
         assert result["relates"] == []
         assert result["price"] is None
 
@@ -622,7 +613,6 @@ class TestSaveConcerts:
             "prfstate": "공연예정",
             "updatedate": "2024-01-15",
             "poster_url": None,
-            "venue_address": None,
             "price": None,
             "relates": [],
         }
@@ -644,40 +634,33 @@ class TestSaveConcerts:
         assert len(insert_sqls) == 1
         assert "ON CONFLICT" in insert_sqls[0]
 
-    def test_insert_sql_includes_poster_and_address(self):
-        """INSERT SQL에 poster_url, venue_address 컬럼이 포함되어야 한다."""
+    def test_insert_sql_includes_poster_url(self):
+        """INSERT SQL에 poster_url 컬럼이 포함되어야 한다."""
         mock_session = MagicMock()
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(
-                poster_url="http://poster.jpg", venue_address="서울특별시 강남구"
-            )])
+            save_concerts([self._make_concert(poster_url="http://poster.jpg")])
 
         insert_sqls = [
             str(c.args[0]) for c in mock_session.execute.call_args_list
             if "INSERT INTO concert" in str(c.args[0])
         ]
         assert "poster_url" in insert_sqls[0]
-        assert "venue_address" in insert_sqls[0]
 
-    def test_poster_and_address_params_passed(self):
-        """INSERT 파라미터에 poster_url, venue_address 값이 전달되어야 한다."""
+    def test_poster_url_param_passed(self):
+        """INSERT 파라미터에 poster_url 값이 전달되어야 한다."""
         mock_session = MagicMock()
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(
-                poster_url="http://poster.jpg", venue_address="서울특별시 강남구"
-            )])
+            save_concerts([self._make_concert(poster_url="http://poster.jpg")])
 
         insert_call = [
             c for c in mock_session.execute.call_args_list
             if "INSERT INTO concert" in str(c.args[0])
         ][0]
-        params = insert_call.args[1]
-        assert params["poster_url"] == "http://poster.jpg"
-        assert params["venue_address"] == "서울특별시 강남구"
+        assert insert_call.args[1]["poster_url"] == "http://poster.jpg"
 
     def test_insert_sql_includes_price(self):
         """INSERT SQL에 price 컬럼이 포함되어야 한다."""
