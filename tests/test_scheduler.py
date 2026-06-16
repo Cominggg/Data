@@ -60,15 +60,17 @@ class TestRunInitialCollect:
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
             patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_spotify_album_total", return_value=None),
             patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
-            patch("scheduler.release.collect_releases", return_value=[]) as mock_collect,
+            patch("scheduler.release.collect_releases", return_value=([], 0)) as mock_collect,
+            patch("scheduler.update_spotify_album_total"),
             patch("scheduler.save_releases"),
         ):
             run_initial_collect()
 
         assert mock_collect.call_count == 2
-        mock_collect.assert_any_call("sp-1", skip_spotify_ids=set())
-        mock_collect.assert_any_call("sp-2", skip_spotify_ids=set())
+        mock_collect.assert_any_call("sp-1", skip_spotify_ids=set(), cached_total=None)
+        mock_collect.assert_any_call("sp-2", skip_spotify_ids=set(), cached_total=None)
 
     def test_saves_releases_for_each_matched_artist(self):
         """각 매칭 아티스트 릴리즈가 save_releases로 저장되어야 한다."""
@@ -81,8 +83,10 @@ class TestRunInitialCollect:
             patch("scheduler.musicbrainz.collect_artists", return_value=[]),
             patch("scheduler.save_artists"),
             patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_spotify_album_total", return_value=None),
             patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
-            patch("scheduler.release.collect_releases", return_value=[{"title": "앨범"}]),
+            patch("scheduler.release.collect_releases", return_value=([{"title": "앨범"}], 1)),
+            patch("scheduler.update_spotify_album_total"),
             patch("scheduler.save_releases") as mock_save,
         ):
             run_initial_collect()
@@ -252,15 +256,17 @@ class TestRunReleaseUpdate:
         ]
         with (
             patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_spotify_album_total", return_value=None),
             patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
-            patch("scheduler.release.collect_releases", return_value=[]) as mock_collect,
+            patch("scheduler.release.collect_releases", return_value=([], 0)) as mock_collect,
+            patch("scheduler.update_spotify_album_total"),
             patch("scheduler.save_releases"),
         ):
             run_release_update()
 
         assert mock_collect.call_count == 2
-        mock_collect.assert_any_call("sp-1", skip_spotify_ids=set())
-        mock_collect.assert_any_call("sp-2", skip_spotify_ids=set())
+        mock_collect.assert_any_call("sp-1", skip_spotify_ids=set(), cached_total=None)
+        mock_collect.assert_any_call("sp-2", skip_spotify_ids=set(), cached_total=None)
 
     def test_saves_releases_with_artist_id(self):
         """릴리즈가 artist_id와 함께 save_releases로 저장되어야 한다."""
@@ -268,8 +274,10 @@ class TestRunReleaseUpdate:
         artists = [{"artist_id": 99, "spotify_url": "https://open.spotify.com/artist/sp-1"}]
         with (
             patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_spotify_album_total", return_value=None),
             patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
-            patch("scheduler.release.collect_releases", return_value=releases),
+            patch("scheduler.release.collect_releases", return_value=(releases, 1)),
+            patch("scheduler.update_spotify_album_total"),
             patch("scheduler.save_releases") as mock_save,
         ):
             run_release_update()

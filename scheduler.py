@@ -24,6 +24,7 @@ from db.repository import (
     get_existing_kopis_ids,
     get_existing_release_spotify_ids,
     get_matched_artists_with_spotify,
+    get_spotify_album_total,
     get_unmatched_concerts,
     save_aliases,
     save_artists,
@@ -35,6 +36,7 @@ from db.repository import (
     update_artist_image,
     update_artist_is_coming,
     update_concert_status,
+    update_spotify_album_total,
 )
 from matchers.artist_matcher import has_match, match_concert
 
@@ -109,17 +111,23 @@ def run_initial_collect(
         matched_artists = get_matched_artists_with_spotify()
         logger.info("내한 공연 매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
         for a in matched_artists:
+            artist_id = a["artist_id"]
             try:
                 spotify_id = _extract_spotify_id(a["spotify_url"])
-                existing_ids = get_existing_release_spotify_ids(a["artist_id"])
-                raw, _ = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
-                releases = _sort_releases(raw)
-                save_releases(a["artist_id"], releases)
+                cached_total = get_spotify_album_total(artist_id)
+                existing_ids = get_existing_release_spotify_ids(artist_id)
+                raw, spotify_total = release.collect_releases(
+                    spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
+                )
+                if spotify_total > 0:
+                    update_spotify_album_total(artist_id, spotify_total)
+                if raw:
+                    save_releases(artist_id, _sort_releases(raw))
             except SpotifyRateLimitError:
-                logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])
+                logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", artist_id)
                 break
             except Exception as e:
-                logger.error("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
+                logger.error("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
 
     if skip_artist_image:
         logger.info("--skip-artist-image 플래그 감지 — 아티스트 이미지 수집 건너뜀")
@@ -217,17 +225,23 @@ def run_release_update() -> None:
     """릴리즈 갱신 (주 1회, 화요일). 내한 공연 매칭 아티스트만 대상."""
     logger.info("=== 릴리즈 갱신 잡 시작 ===")
     for a in get_matched_artists_with_spotify():
+        artist_id = a["artist_id"]
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
-            existing_ids = get_existing_release_spotify_ids(a["artist_id"])
-            raw, _ = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
-            releases = _sort_releases(raw)
-            save_releases(a["artist_id"], releases)
+            cached_total = get_spotify_album_total(artist_id)
+            existing_ids = get_existing_release_spotify_ids(artist_id)
+            raw, spotify_total = release.collect_releases(
+                spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
+            )
+            if spotify_total > 0:
+                update_spotify_album_total(artist_id, spotify_total)
+            if raw:
+                save_releases(artist_id, _sort_releases(raw))
         except SpotifyRateLimitError:
-            logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%s)", a["artist_id"])
+            logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%s)", artist_id)
             break
         except Exception as e:
-            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
+            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
     logger.info("=== 릴리즈 갱신 잡 완료 ===")
 
 
@@ -237,17 +251,23 @@ def run_missing_release_update() -> None:
     artists = get_artists_without_releases()
     logger.info("릴리즈 미수집 아티스트: %d건", len(artists))
     for a in artists:
+        artist_id = a["artist_id"]
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
-            existing_ids = get_existing_release_spotify_ids(a["artist_id"])
-            raw, _ = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
-            releases = _sort_releases(raw)
-            save_releases(a["artist_id"], releases)
+            cached_total = get_spotify_album_total(artist_id)
+            existing_ids = get_existing_release_spotify_ids(artist_id)
+            raw, spotify_total = release.collect_releases(
+                spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
+            )
+            if spotify_total > 0:
+                update_spotify_album_total(artist_id, spotify_total)
+            if raw:
+                save_releases(artist_id, _sort_releases(raw))
         except SpotifyRateLimitError:
-            logger.error("Spotify 429 — 누락 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])
+            logger.error("Spotify 429 — 누락 릴리즈 수집 중단 (artist_id=%s)", artist_id)
             break
         except Exception as e:
-            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
+            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
     logger.info("=== 누락 릴리즈 수집 잡 완료 ===")
 
 
