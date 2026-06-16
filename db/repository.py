@@ -161,11 +161,13 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> None:
                     text("""
                         INSERT INTO concert
                             (kopis_id, title, "cast", start_date, end_date,
-                             venue_name, poster_url, price, status, kopis_update_date)
+                             venue_name, poster_url, price, status, kopis_update_date,
+                             ticket_open_at)
                         VALUES
                             (:kopis_id, :title, :cast, :start_date, :end_date,
                              :venue_name, :poster_url, :price,
-                             :status, :kopis_update_date)
+                             :status, :kopis_update_date,
+                             NULL)
                         ON CONFLICT (kopis_id) DO NOTHING
                         RETURNING id
                     """),
@@ -457,6 +459,27 @@ def update_artist_image(artist_id: int, image_url: str) -> None:
         session.execute(
             text("UPDATE artist SET image_url = :image_url WHERE id = :id"),
             {"image_url": image_url, "id": artist_id},
+        )
+
+
+def get_spotify_album_total(artist_id: int) -> Optional[int]:
+    """artist.spotify_album_total을 반환한다. NULL이면 None 반환."""
+    with get_session() as session:
+        row = session.execute(
+            text("SELECT spotify_album_total FROM artist WHERE id = :id"),
+            {"id": artist_id},
+        ).fetchone()
+    if row is None:
+        return None
+    return row[0]
+
+
+def update_spotify_album_total(artist_id: int, total: int) -> None:
+    """artist.spotify_album_total을 갱신한다."""
+    with get_session() as session:
+        session.execute(
+            text("UPDATE artist SET spotify_album_total = :total WHERE id = :id"),
+            {"total": total, "id": artist_id},
         )
 
 
