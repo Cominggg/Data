@@ -408,11 +408,12 @@ def main() -> None:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["init", "recover", "collect-release"],
+        choices=["init", "recover", "collect-release", "collect-setlist"],
         help=(
             "init: 초기 아티스트·릴리즈 수집 후 종료 / "
             "recover: 누락 이미지·릴리즈 재수집 / "
-            "collect-release: 단건 아티스트 릴리즈 수집"
+            "collect-release: 단건 아티스트 릴리즈 수집 / "
+            "collect-setlist: 공연완료 공연 셋리스트 수집"
         ),
     )
     parser.add_argument(
@@ -480,6 +481,21 @@ def main() -> None:
         if not args.artist_id:
             parser.error("collect-release 커맨드는 --artist-id 가 필요합니다.")
         collect_and_save_releases_for_artist(args.artist_id)
+        return
+
+    if args.command == "collect-setlist":
+        from datetime import datetime as _dt
+        _ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        _log_path = os.path.join(os.path.dirname(__file__), "logs", f"setlist_{_ts}.log")
+        _fh = logging.FileHandler(_log_path, encoding="utf-8")
+        _fh.setLevel(logging.DEBUG)
+        _fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logging.getLogger().addHandler(_fh)
+        logger.info("로그 파일: %s", _log_path)
+        run_setlist_collect()
         return
 
     import uvicorn
