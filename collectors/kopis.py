@@ -26,8 +26,9 @@ _DEFAULT_PARAMS = {
     "rows": 100,
 }
 
-_DEFAULT_STDATE = "20200101"
+_DEFAULT_STDATE = "20250101"
 _DEFAULT_LOOKAHEAD_DAYS = 365
+_SEARCH_STDATE = "20200101"
 
 
 def _parse_kopis_date(raw: Optional[str]) -> Optional[str]:
@@ -80,7 +81,7 @@ _DETAIL_WORKERS = 8
 
 
 def _fetch_detail(kopis_id: str) -> dict:
-    """단건 상세 API를 호출해 poster_url, venue_address, relates, price, updatedate를 반환한다."""
+    """단건 상세 API를 호출해 poster_url, relates, price, updatedate 등을 반환한다."""
     url = f"{_BASE_URL}/{kopis_id}"
     response = requests.get(url, params={"service": _API_KEY}, timeout=30)
     response.raise_for_status()
@@ -124,10 +125,10 @@ def _parse_concert(item: ET.Element) -> dict:
 
 
 def search_concerts(title: str) -> list[dict]:
-    """공연명으로 KOPIS 검색. 2020-01-01~2년 후 범위, 최대 20건 반환."""
+    """공연명으로 KOPIS 검색. 2020-01-01~1년 후 범위, 최대 20건 반환."""
     today = datetime.date.today()
-    stdate = _DEFAULT_STDATE
-    eddate = (today + datetime.timedelta(days=730)).strftime("%Y%m%d")
+    stdate = _SEARCH_STDATE
+    eddate = (today + datetime.timedelta(days=_DEFAULT_LOOKAHEAD_DAYS)).strftime("%Y%m%d")
     params = {
         **_DEFAULT_PARAMS,
         "shprfnm": title,
@@ -224,7 +225,7 @@ def _fetch_and_merge(concert: dict) -> Optional[dict]:
 def collect(stdate: Optional[str] = None, eddate: Optional[str] = None) -> list[dict]:
     """KOPIS에서 내한공연 목록을 전 페이지 순회해 반환한다.
 
-    stdate 미전달 시 _DEFAULT_STDATE(2020-01-01)를 시작일로 사용한다.
+    stdate 미전달 시 _DEFAULT_STDATE(2025-01-01)를 시작일로 사용한다.
     eddate 미전달 시 오늘 기준 _DEFAULT_LOOKAHEAD_DAYS일 후를 종료일로 사용한다.
     """
     logger.info("KOPIS 공연 수집 시작")

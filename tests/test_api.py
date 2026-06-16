@@ -66,6 +66,18 @@ class TestCollectConcertEndpoint:
             client.post("/collect/concert", json={"kopis_id": "PF123"}, headers=_AUTH)
         mock_fn.assert_called_once_with("PF123")
 
+    def test_duplicate_request_not_accepted(self, client):
+        """동일 kopis_id가 이미 실행 중이면 accepted:false를 반환해야 한다."""
+        import api as api_module
+        key = ("concert", "PF_DUP")
+        api_module._running_tasks.add(key)
+        try:
+            with patch("api.collect_and_save_concert"):
+                res = client.post("/collect/concert", json={"kopis_id": "PF_DUP"}, headers=_AUTH)
+            assert res.json()["accepted"] is False
+        finally:
+            api_module._running_tasks.discard(key)
+
 
 class TestCollectReleasesEndpoint:
     def test_returns_202(self, client):
@@ -79,6 +91,18 @@ class TestCollectReleasesEndpoint:
         with patch("api.collect_and_save_releases_for_artist") as mock_fn:
             client.post("/collect/artist/99/releases", headers=_AUTH)
         mock_fn.assert_called_once_with(99)
+
+    def test_duplicate_request_not_accepted(self, client):
+        """동일 artist_id가 이미 실행 중이면 accepted:false를 반환해야 한다."""
+        import api as api_module
+        key = ("releases", 99)
+        api_module._running_tasks.add(key)
+        try:
+            with patch("api.collect_and_save_releases_for_artist"):
+                res = client.post("/collect/artist/99/releases", headers=_AUTH)
+            assert res.json()["accepted"] is False
+        finally:
+            api_module._running_tasks.discard(key)
 
 
 class TestCollectSetlistEndpoint:
@@ -94,6 +118,18 @@ class TestCollectSetlistEndpoint:
             client.post("/collect/concert/7/setlist", headers=_AUTH)
         mock_fn.assert_called_once_with(7)
 
+    def test_duplicate_request_not_accepted(self, client):
+        """동일 concert_id가 이미 실행 중이면 accepted:false를 반환해야 한다."""
+        import api as api_module
+        key = ("setlist", 7)
+        api_module._running_tasks.add(key)
+        try:
+            with patch("api.collect_and_save_setlist"):
+                res = client.post("/collect/concert/7/setlist", headers=_AUTH)
+            assert res.json()["accepted"] is False
+        finally:
+            api_module._running_tasks.discard(key)
+
 
 class TestRegisterArtistEndpoint:
     def test_returns_202(self, client):
@@ -107,6 +143,18 @@ class TestRegisterArtistEndpoint:
         with patch("api.register_artist_by_mbid") as mock_fn:
             client.post("/collect/artist", json={"mbid": "mbid-xyz"}, headers=_AUTH)
         mock_fn.assert_called_once_with("mbid-xyz")
+
+    def test_duplicate_request_not_accepted(self, client):
+        """동일 mbid가 이미 실행 중이면 accepted:false를 반환해야 한다."""
+        import api as api_module
+        key = ("artist", "mbid-dup")
+        api_module._running_tasks.add(key)
+        try:
+            with patch("api.register_artist_by_mbid"):
+                res = client.post("/collect/artist", json={"mbid": "mbid-dup"}, headers=_AUTH)
+            assert res.json()["accepted"] is False
+        finally:
+            api_module._running_tasks.discard(key)
 
 
 class TestSearchArtistsEndpoint:

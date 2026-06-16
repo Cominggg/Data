@@ -22,6 +22,7 @@ from db.repository import (
     get_concert_by_kopis_id,
     get_concert_with_artist,
     get_existing_kopis_ids,
+    get_existing_release_spotify_ids,
     get_matched_artists_with_spotify,
     get_unmatched_concerts,
     save_aliases,
@@ -110,7 +111,9 @@ def run_initial_collect(
         for a in matched_artists:
             try:
                 spotify_id = _extract_spotify_id(a["spotify_url"])
-                releases = _sort_releases(release.collect_releases(spotify_id))
+                existing_ids = get_existing_release_spotify_ids(a["artist_id"])
+                raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+                releases = _sort_releases(raw)
                 save_releases(a["artist_id"], releases)
             except SpotifyRateLimitError:
                 logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])
@@ -216,7 +219,9 @@ def run_release_update() -> None:
     for a in get_matched_artists_with_spotify():
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
-            releases = _sort_releases(release.collect_releases(spotify_id))
+            existing_ids = get_existing_release_spotify_ids(a["artist_id"])
+            raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+            releases = _sort_releases(raw)
             save_releases(a["artist_id"], releases)
         except SpotifyRateLimitError:
             logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%s)", a["artist_id"])
@@ -234,7 +239,9 @@ def run_missing_release_update() -> None:
     for a in artists:
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
-            releases = _sort_releases(release.collect_releases(spotify_id))
+            existing_ids = get_existing_release_spotify_ids(a["artist_id"])
+            raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+            releases = _sort_releases(raw)
             save_releases(a["artist_id"], releases)
         except SpotifyRateLimitError:
             logger.error("Spotify 429 — 누락 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])
@@ -331,7 +338,7 @@ def collect_and_save_concert(kopis_id: str) -> bool:
         logger.info("alias 매칭 없음 — 저장 건너뜀: kopis_id=%s", kopis_id)
         return False
 
-    save_concerts([concert])
+    save_concerts([concert], use_prfstate=True)
 
     concert_row = get_concert_by_kopis_id(kopis_id)
     if concert_row:
@@ -357,7 +364,9 @@ def collect_and_save_releases_for_artist(artist_id: int) -> bool:
         return False
     try:
         spotify_id = _extract_spotify_id(target["spotify_url"])
-        releases = _sort_releases(release.collect_releases(spotify_id))
+        existing_ids = get_existing_release_spotify_ids(artist_id)
+        raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+        releases = _sort_releases(raw)
         save_releases(artist_id, releases)
     except SpotifyRateLimitError:
         logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%d)", artist_id)
@@ -399,11 +408,12 @@ def main() -> None:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["init", "recover", "collect-release"],
+        choices=["init", "recover", "collect-release", "collect-setlist"],
         help=(
             "init: 초기 아티스트·릴리즈 수집 후 종료 / "
             "recover: 누락 이미지·릴리즈 재수집 / "
-            "collect-release: 단건 아티스트 릴리즈 수집"
+            "collect-release: 단건 아티스트 릴리즈 수집 / "
+            "collect-setlist: 공연완료 공연 셋리스트 수집"
         ),
     )
     parser.add_argument(
@@ -471,6 +481,21 @@ def main() -> None:
         if not args.artist_id:
             parser.error("collect-release 커맨드는 --artist-id 가 필요합니다.")
         collect_and_save_releases_for_artist(args.artist_id)
+        return
+
+    if args.command == "collect-setlist":
+        from datetime import datetime as _dt
+        _ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        _log_path = os.path.join(os.path.dirname(__file__), "logs", f"setlist_{_ts}.log")
+        _fh = logging.FileHandler(_log_path, encoding="utf-8")
+        _fh.setLevel(logging.DEBUG)
+        _fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logging.getLogger().addHandler(_fh)
+        logger.info("로그 파일: %s", _log_path)
+        run_setlist_collect()
         return
 
     import uvicorn
