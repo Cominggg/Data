@@ -1,10 +1,11 @@
 import argparse
+import json
 import logging
 import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import List
+from typing import List, Set
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -48,6 +49,38 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _RELEASE_TYPE_ORDER = {"Album": 0, "Single": 1}
+_CHECKPOINT_PATH = os.path.join(os.path.dirname(__file__), "checkpoints", "release_sync.json")
+
+
+def _load_checkpoint() -> Set[int]:
+    """체크포인트 파일에서 완료된 artist_id 집합을 로드한다. 없거나 오류 시 빈 집합 반환."""
+    if not os.path.exists(_CHECKPOINT_PATH):
+        return set()
+    try:
+        with open(_CHECKPOINT_PATH, encoding="utf-8") as f:
+            return set(json.load(f))
+    except Exception as e:
+        logger.warning("체크포인트 로드 실패 — 초기화: %s", e)
+        return set()
+
+
+def _save_checkpoint(completed_ids: Set[int]) -> None:
+    """완료된 artist_id 집합을 체크포인트 파일에 저장한다."""
+    os.makedirs(os.path.dirname(_CHECKPOINT_PATH), exist_ok=True)
+    try:
+        with open(_CHECKPOINT_PATH, "w", encoding="utf-8") as f:
+            json.dump(list(completed_ids), f)
+    except Exception as e:
+        logger.warning("체크포인트 저장 실패: %s", e)
+
+
+def _clear_checkpoint() -> None:
+    """정상 완료 후 체크포인트 파일을 삭제한다."""
+    if os.path.exists(_CHECKPOINT_PATH):
+        try:
+            os.remove(_CHECKPOINT_PATH)
+        except Exception as e:
+            logger.warning("체크포인트 삭제 실패: %s", e)
 
 
 def _sort_releases(releases: List[dict]) -> List[dict]:
@@ -110,8 +143,12 @@ def run_initial_collect(
     else:
         matched_artists = get_matched_artists_with_spotify()
         logger.info("내한 공연 매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
+        completed_ids = _load_checkpoint()
         for a in matched_artists:
             artist_id = a["artist_id"]
+            if artist_id in completed_ids:
+                logger.info("체크포인트 — 완료 아티스트 건너뜀: artist_id=%d", artist_id)
+                continue
             try:
                 spotify_id = _extract_spotify_id(a["spotify_url"])
                 cached_total = get_spotify_album_total(artist_id)
@@ -123,11 +160,15 @@ def run_initial_collect(
                     update_spotify_album_total(artist_id, spotify_total)
                 if raw:
                     save_releases(artist_id, _sort_releases(raw))
+                completed_ids.add(artist_id)
             except SpotifyRateLimitError:
-                logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", artist_id)
+                logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%d)", artist_id)
+                _save_checkpoint(completed_ids)
                 break
             except Exception as e:
-                logger.error("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
+                logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
+        else:
+            _clear_checkpoint()
 
     if skip_artist_image:
         logger.info("--skip-artist-image 플래그 감지 — 아티스트 이미지 수집 건너뜀")
@@ -224,8 +265,12 @@ def run_artist_image_update() -> None:
 def run_release_update() -> None:
     """릴리즈 갱신 (주 1회, 화요일). 내한 공연 매칭 아티스트만 대상."""
     logger.info("=== 릴리즈 갱신 잡 시작 ===")
+    completed_ids = _load_checkpoint()
     for a in get_matched_artists_with_spotify():
         artist_id = a["artist_id"]
+        if artist_id in completed_ids:
+            logger.info("체크포인트 — 완료 아티스트 건너뜀: artist_id=%d", artist_id)
+            continue
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
             cached_total = get_spotify_album_total(artist_id)
@@ -237,11 +282,15 @@ def run_release_update() -> None:
                 update_spotify_album_total(artist_id, spotify_total)
             if raw:
                 save_releases(artist_id, _sort_releases(raw))
+            completed_ids.add(artist_id)
         except SpotifyRateLimitError:
-            logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%s)", artist_id)
+            logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%d)", artist_id)
+            _save_checkpoint(completed_ids)
             break
         except Exception as e:
-            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
+            logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
+    else:
+        _clear_checkpoint()
     logger.info("=== 릴리즈 갱신 잡 완료 ===")
 
 
@@ -250,8 +299,12 @@ def run_missing_release_update() -> None:
     logger.info("=== 누락 릴리즈 수집 잡 시작 ===")
     artists = get_artists_without_releases()
     logger.info("릴리즈 미수집 아티스트: %d건", len(artists))
+    completed_ids = _load_checkpoint()
     for a in artists:
         artist_id = a["artist_id"]
+        if artist_id in completed_ids:
+            logger.info("체크포인트 — 완료 아티스트 건너뜀: artist_id=%d", artist_id)
+            continue
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
             cached_total = get_spotify_album_total(artist_id)
@@ -263,11 +316,15 @@ def run_missing_release_update() -> None:
                 update_spotify_album_total(artist_id, spotify_total)
             if raw:
                 save_releases(artist_id, _sort_releases(raw))
+            completed_ids.add(artist_id)
         except SpotifyRateLimitError:
-            logger.error("Spotify 429 — 누락 릴리즈 수집 중단 (artist_id=%s)", artist_id)
+            logger.error("Spotify 429 — 누락 릴리즈 수집 중단 (artist_id=%d)", artist_id)
+            _save_checkpoint(completed_ids)
             break
         except Exception as e:
-            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
+            logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
+    else:
+        _clear_checkpoint()
     logger.info("=== 누락 릴리즈 수집 잡 완료 ===")
 
 
