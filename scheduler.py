@@ -112,7 +112,7 @@ def run_initial_collect(
             try:
                 spotify_id = _extract_spotify_id(a["spotify_url"])
                 existing_ids = get_existing_release_spotify_ids(a["artist_id"])
-                raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+                raw, _ = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
                 releases = _sort_releases(raw)
                 save_releases(a["artist_id"], releases)
             except SpotifyRateLimitError:
@@ -220,7 +220,7 @@ def run_release_update() -> None:
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
             existing_ids = get_existing_release_spotify_ids(a["artist_id"])
-            raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+            raw, _ = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
             releases = _sort_releases(raw)
             save_releases(a["artist_id"], releases)
         except SpotifyRateLimitError:
@@ -240,7 +240,7 @@ def run_missing_release_update() -> None:
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
             existing_ids = get_existing_release_spotify_ids(a["artist_id"])
-            raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+            raw, _ = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
             releases = _sort_releases(raw)
             save_releases(a["artist_id"], releases)
         except SpotifyRateLimitError:
@@ -302,7 +302,8 @@ def register_artist_by_mbid(mbid: str) -> bool:
 
         try:
             spotify_id = _extract_spotify_id(spotify_url)
-            releases = _sort_releases(release.collect_releases(spotify_id))
+            raw, _ = release.collect_releases(spotify_id)
+            releases = _sort_releases(raw)
             save_releases(artist_id, releases)
         except SpotifyRateLimitError:
             logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", artist_id)
@@ -365,7 +366,7 @@ def collect_and_save_releases_for_artist(artist_id: int) -> bool:
     try:
         spotify_id = _extract_spotify_id(target["spotify_url"])
         existing_ids = get_existing_release_spotify_ids(artist_id)
-        raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+        raw, _ = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
         releases = _sort_releases(raw)
         save_releases(artist_id, releases)
     except SpotifyRateLimitError:

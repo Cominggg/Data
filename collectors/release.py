@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import requests
 
@@ -38,10 +38,18 @@ def _parse_tracks(items: list) -> List[dict]:
     return tracks
 
 
-def _fetch_album_ids(spotify_artist_id: str) -> List[str]:
-    """아티스트의 앨범/싱글 Spotify ID 목록을 페이지네이션으로 수집."""
+def _fetch_album_ids(
+    spotify_artist_id: str,
+    cached_total: Optional[int] = None,
+) -> Tuple[List[str], int]:
+    """아티스트의 앨범/싱글 Spotify ID 목록을 페이지네이션으로 수집.
+
+    cached_total 제공 시 첫 페이지에서 total이 동일하면 즉시 반환한다 (1콜 최적화).
+    반환값: (album_ids, spotify_total)
+    """
     album_ids: List[str] = []
     offset = 0
+    spotify_total = 0
 
     while True:
         try:
@@ -61,17 +69,27 @@ def _fetch_album_ids(spotify_artist_id: str) -> List[str]:
             break
 
         items = data.get("items") or []
+
+        if offset == 0:
+            spotify_total = data.get("total", 0)
+            if cached_total is not None and spotify_total == cached_total:
+                logger.info(
+                    "album total 동일 (%d) — 수집 건너뜀: spotify_artist_id=%s",
+                    spotify_total,
+                    spotify_artist_id,
+                )
+                return [], spotify_total
+
         for item in items:
             album_id = item.get("id")
             if album_id:
                 album_ids.append(album_id)
 
-        total = data.get("total", 0)
         offset += len(items)
-        if not items or offset >= total:
+        if not items or offset >= spotify_total:
             break
 
-    return album_ids
+    return album_ids, spotify_total
 
 
 def _fetch_albums_individual(album_ids: List[str]) -> List[dict]:
@@ -91,17 +109,21 @@ def _fetch_albums_individual(album_ids: List[str]) -> List[dict]:
 def collect_releases(
     spotify_artist_id: str,
     skip_spotify_ids: Optional[set] = None,
-) -> List[dict]:
+    cached_total: Optional[int] = None,
+) -> Tuple[List[dict], int]:
     """아티스트의 릴리즈(앨범·싱글) 수집. compilation은 제외.
 
     skip_spotify_ids: 이미 수집된 spotify_id 집합. 해당 앨범은 상세 API 호출을 건너뜀.
+    cached_total: DB에 캐시된 Spotify album total. 일치 시 수집 없이 1콜로 종료.
+    반환값: (releases, spotify_total). spotify_total=0은 오류 또는 앨범 없음을 의미.
     """
     logger.info("릴리즈 수집 시작: spotify_artist_id=%s", spotify_artist_id)
 
-    album_ids = _fetch_album_ids(spotify_artist_id)
+    album_ids, spotify_total = _fetch_album_ids(spotify_artist_id, cached_total=cached_total)
     if not album_ids:
-        logger.info("수집된 앨범 없음: spotify_artist_id=%s", spotify_artist_id)
-        return []
+        if spotify_total == 0:
+            logger.info("수집된 앨범 없음: spotify_artist_id=%s", spotify_artist_id)
+        return [], spotify_total
 
     if skip_spotify_ids:
         before = len(album_ids)
@@ -113,7 +135,7 @@ def collect_releases(
             )
     if not album_ids:
         logger.info("신규 릴리즈 없음: spotify_artist_id=%s", spotify_artist_id)
-        return []
+        return [], spotify_total
 
     albums = _fetch_albums_individual(album_ids)
     results: List[dict] = []
@@ -147,4 +169,4 @@ def collect_releases(
     logger.info(
         "릴리즈 수집 완료: spotify_artist_id=%s, 총 %d건", spotify_artist_id, len(results)
     )
-    return results
+    return results, spotify_total
