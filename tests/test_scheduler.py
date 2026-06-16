@@ -1,13 +1,20 @@
 """scheduler.py 단위 테스트."""
+import json
+import os
 from unittest.mock import patch
 
 import pytest
 
 from scheduler import (
+    _CHECKPOINT_PATH,
     _build_scheduler,
+    _clear_checkpoint,
+    _load_checkpoint,
+    _save_checkpoint,
     _sort_releases,
     register_artist_by_mbid,
     run_initial_collect,
+    run_missing_release_update,
     run_release_update,
     run_setlist_collect,
     run_status_update,
@@ -402,7 +409,7 @@ class TestRegisterArtistByMbid:
             patch("scheduler.get_artist_by_mbid", return_value=self._SAVED),
             patch("scheduler.artist_image.collect_artist_image", return_value="http://img.url"),
             patch("scheduler.update_artist_image"),
-            patch("scheduler.release.collect_releases", return_value=[]),
+            patch("scheduler.release.collect_releases", return_value=([], 0)),
             patch("scheduler.save_releases"),
         ):
             assert register_artist_by_mbid("mbid-test") is True
@@ -437,7 +444,7 @@ class TestRegisterArtistByMbid:
             patch("scheduler.update_artist_image"),
             patch(
                 "scheduler.release.collect_releases",
-                side_effect=lambda _: call_order.append("releases") or [],
+                side_effect=lambda _: call_order.append("releases") or ([], 0),
             ),
             patch("scheduler.save_releases"),
         ):
@@ -460,3 +467,144 @@ class TestRegisterArtistByMbid:
         assert result is True
         mock_img.assert_not_called()
         mock_rel.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 체크포인트 헬퍼
+# ---------------------------------------------------------------------------
+class TestCheckpoint:
+    def test_load_returns_empty_set_when_no_file(self, tmp_path, monkeypatch):
+        """체크포인트 파일 없으면 빈 집합 반환."""
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json"))
+        assert _load_checkpoint() == set()
+
+    def test_save_and_load_roundtrip(self, tmp_path, monkeypatch):
+        """저장 후 로드하면 같은 집합이 복원되어야 한다."""
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        _save_checkpoint({1, 2, 3})
+        assert _load_checkpoint() == {1, 2, 3}
+
+    def test_clear_removes_file(self, tmp_path, monkeypatch):
+        """_clear_checkpoint 후 파일이 삭제되어야 한다."""
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        _save_checkpoint({10})
+        assert os.path.exists(path)
+        _clear_checkpoint()
+        assert not os.path.exists(path)
+
+    def test_load_returns_empty_on_corrupt_file(self, tmp_path, monkeypatch):
+        """파일이 손상됐을 때 빈 집합을 반환해야 한다."""
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        with open(path, "w") as f:
+            f.write("not-json{{{")
+        assert _load_checkpoint() == set()
+
+
+# ---------------------------------------------------------------------------
+# run_release_update — 체크포인트 + total 캐시
+# ---------------------------------------------------------------------------
+class TestRunReleaseUpdateCheckpoint:
+    _ARTISTS = [
+        {"artist_id": 1, "spotify_url": "https://open.spotify.com/artist/sp-1"},
+        {"artist_id": 2, "spotify_url": "https://open.spotify.com/artist/sp-2"},
+    ]
+
+    def test_skips_already_completed_artist(self, tmp_path, monkeypatch):
+        """체크포인트에 있는 artist_id는 collect_releases 호출 없이 건너뜀."""
+        monkeypatch.setattr(
+            "scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json")
+        )
+        _save_checkpoint({1})  # artist_id=1 이미 완료
+        with (
+            patch("scheduler.get_matched_artists_with_spotify", return_value=self._ARTISTS),
+            patch("scheduler.get_spotify_album_total", return_value=None),
+            patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
+            patch("scheduler.release.collect_releases", return_value=([], 0)) as mock_collect,
+            patch("scheduler.update_spotify_album_total"),
+            patch("scheduler.save_releases"),
+        ):
+            run_release_update()
+
+        assert mock_collect.call_count == 1
+        mock_collect.assert_called_once_with("sp-2", skip_spotify_ids=set(), cached_total=None)
+
+    def test_saves_checkpoint_on_429_and_clears_on_success(self, tmp_path, monkeypatch):
+        """429 발생 시 체크포인트 저장, 정상 완료 시 체크포인트 삭제."""
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        from collectors.spotify_client import SpotifyRateLimitError
+
+        with (
+            patch("scheduler.get_matched_artists_with_spotify", return_value=self._ARTISTS),
+            patch("scheduler.get_spotify_album_total", return_value=None),
+            patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
+            patch(
+                "scheduler.release.collect_releases",
+                side_effect=[([], 0), SpotifyRateLimitError()],
+            ),
+            patch("scheduler.update_spotify_album_total"),
+            patch("scheduler.save_releases"),
+        ):
+            run_release_update()
+
+        assert os.path.exists(path)
+        completed = set(json.load(open(path)))
+        assert 1 in completed  # artist_id=1 완료 후 저장
+        assert 2 not in completed
+
+    def test_clears_checkpoint_on_normal_completion(self, tmp_path, monkeypatch):
+        """정상 완료 시 체크포인트 파일을 삭제해야 한다."""
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        _save_checkpoint({99})  # 잔여 파일 있음
+
+        with (
+            patch("scheduler.get_matched_artists_with_spotify", return_value=self._ARTISTS),
+            patch("scheduler.get_spotify_album_total", return_value=None),
+            patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
+            patch("scheduler.release.collect_releases", return_value=([], 0)),
+            patch("scheduler.update_spotify_album_total"),
+            patch("scheduler.save_releases"),
+        ):
+            run_release_update()
+
+        assert not os.path.exists(path)
+
+    def test_updates_spotify_album_total_when_nonzero(self, tmp_path, monkeypatch):
+        """spotify_total > 0이면 update_spotify_album_total이 호출되어야 한다."""
+        monkeypatch.setattr(
+            "scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json")
+        )
+        artists = [{"artist_id": 5, "spotify_url": "https://open.spotify.com/artist/sp-5"}]
+        with (
+            patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_spotify_album_total", return_value=None),
+            patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
+            patch("scheduler.release.collect_releases", return_value=([], 10)),
+            patch("scheduler.update_spotify_album_total") as mock_update,
+            patch("scheduler.save_releases"),
+        ):
+            run_release_update()
+
+        mock_update.assert_called_once_with(5, 10)
+
+    def test_skips_save_releases_when_no_new_releases(self, tmp_path, monkeypatch):
+        """신규 릴리즈 없으면 save_releases가 호출되지 않아야 한다."""
+        monkeypatch.setattr(
+            "scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json")
+        )
+        artists = [{"artist_id": 7, "spotify_url": "https://open.spotify.com/artist/sp-7"}]
+        with (
+            patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
+            patch("scheduler.get_spotify_album_total", return_value=5),
+            patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
+            patch("scheduler.release.collect_releases", return_value=([], 5)),  # total 동일
+            patch("scheduler.update_spotify_album_total"),
+            patch("scheduler.save_releases") as mock_save,
+        ):
+            run_release_update()
+
+        mock_save.assert_not_called()
