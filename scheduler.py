@@ -186,7 +186,7 @@ def run_initial_collect(
                 raw, spotify_total = release.collect_releases(
                     spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
                 )
-                if spotify_total > 0:
+                if spotify_total > 0 and spotify_total != cached_total:
                     update_spotify_album_total(artist_id, spotify_total)
                 if raw:
                     save_releases(artist_id, _sort_releases(raw))
@@ -314,7 +314,7 @@ def run_release_update() -> None:
             raw, spotify_total = release.collect_releases(
                 spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
             )
-            if spotify_total > 0:
+            if spotify_total > 0 and spotify_total != cached_total:
                 update_spotify_album_total(artist_id, spotify_total)
             if raw:
                 save_releases(artist_id, _sort_releases(raw))
@@ -351,7 +351,7 @@ def run_missing_release_update() -> None:
             raw, spotify_total = release.collect_releases(
                 spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
             )
-            if spotify_total > 0:
+            if spotify_total > 0 and spotify_total != cached_total:
                 update_spotify_album_total(artist_id, spotify_total)
             if raw:
                 save_releases(artist_id, _sort_releases(raw))
