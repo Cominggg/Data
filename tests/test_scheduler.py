@@ -9,10 +9,12 @@ from scheduler import (
     _CHECKPOINT_PATH,
     _build_scheduler,
     _clear_checkpoint,
+    _is_banned,
     _load_checkpoint,
     _save_checkpoint,
     _sort_releases,
     register_artist_by_mbid,
+    run_artist_image_update,
     run_initial_collect,
     run_missing_release_update,
     run_release_update,
@@ -502,6 +504,57 @@ class TestCheckpoint:
             f.write("not-json{{{")
         assert _load_checkpoint() == set()
 
+    def test_load_handles_legacy_flat_list_format(self, tmp_path, monkeypatch):
+        """이전 flat list 형식 파일도 정상 로드되어야 한다."""
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        with open(path, "w") as f:
+            json.dump([10, 20, 30], f)
+        assert _load_checkpoint() == {10, 20, 30}
+
+    def test_save_includes_banned_until(self, tmp_path, monkeypatch):
+        """저장된 파일에 banned_until 필드가 있어야 한다."""
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        _save_checkpoint({5, 6})
+        data = json.load(open(path))
+        assert "banned_until" in data
+        assert set(data["completed_artist_ids"]) == {5, 6}
+
+
+# ---------------------------------------------------------------------------
+# _is_banned
+# ---------------------------------------------------------------------------
+class TestIsBanned:
+    def test_returns_false_when_no_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json"))
+        assert _is_banned() is False
+
+    def test_returns_true_within_ban_period(self, tmp_path, monkeypatch):
+        from datetime import datetime, timedelta
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        future = (datetime.now() + timedelta(hours=20)).isoformat(timespec="seconds")
+        with open(path, "w") as f:
+            json.dump({"banned_until": future, "completed_artist_ids": []}, f)
+        assert _is_banned() is True
+
+    def test_returns_false_after_ban_expired(self, tmp_path, monkeypatch):
+        from datetime import datetime, timedelta
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        past = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
+        with open(path, "w") as f:
+            json.dump({"banned_until": past, "completed_artist_ids": []}, f)
+        assert _is_banned() is False
+
+    def test_returns_false_for_legacy_flat_list(self, tmp_path, monkeypatch):
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        with open(path, "w") as f:
+            json.dump([1, 2, 3], f)
+        assert _is_banned() is False
+
 
 # ---------------------------------------------------------------------------
 # run_release_update — 체크포인트 + total 캐시
@@ -514,10 +567,13 @@ class TestRunReleaseUpdateCheckpoint:
 
     def test_skips_already_completed_artist(self, tmp_path, monkeypatch):
         """체크포인트에 있는 artist_id는 collect_releases 호출 없이 건너뜀."""
-        monkeypatch.setattr(
-            "scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json")
-        )
-        _save_checkpoint({1})  # artist_id=1 이미 완료
+        from datetime import datetime, timedelta
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        # 밴은 만료, 완료된 artist_id=1은 체크포인트에 잔류하는 시나리오
+        past = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
+        with open(path, "w") as f:
+            json.dump({"banned_until": past, "completed_artist_ids": [1]}, f)
         with (
             patch("scheduler.get_matched_artists_with_spotify", return_value=self._ARTISTS),
             patch("scheduler.get_spotify_album_total", return_value=None),
@@ -551,15 +607,21 @@ class TestRunReleaseUpdateCheckpoint:
             run_release_update()
 
         assert os.path.exists(path)
-        completed = set(json.load(open(path)))
+        data = json.load(open(path))
+        completed = set(data["completed_artist_ids"])
+        assert "banned_until" in data
         assert 1 in completed  # artist_id=1 완료 후 저장
         assert 2 not in completed
 
     def test_clears_checkpoint_on_normal_completion(self, tmp_path, monkeypatch):
         """정상 완료 시 체크포인트 파일을 삭제해야 한다."""
+        from datetime import datetime, timedelta
         path = str(tmp_path / "release_sync.json")
         monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
-        _save_checkpoint({99})  # 잔여 파일 있음
+        # 밴 만료 상태의 잔여 체크포인트
+        past = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
+        with open(path, "w") as f:
+            json.dump({"banned_until": past, "completed_artist_ids": [99]}, f)
 
         with (
             patch("scheduler.get_matched_artists_with_spotify", return_value=self._ARTISTS),
@@ -608,3 +670,32 @@ class TestRunReleaseUpdateCheckpoint:
             run_release_update()
 
         mock_save.assert_not_called()
+
+    def test_skips_all_when_banned(self, tmp_path, monkeypatch):
+        """banned_until이 유효하면 collect_releases를 호출하지 않아야 한다."""
+        from datetime import datetime, timedelta
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        future = (datetime.now() + timedelta(hours=20)).isoformat(timespec="seconds")
+        with open(path, "w") as f:
+            json.dump({"banned_until": future, "completed_artist_ids": []}, f)
+        with patch("scheduler.release.collect_releases") as mock_collect:
+            run_release_update()
+        mock_collect.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# run_artist_image_update — ban 가드
+# ---------------------------------------------------------------------------
+class TestRunArtistImageUpdateBanGuard:
+    def test_skips_when_banned(self, tmp_path, monkeypatch):
+        """banned_until이 유효하면 이미지 수집을 실행하지 않아야 한다."""
+        from datetime import datetime, timedelta
+        path = str(tmp_path / "release_sync.json")
+        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        future = (datetime.now() + timedelta(hours=20)).isoformat(timespec="seconds")
+        with open(path, "w") as f:
+            json.dump({"banned_until": future, "completed_artist_ids": []}, f)
+        with patch("scheduler.artist_image.collect_artist_image") as mock_collect:
+            run_artist_image_update()
+        mock_collect.assert_not_called()

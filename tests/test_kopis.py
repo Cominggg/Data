@@ -224,15 +224,15 @@ class TestKopisCollect:
 
         assert result[0]["poster_url"] == "http://poster.jpg"
 
-    def test_filters_visit_concerts_only(self):
-        """요청 파라미터에 visit=Y가 포함되어야 한다."""
+    def test_visit_not_in_list_api_params(self):
+        """목록 API 요청 파라미터에 visit이 포함되지 않아야 한다 (상세 API 응답에서만 필터링)."""
         with patch("collectors.kopis.requests.get") as mock_get:
             mock_get.return_value.content = b"<dbs></dbs>"
             mock_get.return_value.raise_for_status = MagicMock()
             collect()
 
         params = mock_get.call_args[1].get("params") or mock_get.call_args[0][1]
-        assert params.get("visit") == "Y"
+        assert "visit" not in params
 
     def test_filters_popular_music_genre(self):
         """요청 파라미터에 genrenm=GGGA가 포함되어야 한다."""

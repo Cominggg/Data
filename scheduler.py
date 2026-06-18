@@ -5,6 +5,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from typing import List, Set
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -50,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 _RELEASE_TYPE_ORDER = {"Album": 0, "Single": 1}
 _CHECKPOINT_PATH = os.path.join(os.path.dirname(__file__), "checkpoints", "release_sync.json")
+_BAN_MARGIN_HOURS = 25  # Spotify 24h 밴 + 1h 마진
 
 
 def _load_checkpoint() -> Set[int]:
@@ -58,18 +60,44 @@ def _load_checkpoint() -> Set[int]:
         return set()
     try:
         with open(_CHECKPOINT_PATH, encoding="utf-8") as f:
-            return set(json.load(f))
+            data = json.load(f)
+        if isinstance(data, list):
+            return set(data)
+        return set(data.get("completed_artist_ids", []))
     except Exception as e:
         logger.warning("체크포인트 로드 실패 — 초기화: %s", e)
         return set()
 
 
+def _is_banned() -> bool:
+    """체크포인트에 banned_until이 있고 현재 시각이 그 이전이면 True."""
+    if not os.path.exists(_CHECKPOINT_PATH):
+        return False
+    try:
+        with open(_CHECKPOINT_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return False
+        banned_until_str = data.get("banned_until")
+        if not banned_until_str:
+            return False
+        return datetime.now() < datetime.fromisoformat(banned_until_str)
+    except Exception:
+        return False
+
+
 def _save_checkpoint(completed_ids: Set[int]) -> None:
-    """완료된 artist_id 집합을 체크포인트 파일에 저장한다."""
+    """완료된 artist_id 집합과 banned_until을 체크포인트 파일에 저장한다."""
     os.makedirs(os.path.dirname(_CHECKPOINT_PATH), exist_ok=True)
+    data = {
+        "banned_until": (datetime.now() + timedelta(hours=_BAN_MARGIN_HOURS)).isoformat(
+            timespec="seconds"
+        ),
+        "completed_artist_ids": list(completed_ids),
+    }
     try:
         with open(_CHECKPOINT_PATH, "w", encoding="utf-8") as f:
-            json.dump(list(completed_ids), f)
+            json.dump(data, f)
     except Exception as e:
         logger.warning("체크포인트 저장 실패: %s", e)
 
@@ -140,6 +168,8 @@ def run_initial_collect(
 
     if skip_releases:
         logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
+    elif _is_banned():
+        logger.warning("Spotify 429 밴 유효 — 릴리즈 수집 건너뜀")
     else:
         matched_artists = get_matched_artists_with_spotify()
         logger.info("내한 공연 매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
@@ -245,6 +275,9 @@ def run_status_update() -> None:
 def run_artist_image_update() -> None:
     """image_url 미수집 아티스트의 프로필 이미지를 수집한다 (주 1회, 목요일)."""
     logger.info("=== 아티스트 이미지 수집 잡 시작 ===")
+    if _is_banned():
+        logger.warning("Spotify 429 밴 유효 — 이미지 수집 건너뜀")
+        return
     artists = get_artists_without_image()
     logger.info("이미지 미수집 아티스트: %d건", len(artists))
     for a in artists:
@@ -263,8 +296,11 @@ def run_artist_image_update() -> None:
 
 
 def run_release_update() -> None:
-    """릴리즈 갱신 (주 1회, 화요일). 내한 공연 매칭 아티스트만 대상."""
+    """릴리즈 갱신 (매일). 내한 공연 매칭 아티스트만 대상."""
     logger.info("=== 릴리즈 갱신 잡 시작 ===")
+    if _is_banned():
+        logger.warning("Spotify 429 밴 유효 — 릴리즈 갱신 건너뜀")
+        return
     completed_ids = _load_checkpoint()
     for a in get_matched_artists_with_spotify():
         artist_id = a["artist_id"]
@@ -297,6 +333,9 @@ def run_release_update() -> None:
 def run_missing_release_update() -> None:
     """릴리즈가 없는 아티스트만 대상으로 릴리즈를 수집한다 (복구 전용)."""
     logger.info("=== 누락 릴리즈 수집 잡 시작 ===")
+    if _is_banned():
+        logger.warning("Spotify 429 밴 유효 — 누락 릴리즈 수집 건너뜀")
+        return
     artists = get_artists_without_releases()
     logger.info("릴리즈 미수집 아티스트: %d건", len(artists))
     completed_ids = _load_checkpoint()
@@ -474,7 +513,7 @@ def collect_and_save_setlist(concert_id: int) -> bool:
 def _build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
     scheduler.add_job(run_status_update, "cron", hour=4)
-    scheduler.add_job(run_release_update, "cron", day_of_week="tue", hour=5)
+    scheduler.add_job(run_release_update, "cron", hour=2)
     scheduler.add_job(run_wikipedia_collect, "cron", day_of_week="thu", hour=3)
     scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=5)
     scheduler.add_job(run_setlist_collect, "cron", hour=6)
