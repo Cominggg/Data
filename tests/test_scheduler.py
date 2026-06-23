@@ -6,12 +6,14 @@ from unittest.mock import patch
 import pytest
 
 from scheduler import (
-    _CHECKPOINT_PATH,
+    _BAN_PATH,
     _build_scheduler,
-    _clear_checkpoint,
+    _clear_progress,
     _is_banned,
-    _load_checkpoint,
-    _save_checkpoint,
+    _load_progress,
+    _progress_path,
+    _save_ban,
+    _save_progress,
     _sort_releases,
     register_artist_by_mbid,
     run_artist_image_update,
@@ -472,88 +474,79 @@ class TestRegisterArtistByMbid:
 
 
 # ---------------------------------------------------------------------------
-# 체크포인트 헬퍼
+# 체크포인트 헬퍼 — progress (잡별 진행 상태)
 # ---------------------------------------------------------------------------
-class TestCheckpoint:
+class TestCheckpointProgress:
     def test_load_returns_empty_set_when_no_file(self, tmp_path, monkeypatch):
         """체크포인트 파일 없으면 빈 집합 반환."""
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json"))
-        assert _load_checkpoint() == set()
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        assert _load_progress("release_update") == set()
 
     def test_save_and_load_roundtrip(self, tmp_path, monkeypatch):
         """저장 후 로드하면 같은 집합이 복원되어야 한다."""
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
-        _save_checkpoint({1, 2, 3})
-        assert _load_checkpoint() == {1, 2, 3}
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        _save_progress("release_update", {1, 2, 3})
+        assert _load_progress("release_update") == {1, 2, 3}
 
     def test_clear_removes_file(self, tmp_path, monkeypatch):
-        """_clear_checkpoint 후 파일이 삭제되어야 한다."""
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
-        _save_checkpoint({10})
-        assert os.path.exists(path)
-        _clear_checkpoint()
-        assert not os.path.exists(path)
+        """_clear_progress 후 파일이 삭제되어야 한다."""
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        _save_progress("release_update", {10})
+        assert os.path.exists(_progress_path("release_update"))
+        _clear_progress("release_update")
+        assert not os.path.exists(_progress_path("release_update"))
 
     def test_load_returns_empty_on_corrupt_file(self, tmp_path, monkeypatch):
         """파일이 손상됐을 때 빈 집합을 반환해야 한다."""
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        path = _progress_path("release_update")
         with open(path, "w") as f:
             f.write("not-json{{{")
-        assert _load_checkpoint() == set()
+        assert _load_progress("release_update") == set()
 
-    def test_load_handles_legacy_flat_list_format(self, tmp_path, monkeypatch):
-        """이전 flat list 형식 파일도 정상 로드되어야 한다."""
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
-        with open(path, "w") as f:
-            json.dump([10, 20, 30], f)
-        assert _load_checkpoint() == {10, 20, 30}
-
-    def test_save_includes_banned_until(self, tmp_path, monkeypatch):
-        """저장된 파일에 banned_until 필드가 있어야 한다."""
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
-        _save_checkpoint({5, 6})
-        data = json.load(open(path))
-        assert "banned_until" in data
-        assert set(data["completed_artist_ids"]) == {5, 6}
+    def test_jobs_use_separate_files(self, tmp_path, monkeypatch):
+        """잡마다 독립적인 파일을 사용해야 한다."""
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        _save_progress("release_update", {1, 2})
+        _save_progress("missing_release", {10, 20})
+        assert _load_progress("release_update") == {1, 2}
+        assert _load_progress("missing_release") == {10, 20}
 
 
 # ---------------------------------------------------------------------------
-# _is_banned
+# 체크포인트 헬퍼 — ban (Spotify API 밴 상태)
 # ---------------------------------------------------------------------------
 class TestIsBanned:
     def test_returns_false_when_no_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json"))
+        monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
         assert _is_banned() is False
 
     def test_returns_true_within_ban_period(self, tmp_path, monkeypatch):
         from datetime import datetime, timedelta
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
         future = (datetime.now() + timedelta(hours=20)).isoformat(timespec="seconds")
-        with open(path, "w") as f:
-            json.dump({"banned_until": future, "completed_artist_ids": []}, f)
+        with open(ban_path, "w") as f:
+            json.dump({"banned_until": future}, f)
         assert _is_banned() is True
 
     def test_returns_false_after_ban_expired(self, tmp_path, monkeypatch):
         from datetime import datetime, timedelta
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
         past = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
-        with open(path, "w") as f:
-            json.dump({"banned_until": past, "completed_artist_ids": []}, f)
+        with open(ban_path, "w") as f:
+            json.dump({"banned_until": past}, f)
         assert _is_banned() is False
 
-    def test_returns_false_for_legacy_flat_list(self, tmp_path, monkeypatch):
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
-        with open(path, "w") as f:
-            json.dump([1, 2, 3], f)
-        assert _is_banned() is False
+    def test_save_ban_writes_banned_until(self, tmp_path, monkeypatch):
+        """_save_ban 후 spotify_ban.json에 banned_until이 저장되어야 한다."""
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        _save_ban()
+        data = json.load(open(ban_path))
+        assert "banned_until" in data
 
 
 # ---------------------------------------------------------------------------
@@ -567,13 +560,9 @@ class TestRunReleaseUpdateCheckpoint:
 
     def test_skips_already_completed_artist(self, tmp_path, monkeypatch):
         """체크포인트에 있는 artist_id는 collect_releases 호출 없이 건너뜀."""
-        from datetime import datetime, timedelta
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
-        # 밴은 만료, 완료된 artist_id=1은 체크포인트에 잔류하는 시나리오
-        past = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
-        with open(path, "w") as f:
-            json.dump({"banned_until": past, "completed_artist_ids": [1]}, f)
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
+        _save_progress("release_update", {1})
         with (
             patch("scheduler.get_matched_artists_with_spotify", return_value=self._ARTISTS),
             patch("scheduler.get_spotify_album_total", return_value=None),
@@ -587,10 +576,11 @@ class TestRunReleaseUpdateCheckpoint:
         assert mock_collect.call_count == 1
         mock_collect.assert_called_once_with("sp-2", skip_spotify_ids=set(), cached_total=None)
 
-    def test_saves_checkpoint_on_429_and_clears_on_success(self, tmp_path, monkeypatch):
-        """429 발생 시 체크포인트 저장, 정상 완료 시 체크포인트 삭제."""
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+    def test_saves_ban_and_progress_on_429(self, tmp_path, monkeypatch):
+        """429 발생 시 spotify_ban.json과 잡별 progress 파일이 저장되어야 한다."""
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
         from collectors.spotify_client import SpotifyRateLimitError
 
         with (
@@ -606,22 +596,17 @@ class TestRunReleaseUpdateCheckpoint:
         ):
             run_release_update()
 
-        assert os.path.exists(path)
-        data = json.load(open(path))
-        completed = set(data["completed_artist_ids"])
-        assert "banned_until" in data
-        assert 1 in completed  # artist_id=1 완료 후 저장
+        assert os.path.exists(ban_path)
+        assert "banned_until" in json.load(open(ban_path))
+        completed = _load_progress("release_update")
+        assert 1 in completed
         assert 2 not in completed
 
-    def test_clears_checkpoint_on_normal_completion(self, tmp_path, monkeypatch):
-        """정상 완료 시 체크포인트 파일을 삭제해야 한다."""
-        from datetime import datetime, timedelta
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
-        # 밴 만료 상태의 잔여 체크포인트
-        past = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
-        with open(path, "w") as f:
-            json.dump({"banned_until": past, "completed_artist_ids": [99]}, f)
+    def test_clears_progress_on_normal_completion(self, tmp_path, monkeypatch):
+        """정상 완료 시 잡별 progress 파일을 삭제해야 한다."""
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
+        _save_progress("release_update", {99})
 
         with (
             patch("scheduler.get_matched_artists_with_spotify", return_value=self._ARTISTS),
@@ -633,13 +618,12 @@ class TestRunReleaseUpdateCheckpoint:
         ):
             run_release_update()
 
-        assert not os.path.exists(path)
+        assert not os.path.exists(_progress_path("release_update"))
 
     def test_updates_spotify_album_total_when_nonzero(self, tmp_path, monkeypatch):
         """spotify_total > 0이면 update_spotify_album_total이 호출되어야 한다."""
-        monkeypatch.setattr(
-            "scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json")
-        )
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
         artists = [{"artist_id": 5, "spotify_url": "https://open.spotify.com/artist/sp-5"}]
         with (
             patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
@@ -655,15 +639,14 @@ class TestRunReleaseUpdateCheckpoint:
 
     def test_skips_save_releases_when_no_new_releases(self, tmp_path, monkeypatch):
         """신규 릴리즈 없으면 save_releases가 호출되지 않아야 한다."""
-        monkeypatch.setattr(
-            "scheduler._CHECKPOINT_PATH", str(tmp_path / "release_sync.json")
-        )
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
         artists = [{"artist_id": 7, "spotify_url": "https://open.spotify.com/artist/sp-7"}]
         with (
             patch("scheduler.get_matched_artists_with_spotify", return_value=artists),
             patch("scheduler.get_spotify_album_total", return_value=5),
             patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
-            patch("scheduler.release.collect_releases", return_value=([], 5)),  # total 동일
+            patch("scheduler.release.collect_releases", return_value=([], 5)),
             patch("scheduler.update_spotify_album_total"),
             patch("scheduler.save_releases") as mock_save,
         ):
@@ -674,11 +657,11 @@ class TestRunReleaseUpdateCheckpoint:
     def test_skips_all_when_banned(self, tmp_path, monkeypatch):
         """banned_until이 유효하면 collect_releases를 호출하지 않아야 한다."""
         from datetime import datetime, timedelta
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
         future = (datetime.now() + timedelta(hours=20)).isoformat(timespec="seconds")
-        with open(path, "w") as f:
-            json.dump({"banned_until": future, "completed_artist_ids": []}, f)
+        with open(ban_path, "w") as f:
+            json.dump({"banned_until": future}, f)
         with patch("scheduler.release.collect_releases") as mock_collect:
             run_release_update()
         mock_collect.assert_not_called()
@@ -691,11 +674,73 @@ class TestRunArtistImageUpdateBanGuard:
     def test_skips_when_banned(self, tmp_path, monkeypatch):
         """banned_until이 유효하면 이미지 수집을 실행하지 않아야 한다."""
         from datetime import datetime, timedelta
-        path = str(tmp_path / "release_sync.json")
-        monkeypatch.setattr("scheduler._CHECKPOINT_PATH", path)
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
         future = (datetime.now() + timedelta(hours=20)).isoformat(timespec="seconds")
-        with open(path, "w") as f:
-            json.dump({"banned_until": future, "completed_artist_ids": []}, f)
+        with open(ban_path, "w") as f:
+            json.dump({"banned_until": future}, f)
         with patch("scheduler.artist_image.collect_artist_image") as mock_collect:
             run_artist_image_update()
         mock_collect.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 잡 간 체크포인트 격리
+# ---------------------------------------------------------------------------
+class TestJobIsolation:
+    """run_missing_release_update의 progress가 run_release_update에 영향을 주지 않아야 한다."""
+
+    _MATCHED_ARTISTS = [
+        {"artist_id": 10, "spotify_url": "https://open.spotify.com/artist/sp-10"},
+        {"artist_id": 20, "spotify_url": "https://open.spotify.com/artist/sp-20"},
+    ]
+    _MISSING_ARTISTS = [
+        {"artist_id": 10, "spotify_url": "https://open.spotify.com/artist/sp-10"},
+        {"artist_id": 20, "spotify_url": "https://open.spotify.com/artist/sp-20"},
+    ]
+
+    def test_missing_release_progress_does_not_skip_release_update(self, tmp_path, monkeypatch):
+        """missing_release 잡이 저장한 completed_ids를 release_update 잡이 읽지 않아야 한다."""
+        from collectors.spotify_client import SpotifyRateLimitError
+
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
+
+        # missing_release 잡이 artist 10, 20 처리 후 429로 중단된 상황 시뮬레이션
+        _save_progress("missing_release", {10, 20})
+
+        # release_update 잡 실행 — missing_release progress를 읽어선 안 됨
+        with (
+            patch("scheduler.get_matched_artists_with_spotify", return_value=self._MATCHED_ARTISTS),
+            patch("scheduler.get_spotify_album_total", return_value=None),
+            patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
+            patch("scheduler.release.collect_releases", return_value=([], 0)) as mock_collect,
+            patch("scheduler.update_spotify_album_total"),
+            patch("scheduler.save_releases"),
+        ):
+            run_release_update()
+
+        assert mock_collect.call_count == 2  # 두 아티스트 모두 처리되어야 함
+
+    def test_release_update_progress_does_not_skip_missing_release(self, tmp_path, monkeypatch):
+        """release_update 잡이 저장한 completed_ids를 missing_release 잡이 읽지 않아야 한다."""
+        from collectors.spotify_client import SpotifyRateLimitError
+
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
+
+        # release_update 잡이 artist 10, 20 처리 후 429로 중단된 상황 시뮬레이션
+        _save_progress("release_update", {10, 20})
+
+        # missing_release 잡 실행 — release_update progress를 읽어선 안 됨
+        with (
+            patch("scheduler.get_artists_without_releases", return_value=self._MISSING_ARTISTS),
+            patch("scheduler.get_spotify_album_total", return_value=None),
+            patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
+            patch("scheduler.release.collect_releases", return_value=([], 0)) as mock_collect,
+            patch("scheduler.update_spotify_album_total"),
+            patch("scheduler.save_releases"),
+        ):
+            run_missing_release_update()
+
+        assert mock_collect.call_count == 2  # 두 아티스트 모두 처리되어야 함
