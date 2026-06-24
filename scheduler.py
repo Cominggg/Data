@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import logging.handlers
 import os
 import threading
 import time
@@ -684,6 +685,19 @@ def main() -> None:
         return
 
     import uvicorn
+
+    _daemon_log = os.path.join(os.path.dirname(__file__), "logs", "scheduler.log")
+    os.makedirs(os.path.dirname(os.path.abspath(_daemon_log)), exist_ok=True)
+    _rfh = logging.handlers.TimedRotatingFileHandler(
+        _daemon_log, when="midnight", backupCount=30, encoding="utf-8"
+    )
+    _rfh.setLevel(logging.DEBUG)
+    _rfh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logging.getLogger().addHandler(_rfh)
+    logger.info("데몬 로그 파일: %s", _daemon_log)
 
     api_host = os.environ.get("API_HOST", "0.0.0.0")
     api_port = int(os.environ.get("API_PORT", "8000"))
