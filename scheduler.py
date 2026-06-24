@@ -125,6 +125,19 @@ def _clear_progress(job_name: str) -> None:
             logger.warning("진행 체크포인트 삭제 실패 (%s): %s", job_name, e)
 
 
+def _attach_file_handler(log_path: str) -> None:
+    """루트 로거에 FileHandler를 부착한다. 디렉토리가 없으면 생성한다."""
+    os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logging.getLogger().addHandler(fh)
+    logger.info("로그 파일: %s", log_path)
+
+
 def _migrate_legacy_checkpoint() -> None:
     """release_sync.json을 spotify_ban.json + 잡별 파일로 분리 이전한다."""
     legacy = os.path.join(_CHECKPOINT_DIR, "release_sync.json")
@@ -632,15 +645,7 @@ def main() -> None:
         else:
             _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             _log_path = os.path.join(os.path.dirname(__file__), "logs", f"release_init_{_ts}.log")
-        os.makedirs(os.path.dirname(os.path.abspath(_log_path)), exist_ok=True)
-        _fh = logging.FileHandler(_log_path, mode="a", encoding="utf-8")
-        _fh.setLevel(logging.DEBUG)
-        _fh.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
-        logging.getLogger().addHandler(_fh)
-        logger.info("로그 파일: %s", _log_path)
+        _attach_file_handler(_log_path)
         run_initial_collect(
             skip_artists=args.skip_artists,
             force_artists=args.force_artists,
@@ -666,17 +671,9 @@ def main() -> None:
         return
 
     if args.command == "collect-setlist":
-        from datetime import datetime as _dt
-        _ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         _log_path = os.path.join(os.path.dirname(__file__), "logs", f"setlist_{_ts}.log")
-        _fh = logging.FileHandler(_log_path, encoding="utf-8")
-        _fh.setLevel(logging.DEBUG)
-        _fh.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
-        logging.getLogger().addHandler(_fh)
-        logger.info("로그 파일: %s", _log_path)
+        _attach_file_handler(_log_path)
         run_setlist_collect()
         return
 
