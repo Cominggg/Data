@@ -318,6 +318,22 @@ def get_all_artists() -> list[dict]:
     return [{"artist_id": row[0], "name": row[1]} for row in rows]
 
 
+def get_artists_without_ko_alias() -> list[dict]:
+    """artist_alias에 locale='ko' 행이 없는 아티스트 목록 (artist_id, name)을 반환한다."""
+    with get_session() as session:
+        rows = session.execute(
+            text("""
+                SELECT a.id AS artist_id, a.name
+                FROM artist a
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM artist_alias aa
+                    WHERE aa.artist_id = a.id AND aa.locale = 'ko'
+                )
+            """)
+        ).fetchall()
+    return [{"artist_id": row[0], "name": row[1]} for row in rows]
+
+
 def save_aliases(aliases: list[dict]) -> None:
     """외부 소스에서 수집된 alias를 artist_alias 테이블에 저장한다. 중복 시 무시.
 

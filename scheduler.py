@@ -17,10 +17,10 @@ from db.repository import (
     get_active_concerts,
     get_all_aliases,
     get_all_artist_mbids,
-    get_all_artists,
     get_all_artists_with_spotify,
     get_artist_by_mbid,
     get_artists_without_image,
+    get_artists_without_ko_alias,
     get_artists_without_releases,
     get_concert_by_kopis_id,
     get_concert_with_artist,
@@ -266,9 +266,16 @@ def run_initial_collect(
 
 
 def run_wikipedia_collect() -> None:
-    """Wikipedia 한국어 alias 수집 (초기 1회 + 주 1회, 목요일)."""
+    """Wikipedia 한국어 alias 수집 (초기 1회 + 주 1회, 목요일).
+
+    locale='ko' alias가 이미 존재하는 아티스트는 건너뛴다.
+    """
     logger.info("=== Wikipedia 한국어 alias 수집 잡 시작 ===")
-    artists = get_all_artists()
+    artists = get_artists_without_ko_alias()
+    logger.info("한국어 alias 미수집 아티스트: %d건", len(artists))
+    if not artists:
+        logger.info("=== Wikipedia 한국어 alias 수집 잡 완료 (대상 없음) ===")
+        return
     aliases = wikipedia.collect_korean_aliases(artists)
     if aliases:
         save_aliases(aliases)
