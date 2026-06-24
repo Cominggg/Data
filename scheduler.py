@@ -148,9 +148,6 @@ def _migrate_legacy_checkpoint() -> None:
         logger.warning("레거시 체크포인트 마이그레이션 실패: %s", e)
 
 
-_migrate_legacy_checkpoint()
-
-
 def _sort_releases(releases: List[dict]) -> List[dict]:
     return sorted(releases, key=lambda r: _RELEASE_TYPE_ORDER.get(r.get("type", ""), 9))
 
@@ -431,6 +428,8 @@ def register_artist_by_mbid(mbid: str) -> bool:
     2) Spotify URL이 있으면 이미지·릴리즈 수집
     Last.fm 리스너 수 필터를 적용하지 않는다.
     성공 시 True, 수집 실패 시 False 반환.
+
+    관리자가 명시적으로 호출하는 단건 작업이므로 ban 상태와 무관하게 실행한다.
     """
     logger.info("어드민 아티스트 등록 시작: mbid=%s", mbid)
 
@@ -513,7 +512,10 @@ def collect_and_save_concert(kopis_id: str) -> bool:
 
 
 def collect_and_save_releases_for_artist(artist_id: int) -> bool:
-    """단건 아티스트의 릴리즈를 수집해 DB에 저장한다. 성공 시 True 반환."""
+    """단건 아티스트의 릴리즈를 수집해 DB에 저장한다. 성공 시 True 반환.
+
+    관리자가 명시적으로 호출하는 단건 작업이므로 ban 상태와 무관하게 실행한다.
+    """
     artists = get_matched_artists_with_spotify()
     target = next((a for a in artists if a["artist_id"] == artist_id), None)
     if target is None:
@@ -564,6 +566,7 @@ def _build_scheduler() -> BackgroundScheduler:
 
 
 def main() -> None:
+    _migrate_legacy_checkpoint()
     parser = argparse.ArgumentParser(description="Coming Data Pipeline")
     parser.add_argument(
         "command",
