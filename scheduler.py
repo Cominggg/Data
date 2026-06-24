@@ -585,12 +585,13 @@ def main() -> None:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["init", "recover", "collect-release", "collect-setlist"],
+        choices=["init", "recover", "collect-release", "collect-setlist", "run-job"],
         help=(
             "init: 초기 아티스트·릴리즈 수집 후 종료 / "
             "recover: 누락 이미지·릴리즈 재수집 / "
             "collect-release: 단건 아티스트 릴리즈 수집 / "
-            "collect-setlist: 공연완료 공연 셋리스트 수집"
+            "collect-setlist: 공연완료 공연 셋리스트 수집 / "
+            "run-job: 단일 잡 즉시 실행 (--job으로 잡 선택)"
         ),
     )
     parser.add_argument(
@@ -638,6 +639,11 @@ def main() -> None:
         type=int,
         help="단건 릴리즈 수집 대상 artist.id (collect-release 전용)",
     )
+    parser.add_argument(
+        "--job",
+        choices=["status-update", "release-update", "wikipedia", "artist-image", "setlist"],
+        help="즉시 실행할 잡 이름 (run-job 전용)",
+    )
     args = parser.parse_args()
 
     if args.command == "init":
@@ -682,6 +688,24 @@ def main() -> None:
         _log_path = os.path.join(os.path.dirname(__file__), "logs", f"setlist_{_ts}.log")
         _attach_file_handler(_log_path)
         run_setlist_collect()
+        return
+
+    if args.command == "run-job":
+        if not args.job:
+            parser.error("run-job 커맨드는 --job 이 필요합니다.")
+        _job_map = {
+            "status-update": run_status_update,
+            "release-update": run_release_update,
+            "wikipedia": run_wikipedia_collect,
+            "artist-image": run_artist_image_update,
+            "setlist": run_setlist_collect,
+        }
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _log_path = os.path.join(
+            os.path.dirname(__file__), "logs", f"run_job_{args.job}_{_ts}.log"
+        )
+        _attach_file_handler(_log_path)
+        _job_map[args.job]()
         return
 
     import uvicorn
