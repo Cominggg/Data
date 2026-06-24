@@ -658,6 +658,9 @@ def main() -> None:
         return
 
     if args.command == "recover":
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _log_path = os.path.join(os.path.dirname(__file__), "logs", f"recover_{_ts}.log")
+        _attach_file_handler(_log_path)
         run_recover(
             skip_releases=args.skip_releases,
             skip_artist_image=args.skip_artist_image,
@@ -667,6 +670,9 @@ def main() -> None:
     if args.command == "collect-release":
         if not args.artist_id:
             parser.error("collect-release 커맨드는 --artist-id 가 필요합니다.")
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _log_path = os.path.join(os.path.dirname(__file__), "logs", f"collect_release_{_ts}.log")
+        _attach_file_handler(_log_path)
         collect_and_save_releases_for_artist(args.artist_id)
         return
 
