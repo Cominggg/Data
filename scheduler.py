@@ -239,7 +239,7 @@ def run_initial_collect(
     else:
         # KOPIS 수집 + 매칭으로 내한 확정 아티스트를 먼저 파악한다.
         logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
-        run_status_update()
+        run_status_update(stdate="20200101")
 
     if skip_releases:
         logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
@@ -307,8 +307,12 @@ def run_wikipedia_collect() -> None:
 
 
 
-def run_status_update() -> None:
-    """공연 상태 갱신 + 신규 공연 저장·매칭 + is_coming 동기화 (매일)."""
+def run_status_update(stdate: Optional[str] = None) -> None:
+    """공연 상태 갱신 + 신규 공연 저장·매칭 + is_coming 동기화 (매일).
+
+    stdate 미전달 시 kopis.collect() 기본값(20250101)을 사용한다.
+    초기 수집 시에는 stdate="20200101"을 전달해 전체 기간을 탐색한다.
+    """
     logger.info("=== 공연 상태 갱신 잡 시작 ===")
 
     # ① 상태 갱신: DB의 진행 중 공연을 개별 API로 최신 상태 갱신
@@ -336,8 +340,8 @@ def run_status_update() -> None:
     if last_date:
         logger.info("증분 스캔 — afterdate=%s", last_date)
     else:
-        logger.info("초기 전체 스캔 (체크포인트 없음)")
-    concerts = kopis.collect(afterdate=last_date)
+        logger.info("초기 전체 스캔 (체크포인트 없음, stdate=%s)", stdate or "20250101")
+    concerts = kopis.collect(stdate=stdate, afterdate=last_date)
     existing_ids = get_existing_kopis_ids()
     aliases = get_all_aliases()
     new_concerts = [
