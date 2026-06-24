@@ -7,7 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from typing import List, Set
+from typing import List, Optional, Set
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 _RELEASE_TYPE_ORDER = {"Album": 0, "Single": 1}
 _CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 _BAN_PATH = os.path.join(_CHECKPOINT_DIR, "spotify_ban.json")
+_STATUS_UPDATE_CHECKPOINT = os.path.join(_CHECKPOINT_DIR, "status_update.json")
 _BAN_MARGIN_HOURS = 25  # Spotify 24h 밴 + 1h 마진
 
 
@@ -114,6 +115,29 @@ def _save_progress(job_name: str, completed_ids: Set[int]) -> None:
             json.dump(list(completed_ids), f)
     except Exception as e:
         logger.warning("진행 체크포인트 저장 실패 (%s): %s", job_name, e)
+
+
+def _load_last_collect_date() -> Optional[str]:
+    """status_update 체크포인트에서 마지막 성공 수집일(YYYYMMDD)을 로드한다. 없으면 None."""
+    if not os.path.exists(_STATUS_UPDATE_CHECKPOINT):
+        return None
+    try:
+        with open(_STATUS_UPDATE_CHECKPOINT, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("last_collect_date") or None
+    except Exception as e:
+        logger.warning("status_update 체크포인트 로드 실패 — 전체 스캔으로 대체: %s", e)
+        return None
+
+
+def _save_last_collect_date(date_str: str) -> None:
+    """status_update 체크포인트에 마지막 성공 수집일(YYYYMMDD)을 저장한다."""
+    os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
+    try:
+        with open(_STATUS_UPDATE_CHECKPOINT, "w", encoding="utf-8") as f:
+            json.dump({"last_collect_date": date_str}, f)
+    except Exception as e:
+        logger.warning("status_update 체크포인트 저장 실패: %s", e)
 
 
 def _clear_progress(job_name: str) -> None:
@@ -307,8 +331,13 @@ def run_status_update() -> None:
         if fetched:
             update_concert_status(fetched)
 
-    # ② 신규 발견: 2020-01-01부터 현재 기준 +365일까지 신규 공연 탐지·저장
-    concerts = kopis.collect()
+    # ② 신규 발견: 마지막 수집일 이후 등록·수정된 공연만 증분 탐지
+    last_date = _load_last_collect_date()
+    if last_date:
+        logger.info("증분 스캔 — afterdate=%s", last_date)
+    else:
+        logger.info("초기 전체 스캔 (체크포인트 없음)")
+    concerts = kopis.collect(afterdate=last_date)
     existing_ids = get_existing_kopis_ids()
     aliases = get_all_aliases()
     new_concerts = [
@@ -327,6 +356,7 @@ def run_status_update() -> None:
             save_concert_artist_candidates(all_matches)
 
     update_artist_is_coming()
+    _save_last_collect_date(datetime.now().strftime("%Y%m%d"))
     logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
 
