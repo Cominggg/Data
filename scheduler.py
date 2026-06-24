@@ -1,10 +1,12 @@
 import argparse
+import json
 import logging
 import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import List
+from datetime import datetime, timedelta
+from typing import List, Set
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -24,6 +26,7 @@ from db.repository import (
     get_existing_kopis_ids,
     get_existing_release_spotify_ids,
     get_matched_artists_with_spotify,
+    get_spotify_album_total,
     get_unmatched_concerts,
     save_aliases,
     save_artists,
@@ -35,6 +38,7 @@ from db.repository import (
     update_artist_image,
     update_artist_is_coming,
     update_concert_status,
+    update_spotify_album_total,
 )
 from matchers.artist_matcher import has_match, match_concert
 
@@ -46,6 +50,102 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _RELEASE_TYPE_ORDER = {"Album": 0, "Single": 1}
+_CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
+_BAN_PATH = os.path.join(_CHECKPOINT_DIR, "spotify_ban.json")
+_BAN_MARGIN_HOURS = 25  # Spotify 24h 밴 + 1h 마진
+
+
+def _progress_path(job_name: str) -> str:
+    return os.path.join(_CHECKPOINT_DIR, f"{job_name}.json")
+
+
+def _is_banned() -> bool:
+    """spotify_ban.json에 banned_until이 있고 현재 시각이 그 이전이면 True."""
+    if not os.path.exists(_BAN_PATH):
+        return False
+    try:
+        with open(_BAN_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        banned_until_str = data.get("banned_until")
+        if not banned_until_str:
+            return False
+        return datetime.now() < datetime.fromisoformat(banned_until_str)
+    except Exception:
+        return False
+
+
+def _save_ban() -> None:
+    """Spotify 429 발생 시 ban 해제 시각을 spotify_ban.json에 저장한다."""
+    os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
+    data = {
+        "banned_until": (datetime.now() + timedelta(hours=_BAN_MARGIN_HOURS)).isoformat(
+            timespec="seconds"
+        )
+    }
+    try:
+        with open(_BAN_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as e:
+        logger.warning("ban 파일 저장 실패: %s", e)
+
+
+def _load_progress(job_name: str) -> Set[int]:
+    """잡별 체크포인트에서 완료된 artist_id 집합을 로드한다. 없거나 오류 시 빈 집합 반환."""
+    path = _progress_path(job_name)
+    if not os.path.exists(path):
+        return set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return set(data)
+        return set()
+    except Exception as e:
+        logger.warning("진행 체크포인트 로드 실패 (%s) — 초기화: %s", job_name, e)
+        return set()
+
+
+def _save_progress(job_name: str, completed_ids: Set[int]) -> None:
+    """잡별 완료된 artist_id 집합을 체크포인트 파일에 저장한다."""
+    os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
+    try:
+        with open(_progress_path(job_name), "w", encoding="utf-8") as f:
+            json.dump(list(completed_ids), f)
+    except Exception as e:
+        logger.warning("진행 체크포인트 저장 실패 (%s): %s", job_name, e)
+
+
+def _clear_progress(job_name: str) -> None:
+    """정상 완료 후 잡별 체크포인트 파일을 삭제한다."""
+    path = _progress_path(job_name)
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception as e:
+            logger.warning("진행 체크포인트 삭제 실패 (%s): %s", job_name, e)
+
+
+def _migrate_legacy_checkpoint() -> None:
+    """release_sync.json을 spotify_ban.json + 잡별 파일로 분리 이전한다."""
+    legacy = os.path.join(_CHECKPOINT_DIR, "release_sync.json")
+    if not os.path.exists(legacy):
+        return
+    try:
+        with open(legacy, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            banned_until = data.get("banned_until")
+            if banned_until:
+                os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
+                with open(_BAN_PATH, "w", encoding="utf-8") as f:
+                    json.dump({"banned_until": banned_until}, f)
+            completed = data.get("completed_artist_ids", [])
+            if completed:
+                _save_progress("release_update", set(completed))
+        os.remove(legacy)
+        logger.info("레거시 체크포인트 마이그레이션 완료: release_sync.json → 분리 저장")
+    except Exception as e:
+        logger.warning("레거시 체크포인트 마이그레이션 실패: %s", e)
 
 
 def _sort_releases(releases: List[dict]) -> List[dict]:
@@ -105,21 +205,38 @@ def run_initial_collect(
 
     if skip_releases:
         logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
+    elif _is_banned():
+        logger.warning("Spotify 429 밴 유효 — 릴리즈 수집 건너뜀")
     else:
         matched_artists = get_matched_artists_with_spotify()
         logger.info("내한 공연 매칭 아티스트 %d건 릴리즈 수집 시작", len(matched_artists))
+        completed_ids = _load_progress("initial_collect")
         for a in matched_artists:
+            artist_id = a["artist_id"]
+            if artist_id in completed_ids:
+                logger.info("체크포인트 — 완료 아티스트 건너뜀: artist_id=%d", artist_id)
+                continue
             try:
                 spotify_id = _extract_spotify_id(a["spotify_url"])
-                existing_ids = get_existing_release_spotify_ids(a["artist_id"])
-                raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
-                releases = _sort_releases(raw)
-                save_releases(a["artist_id"], releases)
+                cached_total = get_spotify_album_total(artist_id)
+                existing_ids = get_existing_release_spotify_ids(artist_id)
+                raw, spotify_total = release.collect_releases(
+                    spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
+                )
+                if spotify_total > 0 and spotify_total != cached_total:
+                    update_spotify_album_total(artist_id, spotify_total)
+                if raw:
+                    save_releases(artist_id, _sort_releases(raw))
+                completed_ids.add(artist_id)
             except SpotifyRateLimitError:
-                logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])
+                logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%d)", artist_id)
+                _save_ban()
+                _save_progress("initial_collect", completed_ids)
                 break
             except Exception as e:
-                logger.error("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
+                logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
+        else:
+            _clear_progress("initial_collect")
 
     if skip_artist_image:
         logger.info("--skip-artist-image 플래그 감지 — 아티스트 이미지 수집 건너뜀")
@@ -196,6 +313,9 @@ def run_status_update() -> None:
 def run_artist_image_update() -> None:
     """image_url 미수집 아티스트의 프로필 이미지를 수집한다 (주 1회, 목요일)."""
     logger.info("=== 아티스트 이미지 수집 잡 시작 ===")
+    if _is_banned():
+        logger.warning("Spotify 429 밴 유효 — 이미지 수집 건너뜀")
+        return
     artists = get_artists_without_image()
     logger.info("이미지 미수집 아티스트: %d건", len(artists))
     for a in artists:
@@ -214,40 +334,76 @@ def run_artist_image_update() -> None:
 
 
 def run_release_update() -> None:
-    """릴리즈 갱신 (주 1회, 화요일). 내한 공연 매칭 아티스트만 대상."""
+    """릴리즈 갱신 (매일). 내한 공연 매칭 아티스트만 대상."""
     logger.info("=== 릴리즈 갱신 잡 시작 ===")
+    if _is_banned():
+        logger.warning("Spotify 429 밴 유효 — 릴리즈 갱신 건너뜀")
+        return
+    completed_ids = _load_progress("release_update")
     for a in get_matched_artists_with_spotify():
+        artist_id = a["artist_id"]
+        if artist_id in completed_ids:
+            logger.info("체크포인트 — 완료 아티스트 건너뜀: artist_id=%d", artist_id)
+            continue
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
-            existing_ids = get_existing_release_spotify_ids(a["artist_id"])
-            raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
-            releases = _sort_releases(raw)
-            save_releases(a["artist_id"], releases)
+            cached_total = get_spotify_album_total(artist_id)
+            existing_ids = get_existing_release_spotify_ids(artist_id)
+            raw, spotify_total = release.collect_releases(
+                spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
+            )
+            if spotify_total > 0 and spotify_total != cached_total:
+                update_spotify_album_total(artist_id, spotify_total)
+            if raw:
+                save_releases(artist_id, _sort_releases(raw))
+            completed_ids.add(artist_id)
         except SpotifyRateLimitError:
-            logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%s)", a["artist_id"])
+            logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%d)", artist_id)
+            _save_ban()
+            _save_progress("release_update", completed_ids)
             break
         except Exception as e:
-            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
+            logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
+    else:
+        _clear_progress("release_update")
     logger.info("=== 릴리즈 갱신 잡 완료 ===")
 
 
 def run_missing_release_update() -> None:
     """릴리즈가 없는 아티스트만 대상으로 릴리즈를 수집한다 (복구 전용)."""
     logger.info("=== 누락 릴리즈 수집 잡 시작 ===")
+    if _is_banned():
+        logger.warning("Spotify 429 밴 유효 — 누락 릴리즈 수집 건너뜀")
+        return
     artists = get_artists_without_releases()
     logger.info("릴리즈 미수집 아티스트: %d건", len(artists))
+    completed_ids = _load_progress("missing_release")
     for a in artists:
+        artist_id = a["artist_id"]
+        if artist_id in completed_ids:
+            logger.info("체크포인트 — 완료 아티스트 건너뜀: artist_id=%d", artist_id)
+            continue
         try:
             spotify_id = _extract_spotify_id(a["spotify_url"])
-            existing_ids = get_existing_release_spotify_ids(a["artist_id"])
-            raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
-            releases = _sort_releases(raw)
-            save_releases(a["artist_id"], releases)
+            cached_total = get_spotify_album_total(artist_id)
+            existing_ids = get_existing_release_spotify_ids(artist_id)
+            raw, spotify_total = release.collect_releases(
+                spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
+            )
+            if spotify_total > 0 and spotify_total != cached_total:
+                update_spotify_album_total(artist_id, spotify_total)
+            if raw:
+                save_releases(artist_id, _sort_releases(raw))
+            completed_ids.add(artist_id)
         except SpotifyRateLimitError:
-            logger.error("Spotify 429 — 누락 릴리즈 수집 중단 (artist_id=%s)", a["artist_id"])
+            logger.error("Spotify 429 — 누락 릴리즈 수집 중단 (artist_id=%d)", artist_id)
+            _save_ban()
+            _save_progress("missing_release", completed_ids)
             break
         except Exception as e:
-            logger.error("릴리즈 수집 실패 — artist_id=%s: %s", a["artist_id"], e)
+            logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
+    else:
+        _clear_progress("missing_release")
     logger.info("=== 누락 릴리즈 수집 잡 완료 ===")
 
 
@@ -272,6 +428,8 @@ def register_artist_by_mbid(mbid: str) -> bool:
     2) Spotify URL이 있으면 이미지·릴리즈 수집
     Last.fm 리스너 수 필터를 적용하지 않는다.
     성공 시 True, 수집 실패 시 False 반환.
+
+    관리자가 명시적으로 호출하는 단건 작업이므로 ban 상태와 무관하게 실행한다.
     """
     logger.info("어드민 아티스트 등록 시작: mbid=%s", mbid)
 
@@ -302,7 +460,8 @@ def register_artist_by_mbid(mbid: str) -> bool:
 
         try:
             spotify_id = _extract_spotify_id(spotify_url)
-            releases = _sort_releases(release.collect_releases(spotify_id))
+            raw, _ = release.collect_releases(spotify_id)
+            releases = _sort_releases(raw)
             save_releases(artist_id, releases)
         except SpotifyRateLimitError:
             logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", artist_id)
@@ -353,7 +512,10 @@ def collect_and_save_concert(kopis_id: str) -> bool:
 
 
 def collect_and_save_releases_for_artist(artist_id: int) -> bool:
-    """단건 아티스트의 릴리즈를 수집해 DB에 저장한다. 성공 시 True 반환."""
+    """단건 아티스트의 릴리즈를 수집해 DB에 저장한다. 성공 시 True 반환.
+
+    관리자가 명시적으로 호출하는 단건 작업이므로 ban 상태와 무관하게 실행한다.
+    """
     artists = get_matched_artists_with_spotify()
     target = next((a for a in artists if a["artist_id"] == artist_id), None)
     if target is None:
@@ -365,7 +527,7 @@ def collect_and_save_releases_for_artist(artist_id: int) -> bool:
     try:
         spotify_id = _extract_spotify_id(target["spotify_url"])
         existing_ids = get_existing_release_spotify_ids(artist_id)
-        raw = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
+        raw, _ = release.collect_releases(spotify_id, skip_spotify_ids=existing_ids)
         releases = _sort_releases(raw)
         save_releases(artist_id, releases)
     except SpotifyRateLimitError:
@@ -396,7 +558,7 @@ def collect_and_save_setlist(concert_id: int) -> bool:
 def _build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
     scheduler.add_job(run_status_update, "cron", hour=4)
-    scheduler.add_job(run_release_update, "cron", day_of_week="tue", hour=5)
+    scheduler.add_job(run_release_update, "cron", hour=2)
     scheduler.add_job(run_wikipedia_collect, "cron", day_of_week="thu", hour=3)
     scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=5)
     scheduler.add_job(run_setlist_collect, "cron", hour=6)
@@ -404,6 +566,7 @@ def _build_scheduler() -> BackgroundScheduler:
 
 
 def main() -> None:
+    _migrate_legacy_checkpoint()
     parser = argparse.ArgumentParser(description="Coming Data Pipeline")
     parser.add_argument(
         "command",
@@ -452,6 +615,11 @@ def main() -> None:
         help="setlist.fm 수집을 건너뜀 (init 전용)",
     )
     parser.add_argument(
+        "--log-file",
+        type=str,
+        help="기존 로그 파일에 이어쓰기 (init 전용, 미지정 시 타임스탬프 파일 신규 생성)",
+    )
+    parser.add_argument(
         "--artist-id",
         type=int,
         help="단건 릴리즈 수집 대상 artist.id (collect-release 전용)",
@@ -459,6 +627,20 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "init":
+        if args.log_file:
+            _log_path = args.log_file
+        else:
+            _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            _log_path = os.path.join(os.path.dirname(__file__), "logs", f"release_init_{_ts}.log")
+        os.makedirs(os.path.dirname(os.path.abspath(_log_path)), exist_ok=True)
+        _fh = logging.FileHandler(_log_path, mode="a", encoding="utf-8")
+        _fh.setLevel(logging.DEBUG)
+        _fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logging.getLogger().addHandler(_fh)
+        logger.info("로그 파일: %s", _log_path)
         run_initial_collect(
             skip_artists=args.skip_artists,
             force_artists=args.force_artists,

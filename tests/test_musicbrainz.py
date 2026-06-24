@@ -35,6 +35,16 @@ class TestParseAliases:
     def test_returns_empty_for_empty_input(self):
         assert _parse_aliases([]) == []
 
+    def test_skips_search_hint_type(self):
+        """type == 'Search hint'인 alias는 locale 조건에 관계없이 제거되어야 한다."""
+        raw = [
+            {"name": "Ariana Grande", "locale": "en", "type": "Search hint"},
+            {"name": "AG", "locale": "en", "type": "Artist name"},
+        ]
+        result = _parse_aliases(raw)
+        assert len(result) == 1
+        assert result[0]["name"] == "AG"
+
 
 class TestParseUrlRels:
     def test_allows_instagram(self):

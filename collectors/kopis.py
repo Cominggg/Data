@@ -21,7 +21,6 @@ if not _API_KEY:
 
 _DEFAULT_PARAMS = {
     "service": _API_KEY,
-    "visit": "Y",
     "genrenm": "GGGA",
     "rows": 100,
 }

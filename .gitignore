@@ -208,3 +208,7 @@ __marimo__/
 
 # Claude Code
 .claude/scheduled_tasks.lock
+
+# Runtime state
+checkpoints/
+logs/

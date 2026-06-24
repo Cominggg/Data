@@ -78,6 +78,8 @@ def _parse_aliases(raw_aliases: list) -> list[dict]:
     locale_map = {"ko": "ko", "en": "en", "ja": "ja"}
     result = []
     for alias in raw_aliases:
+        if alias.get("type") == "Search hint":
+            continue
         locale = alias.get("locale") or ""
         lang = locale.split("-")[0] if locale else ""
         if lang in locale_map:
