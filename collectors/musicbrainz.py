@@ -10,8 +10,6 @@ from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 
-from collectors.lastfm import get_monthly_listeners
-
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -27,7 +25,6 @@ _HEADERS = {
 _RATE_LIMIT_SLEEP = 1.1
 _PAGE_LIMIT = 100
 _MAX_ARTISTS = 10_000
-_MIN_LISTENERS = int(os.environ.get("LASTFM_MIN_LISTENERS", "1000"))
 _DOMAIN_TO_TYPE = {
     "instagram.com": "Instagram",
     "twitter.com": "Twitter",
@@ -215,21 +212,6 @@ def collect_artists(skip_mbids: Optional[set] = None) -> list[dict]:
                         time.sleep(5 * attempt)
 
             if detail is None:
-                continue
-
-            lastfm_names = [
-                a.get("name") for a in detail.get("aliases", [])
-                if a.get("name") and not (a.get("locale") or "").startswith("ko")
-            ]
-            listeners = get_monthly_listeners(mbid, names=lastfm_names or None)
-            if listeners is None:
-                logger.info("리스너 수 조회 실패 — 건너뜀: %s (%s)", item.get("name"), mbid)
-                continue
-            if listeners < _MIN_LISTENERS:
-                logger.info(
-                    "리스너 수 미달 — 건너뜀: %s (%s), listeners=%d",
-                    item.get("name"), mbid, listeners,
-                )
                 continue
 
             parsed = _parse_artist(detail)
