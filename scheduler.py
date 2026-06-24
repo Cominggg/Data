@@ -612,6 +612,11 @@ def main() -> None:
         help="setlist.fm 수집을 건너뜀 (init 전용)",
     )
     parser.add_argument(
+        "--log-file",
+        type=str,
+        help="기존 로그 파일에 이어쓰기 (init 전용, 미지정 시 타임스탬프 파일 신규 생성)",
+    )
+    parser.add_argument(
         "--artist-id",
         type=int,
         help="단건 릴리즈 수집 대상 artist.id (collect-release 전용)",
@@ -619,6 +624,20 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "init":
+        if args.log_file:
+            _log_path = args.log_file
+        else:
+            _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            _log_path = os.path.join(os.path.dirname(__file__), "logs", f"release_init_{_ts}.log")
+        os.makedirs(os.path.dirname(os.path.abspath(_log_path)), exist_ok=True)
+        _fh = logging.FileHandler(_log_path, mode="a", encoding="utf-8")
+        _fh.setLevel(logging.DEBUG)
+        _fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logging.getLogger().addHandler(_fh)
+        logger.info("로그 파일: %s", _log_path)
         run_initial_collect(
             skip_artists=args.skip_artists,
             force_artists=args.force_artists,
