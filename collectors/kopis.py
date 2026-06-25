@@ -221,13 +221,19 @@ def _fetch_and_merge(concert: dict) -> Optional[dict]:
     return concert
 
 
-def collect(stdate: Optional[str] = None, eddate: Optional[str] = None) -> list[dict]:
+def collect(
+    stdate: Optional[str] = None,
+    eddate: Optional[str] = None,
+    afterdate: Optional[str] = None,
+) -> list[dict]:
     """KOPIS에서 내한공연 목록을 전 페이지 순회해 반환한다.
 
     stdate 미전달 시 _DEFAULT_STDATE(2025-01-01)를 시작일로 사용한다.
     eddate 미전달 시 오늘 기준 _DEFAULT_LOOKAHEAD_DAYS일 후를 종료일로 사용한다.
+    afterdate 전달 시 해당 일자 이후 등록·수정된 공연만 반환한다 (YYYYMMDD).
+    afterdate는 stdate/eddate와 AND 조건으로 동작한다 (KOPIS API 명세).
     """
-    logger.info("KOPIS 공연 수집 시작")
+    logger.info("KOPIS 공연 수집 시작%s", f" (afterdate={afterdate})" if afterdate else "")
     results = []
     cpage = 1
     today = datetime.date.today()
@@ -241,6 +247,8 @@ def collect(stdate: Optional[str] = None, eddate: Optional[str] = None) -> list[
             **_DEFAULT_PARAMS, "cpage": cpage,
             "stdate": resolved_stdate, "eddate": resolved_eddate,
         }
+        if afterdate:
+            params["afterdate"] = afterdate
 
         root = None
         for attempt in range(1, 4):

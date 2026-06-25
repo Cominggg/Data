@@ -1,12 +1,13 @@
 import argparse
 import json
 import logging
+import logging.handlers
 import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from typing import List, Set
+from typing import List, Optional, Set
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -16,10 +17,10 @@ from db.repository import (
     get_active_concerts,
     get_all_aliases,
     get_all_artist_mbids,
-    get_all_artists,
     get_all_artists_with_spotify,
     get_artist_by_mbid,
     get_artists_without_image,
+    get_artists_without_ko_alias,
     get_artists_without_releases,
     get_concert_by_kopis_id,
     get_concert_with_artist,
@@ -52,6 +53,7 @@ logger = logging.getLogger(__name__)
 _RELEASE_TYPE_ORDER = {"Album": 0, "Single": 1}
 _CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 _BAN_PATH = os.path.join(_CHECKPOINT_DIR, "spotify_ban.json")
+_STATUS_UPDATE_CHECKPOINT = os.path.join(_CHECKPOINT_DIR, "status_update.json")
 _BAN_MARGIN_HOURS = 25  # Spotify 24h 밴 + 1h 마진
 
 
@@ -115,6 +117,29 @@ def _save_progress(job_name: str, completed_ids: Set[int]) -> None:
         logger.warning("진행 체크포인트 저장 실패 (%s): %s", job_name, e)
 
 
+def _load_last_collect_date() -> Optional[str]:
+    """status_update 체크포인트에서 마지막 성공 수집일(YYYYMMDD)을 로드한다. 없으면 None."""
+    if not os.path.exists(_STATUS_UPDATE_CHECKPOINT):
+        return None
+    try:
+        with open(_STATUS_UPDATE_CHECKPOINT, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("last_collect_date") or None
+    except Exception as e:
+        logger.warning("status_update 체크포인트 로드 실패 — 전체 스캔으로 대체: %s", e)
+        return None
+
+
+def _save_last_collect_date(date_str: str) -> None:
+    """status_update 체크포인트에 마지막 성공 수집일(YYYYMMDD)을 저장한다."""
+    os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
+    try:
+        with open(_STATUS_UPDATE_CHECKPOINT, "w", encoding="utf-8") as f:
+            json.dump({"last_collect_date": date_str}, f)
+    except Exception as e:
+        logger.warning("status_update 체크포인트 저장 실패: %s", e)
+
+
 def _clear_progress(job_name: str) -> None:
     """정상 완료 후 잡별 체크포인트 파일을 삭제한다."""
     path = _progress_path(job_name)
@@ -123,6 +148,28 @@ def _clear_progress(job_name: str) -> None:
             os.remove(path)
         except Exception as e:
             logger.warning("진행 체크포인트 삭제 실패 (%s): %s", job_name, e)
+
+
+def _attach_file_handler(log_path: str, rotating: bool = False) -> None:
+    """루트 로거에 FileHandler를 부착한다. 디렉토리가 없으면 생성한다.
+
+    rotating=True이면 TimedRotatingFileHandler(자정 교체, 30일 보관)를 사용한다.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    if rotating:
+        fh = logging.handlers.TimedRotatingFileHandler(
+            log_path, when="midnight", backupCount=30, encoding="utf-8"
+        )
+    else:
+        fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
+    logging.getLogger().addHandler(fh)
+    logger.info("로그 파일: %s", log_path)
 
 
 def _migrate_legacy_checkpoint() -> None:
@@ -201,7 +248,7 @@ def run_initial_collect(
     else:
         # KOPIS 수집 + 매칭으로 내한 확정 아티스트를 먼저 파악한다.
         logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
-        run_status_update()
+        run_status_update(stdate="20200101")
 
     if skip_releases:
         logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
@@ -252,9 +299,16 @@ def run_initial_collect(
 
 
 def run_wikipedia_collect() -> None:
-    """Wikipedia 한국어 alias 수집 (초기 1회 + 주 1회, 목요일)."""
+    """Wikipedia 한국어 alias 수집 (초기 1회 + 주 1회, 목요일).
+
+    locale='ko' alias가 이미 존재하는 아티스트는 건너뛴다.
+    """
     logger.info("=== Wikipedia 한국어 alias 수집 잡 시작 ===")
-    artists = get_all_artists()
+    artists = get_artists_without_ko_alias()
+    logger.info("한국어 alias 미수집 아티스트: %d건", len(artists))
+    if not artists:
+        logger.info("=== Wikipedia 한국어 alias 수집 잡 완료 (대상 없음) ===")
+        return
     aliases = wikipedia.collect_korean_aliases(artists)
     if aliases:
         save_aliases(aliases)
@@ -262,8 +316,12 @@ def run_wikipedia_collect() -> None:
 
 
 
-def run_status_update() -> None:
-    """공연 상태 갱신 + 신규 공연 저장·매칭 + is_coming 동기화 (매일)."""
+def run_status_update(stdate: Optional[str] = None) -> None:
+    """공연 상태 갱신 + 신규 공연 저장·매칭 + is_coming 동기화 (매일).
+
+    stdate 미전달 시 kopis.collect() 기본값(20250101)을 사용한다.
+    초기 수집 시에는 stdate="20200101"을 전달해 전체 기간을 탐색한다.
+    """
     logger.info("=== 공연 상태 갱신 잡 시작 ===")
 
     # ① 상태 갱신: DB의 진행 중 공연을 개별 API로 최신 상태 갱신
@@ -286,8 +344,13 @@ def run_status_update() -> None:
         if fetched:
             update_concert_status(fetched)
 
-    # ② 신규 발견: 2020-01-01부터 현재 기준 +365일까지 신규 공연 탐지·저장
-    concerts = kopis.collect()
+    # ② 신규 발견: 마지막 수집일 이후 등록·수정된 공연만 증분 탐지
+    last_date = _load_last_collect_date()
+    if last_date:
+        logger.info("증분 스캔 — afterdate=%s", last_date)
+    else:
+        logger.info("초기 전체 스캔 (체크포인트 없음, stdate=%s)", stdate or "20250101")
+    concerts = kopis.collect(stdate=stdate, afterdate=last_date)
     existing_ids = get_existing_kopis_ids()
     aliases = get_all_aliases()
     new_concerts = [
@@ -306,6 +369,7 @@ def run_status_update() -> None:
             save_concert_artist_candidates(all_matches)
 
     update_artist_is_coming()
+    _save_last_collect_date(datetime.now().strftime("%Y%m%d"))
     logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
 
@@ -571,12 +635,13 @@ def main() -> None:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["init", "recover", "collect-release", "collect-setlist"],
+        choices=["init", "recover", "collect-release", "collect-setlist", "run-job"],
         help=(
             "init: 초기 아티스트·릴리즈 수집 후 종료 / "
             "recover: 누락 이미지·릴리즈 재수집 / "
             "collect-release: 단건 아티스트 릴리즈 수집 / "
-            "collect-setlist: 공연완료 공연 셋리스트 수집"
+            "collect-setlist: 공연완료 공연 셋리스트 수집 / "
+            "run-job: 단일 잡 즉시 실행 (--job으로 잡 선택)"
         ),
     )
     parser.add_argument(
@@ -624,6 +689,11 @@ def main() -> None:
         type=int,
         help="단건 릴리즈 수집 대상 artist.id (collect-release 전용)",
     )
+    parser.add_argument(
+        "--job",
+        choices=["status-update", "release-update", "wikipedia", "artist-image", "setlist"],
+        help="즉시 실행할 잡 이름 (run-job 전용)",
+    )
     args = parser.parse_args()
 
     if args.command == "init":
@@ -632,15 +702,7 @@ def main() -> None:
         else:
             _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             _log_path = os.path.join(os.path.dirname(__file__), "logs", f"release_init_{_ts}.log")
-        os.makedirs(os.path.dirname(os.path.abspath(_log_path)), exist_ok=True)
-        _fh = logging.FileHandler(_log_path, mode="a", encoding="utf-8")
-        _fh.setLevel(logging.DEBUG)
-        _fh.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
-        logging.getLogger().addHandler(_fh)
-        logger.info("로그 파일: %s", _log_path)
+        _attach_file_handler(_log_path)
         run_initial_collect(
             skip_artists=args.skip_artists,
             force_artists=args.force_artists,
@@ -653,6 +715,9 @@ def main() -> None:
         return
 
     if args.command == "recover":
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _log_path = os.path.join(os.path.dirname(__file__), "logs", f"recover_{_ts}.log")
+        _attach_file_handler(_log_path)
         run_recover(
             skip_releases=args.skip_releases,
             skip_artist_image=args.skip_artist_image,
@@ -662,25 +727,42 @@ def main() -> None:
     if args.command == "collect-release":
         if not args.artist_id:
             parser.error("collect-release 커맨드는 --artist-id 가 필요합니다.")
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _log_path = os.path.join(os.path.dirname(__file__), "logs", f"collect_release_{_ts}.log")
+        _attach_file_handler(_log_path)
         collect_and_save_releases_for_artist(args.artist_id)
         return
 
     if args.command == "collect-setlist":
-        from datetime import datetime as _dt
-        _ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         _log_path = os.path.join(os.path.dirname(__file__), "logs", f"setlist_{_ts}.log")
-        _fh = logging.FileHandler(_log_path, encoding="utf-8")
-        _fh.setLevel(logging.DEBUG)
-        _fh.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
-        logging.getLogger().addHandler(_fh)
-        logger.info("로그 파일: %s", _log_path)
+        _attach_file_handler(_log_path)
         run_setlist_collect()
         return
 
+    if args.command == "run-job":
+        if not args.job:
+            parser.error("run-job 커맨드는 --job 이 필요합니다.")
+        _job_map = {
+            "status-update": run_status_update,
+            "release-update": run_release_update,
+            "wikipedia": run_wikipedia_collect,
+            "artist-image": run_artist_image_update,
+            "setlist": run_setlist_collect,
+        }
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _log_path = os.path.join(
+            os.path.dirname(__file__), "logs", f"run_job_{args.job}_{_ts}.log"
+        )
+        _attach_file_handler(_log_path)
+        _job_map[args.job]()
+        return
+
     import uvicorn
+
+    _daemon_log = os.path.join(os.path.dirname(__file__), "logs", "scheduler.log")
+    _attach_file_handler(_daemon_log, rotating=True)
+    logger.info("데몬 로그 파일: %s", _daemon_log)
 
     api_host = os.environ.get("API_HOST", "0.0.0.0")
     api_port = int(os.environ.get("API_PORT", "8000"))
