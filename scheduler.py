@@ -150,15 +150,24 @@ def _clear_progress(job_name: str) -> None:
             logger.warning("진행 체크포인트 삭제 실패 (%s): %s", job_name, e)
 
 
-def _attach_file_handler(log_path: str) -> None:
-    """루트 로거에 FileHandler를 부착한다. 디렉토리가 없으면 생성한다."""
+def _attach_file_handler(log_path: str, rotating: bool = False) -> None:
+    """루트 로거에 FileHandler를 부착한다. 디렉토리가 없으면 생성한다.
+
+    rotating=True이면 TimedRotatingFileHandler(자정 교체, 30일 보관)를 사용한다.
+    """
     os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
-    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter(
+    fmt = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-    ))
+    )
+    if rotating:
+        fh = logging.handlers.TimedRotatingFileHandler(
+            log_path, when="midnight", backupCount=30, encoding="utf-8"
+        )
+    else:
+        fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
     logging.getLogger().addHandler(fh)
     logger.info("로그 파일: %s", log_path)
 
@@ -752,16 +761,7 @@ def main() -> None:
     import uvicorn
 
     _daemon_log = os.path.join(os.path.dirname(__file__), "logs", "scheduler.log")
-    os.makedirs(os.path.dirname(os.path.abspath(_daemon_log)), exist_ok=True)
-    _rfh = logging.handlers.TimedRotatingFileHandler(
-        _daemon_log, when="midnight", backupCount=30, encoding="utf-8"
-    )
-    _rfh.setLevel(logging.DEBUG)
-    _rfh.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    ))
-    logging.getLogger().addHandler(_rfh)
+    _attach_file_handler(_daemon_log, rotating=True)
     logger.info("데몬 로그 파일: %s", _daemon_log)
 
     api_host = os.environ.get("API_HOST", "0.0.0.0")
