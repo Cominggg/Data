@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from db.repository import (
     get_active_concerts,
@@ -67,7 +67,16 @@ class TestSaveArtists:
         """아티스트 정보가 artist 테이블에 INSERT되어야 한다."""
         mock_session = self._make_session_mock()
         self._run(
-            [{"mbid": "mbid-1", "name": "Artist A", "sort_name": "A, Artist", "debut_date": "2010-01-01", "aliases": [], "url_rels": []}],
+            [
+                {
+                    "mbid": "mbid-1",
+                    "name": "Artist A",
+                    "sort_name": "A, Artist",
+                    "debut_date": "2010-01-01",
+                    "aliases": [],
+                    "url_rels": [],
+                }
+            ],
             mock_session,
         )
 
@@ -78,7 +87,16 @@ class TestSaveArtists:
         """중복 mbid 시 ON CONFLICT DO NOTHING이 포함되어야 한다."""
         mock_session = self._make_session_mock()
         self._run(
-            [{"mbid": "mbid-1", "name": "Artist A", "sort_name": "A, Artist", "debut_date": None, "aliases": [], "url_rels": []}],
+            [
+                {
+                    "mbid": "mbid-1",
+                    "name": "Artist A",
+                    "sort_name": "A, Artist",
+                    "debut_date": None,
+                    "aliases": [],
+                    "url_rels": [],
+                }
+            ],
             mock_session,
         )
 
@@ -105,9 +123,11 @@ class TestSaveArtists:
             mock_session,
         )
 
-        sqls = [str(call.args[0]) for call in mock_session.execute.call_args_list]
+        sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list]
         assert any("INSERT INTO artist_alias" in s for s in sqls)
-        alias_calls = [c for c in mock_session.execute.call_args_list if "artist_alias" in str(c.args[0])]
+        alias_calls = [
+            c for c in mock_session.execute.call_args_list if "artist_alias" in str(c.args[0])
+        ]
         assert len(alias_calls) == 2
 
     def test_inserts_url_rels(self):
@@ -130,7 +150,9 @@ class TestSaveArtists:
             mock_session,
         )
 
-        url_calls = [c for c in mock_session.execute.call_args_list if "artist_url" in str(c.args[0])]
+        url_calls = [
+            c for c in mock_session.execute.call_args_list if "artist_url" in str(c.args[0])
+        ]
         assert len(url_calls) == 2
 
     def test_falls_back_to_select_when_returning_is_none(self):
@@ -151,7 +173,9 @@ class TestSaveArtists:
             mock_session,
         )
 
-        alias_calls = [c for c in mock_session.execute.call_args_list if "artist_alias" in str(c.args[0])]
+        alias_calls = [
+            c for c in mock_session.execute.call_args_list if "artist_alias" in str(c.args[0])
+        ]
         assert len(alias_calls) == 1
 
     def test_skips_artist_when_id_not_found(self):
@@ -159,11 +183,20 @@ class TestSaveArtists:
         mock_session = MagicMock()
         mock_session.execute.return_value.fetchone.return_value = None
         self._run(
-            [{"mbid": "mbid-x", "name": "Ghost", "sort_name": "Ghost", "debut_date": None, "aliases": [{"name": "고스트", "locale": "ko"}], "url_rels": []}],
+            [
+                {
+                    "mbid": "mbid-x",
+                    "name": "Ghost",
+                    "sort_name": "Ghost",
+                    "debut_date": None,
+                    "aliases": [{"name": "고스트", "locale": "ko"}],
+                    "url_rels": [],
+                }
+            ],
             mock_session,
         )
 
-        sqls = [str(call.args[0]) for call in mock_session.execute.call_args_list]
+        sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list]
         assert not any("artist_alias" in s for s in sqls)
 
     def test_handles_empty_list(self):
@@ -176,12 +209,21 @@ class TestSaveArtists:
         """복수 아티스트가 모두 INSERT되어야 한다."""
         mock_session = self._make_session_mock()
         artists = [
-            {"mbid": f"mbid-{i}", "name": f"Artist {i}", "sort_name": f"{i}", "debut_date": None, "aliases": [], "url_rels": []}
+            {
+                "mbid": f"mbid-{i}",
+                "name": f"Artist {i}",
+                "sort_name": f"{i}",
+                "debut_date": None,
+                "aliases": [],
+                "url_rels": [],
+            }
             for i in range(3)
         ]
         self._run(artists, mock_session)
 
-        artist_insert_calls = [c for c in mock_session.execute.call_args_list if "INSERT INTO artist" in str(c.args[0])]
+        artist_insert_calls = [
+            c for c in mock_session.execute.call_args_list if "INSERT INTO artist" in str(c.args[0])
+        ]
         assert len(artist_insert_calls) == 3
 
 

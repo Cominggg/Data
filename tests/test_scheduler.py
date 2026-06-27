@@ -6,7 +6,6 @@ from unittest.mock import patch
 import pytest
 
 from scheduler import (
-    _BAN_PATH,
     _build_scheduler,
     _clear_progress,
     _is_banned,
@@ -701,8 +700,6 @@ class TestJobIsolation:
 
     def test_missing_release_progress_does_not_skip_release_update(self, tmp_path, monkeypatch):
         """missing_release 잡이 저장한 completed_ids를 release_update 잡이 읽지 않아야 한다."""
-        from collectors.spotify_client import SpotifyRateLimitError
-
         monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
         monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
 
@@ -724,8 +721,6 @@ class TestJobIsolation:
 
     def test_release_update_progress_does_not_skip_missing_release(self, tmp_path, monkeypatch):
         """release_update 잡이 저장한 completed_ids를 missing_release 잡이 읽지 않아야 한다."""
-        from collectors.spotify_client import SpotifyRateLimitError
-
         monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
         monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
 

@@ -156,7 +156,11 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> None:
     for concert in concerts:
         try:
             with get_session() as session:
-                status = _KOPIS_STATUS_MAP.get(concert.get("prfstate"), "PENDING") if use_prfstate else "PENDING"
+                status = (
+                    _KOPIS_STATUS_MAP.get(concert.get("prfstate"), "PENDING")
+                    if use_prfstate
+                    else "PENDING"
+                )
                 new_row = session.execute(
                     text("""
                         INSERT INTO concert
