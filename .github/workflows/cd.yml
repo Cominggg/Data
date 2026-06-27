@@ -44,21 +44,21 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            set -e
             mkdir -p ~/compose
-            cat > ~/compose/.env <<EOF
-            DB_HOST=${{ secrets.DB_HOST }}
-            DB_PORT=${{ secrets.DB_PORT }}
-            DB_NAME=${{ secrets.DB_NAME }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            KOPIS_API_KEY=${{ secrets.KOPIS_API_KEY }}
-            MUSICBRAINZ_USER_AGENT=${{ secrets.MUSICBRAINZ_USER_AGENT }}
-            SETLISTFM_API_KEY=${{ secrets.SETLISTFM_API_KEY }}
-            SPOTIFY_CLIENT_ID=${{ secrets.SPOTIFY_CLIENT_ID }}
-            SPOTIFY_CLIENT_SECRET=${{ secrets.SPOTIFY_CLIENT_SECRET }}
-            INTERNAL_SECRET=${{ secrets.INTERNAL_SECRET }}
-            EOF
-
+            {
+              echo "DB_HOST=${{ secrets.DB_HOST }}"
+              echo "DB_PORT=${{ secrets.DB_PORT }}"
+              echo "DB_NAME=${{ secrets.DB_NAME }}"
+              echo "DB_USER=${{ secrets.DB_USER }}"
+              echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}"
+              echo "KOPIS_API_KEY=${{ secrets.KOPIS_API_KEY }}"
+              echo "MUSICBRAINZ_USER_AGENT=${{ secrets.MUSICBRAINZ_USER_AGENT }}"
+              echo "SETLISTFM_API_KEY=${{ secrets.SETLISTFM_API_KEY }}"
+              echo "SPOTIFY_CLIENT_ID=${{ secrets.SPOTIFY_CLIENT_ID }}"
+              echo "SPOTIFY_CLIENT_SECRET=${{ secrets.SPOTIFY_CLIENT_SECRET }}"
+              echo "INTERNAL_SECRET=${{ secrets.INTERNAL_SECRET }}"
+            } > ~/compose/.env
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker compose -f ~/compose/docker-compose.yml pull data
             docker compose -f ~/compose/docker-compose.yml up -d data
