@@ -34,7 +34,9 @@ def _phrase_match_title(title: str, aliases: list[dict]) -> list[dict]:
         )
         if matched:
             artist_id = alias["artist_id"]
-            if artist_id not in best_per_artist or len(name) > len(best_per_artist[artist_id]["name"]):
+            if artist_id not in best_per_artist or len(name) > len(
+                best_per_artist[artist_id]["name"]
+            ):
                 best_per_artist[artist_id] = alias
     return list(best_per_artist.values())
 
