@@ -113,7 +113,12 @@ def collect_for_concert(concert: dict) -> Optional[dict]:
             tracks = _parse_tracks(item.get("sets", {}))
             logger.info("셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
                         concert_id, item.get("id"), len(tracks))
-            return {"concert_id": concert_id, "setlist_fm_id": item.get("id"), "tracks": tracks}
+            return {
+                "concert_id": concert_id,
+                "setlist_fm_id": item.get("id"),
+                "attribution_url": item.get("url"),
+                "tracks": tracks,
+            }
 
         total = int(data.get("total", 0))
         items_per_page = int(data.get("itemsPerPage", 20))
@@ -176,6 +181,7 @@ def collect() -> list[dict]:
                 results.append({
                     "concert_id": concert_id,
                     "setlist_fm_id": item.get("id"),
+                    "attribution_url": item.get("url"),
                     "tracks": tracks,
                 })
                 seen_concert_ids.add(concert_id)

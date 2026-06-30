@@ -4,7 +4,9 @@ from db.repository import (
     get_active_concerts,
     save_artists,
     save_concert_artists,
+    save_setlists,
     update_artist_is_coming,
+    upsert_artist_url,
 )
 
 
@@ -225,6 +227,132 @@ class TestSaveArtists:
             c for c in mock_session.execute.call_args_list if "INSERT INTO artist" in str(c.args[0])
         ]
         assert len(artist_insert_calls) == 3
+
+
+class TestUpsertArtistUrl:
+    def _run(self, artist_id, url_type, url, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            upsert_artist_url(artist_id, url_type, url)
+
+    def test_inserts_into_artist_url_table(self):
+        """artist_url 테이블에 INSERT되어야 한다."""
+        mock_session = MagicMock()
+        self._run(5, "Spotify", "https://open.spotify.com/artist/abc123", mock_session)
+
+        sql, params = mock_session.execute.call_args.args
+        assert "INSERT INTO artist_url" in str(sql)
+        assert params == {
+            "artist_id": 5,
+            "type": "Spotify",
+            "url": "https://open.spotify.com/artist/abc123",
+        }
+
+    def test_on_conflict_artist_id_type_do_nothing(self):
+        """(artist_id, type) 중복 시 ON CONFLICT DO NOTHING이 포함되어야 한다."""
+        mock_session = MagicMock()
+        self._run(5, "Spotify", "https://open.spotify.com/artist/abc123", mock_session)
+
+        sql = str(mock_session.execute.call_args.args[0])
+        assert "ON CONFLICT (artist_id, type) DO NOTHING" in sql
+
+
+class TestSaveSetlists:
+    def _run(self, setlists, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_setlists(setlists)
+
+    def _make_session_mock(self, setlist_id=1):
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (setlist_id,)
+        return mock_session
+
+    def test_inserts_attribution_url(self):
+        """attribution_url이 setlist 테이블 INSERT 파라미터에 포함되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(
+            [
+                {
+                    "concert_id": 1,
+                    "setlist_fm_id": "abc123",
+                    "attribution_url": "https://www.setlist.fm/setlist/abc123.html",
+                    "tracks": [],
+                }
+            ],
+            mock_session,
+        )
+
+        sql, params = mock_session.execute.call_args_list[0].args
+        assert "INSERT INTO setlist" in str(sql)
+        assert params["attribution_url"] == "https://www.setlist.fm/setlist/abc123.html"
+
+    def test_attribution_url_none_when_missing(self):
+        """결과 dict에 attribution_url이 없으면 None으로 저장되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(
+            [{"concert_id": 1, "setlist_fm_id": "abc123", "tracks": []}],
+            mock_session,
+        )
+
+        _, params = mock_session.execute.call_args_list[0].args
+        assert params["attribution_url"] is None
+
+    def test_on_conflict_setlist_fm_id_do_nothing(self):
+        """중복 setlist_fm_id 시 ON CONFLICT DO NOTHING이 포함되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(
+            [{"concert_id": 1, "setlist_fm_id": "abc123", "tracks": []}],
+            mock_session,
+        )
+
+        sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "ON CONFLICT (setlist_fm_id) DO NOTHING" in sql
+
+    def test_inserts_tracks_when_present(self):
+        """tracks가 있으면 setlist_track 테이블에 INSERT되어야 한다."""
+        mock_session = self._make_session_mock(setlist_id=7)
+        self._run(
+            [
+                {
+                    "concert_id": 1,
+                    "setlist_fm_id": "abc123",
+                    "attribution_url": "https://www.setlist.fm/setlist/abc123.html",
+                    "tracks": [
+                        {"position": 1, "song_name": "Song A", "info": None},
+                        {"position": 2, "song_name": "Song B", "info": "acoustic"},
+                    ],
+                }
+            ],
+            mock_session,
+        )
+
+        track_calls = [
+            c for c in mock_session.execute.call_args_list if "setlist_track" in str(c.args[0])
+        ]
+        assert len(track_calls) == 1
+        assert len(track_calls[0].args[1]) == 2
+
+    def test_skips_tracks_when_conflict_returns_no_row(self):
+        """RETURNING id가 None(중복)이면 setlist_track INSERT를 건너뛰어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
+        self._run(
+            [
+                {
+                    "concert_id": 1,
+                    "setlist_fm_id": "dup",
+                    "attribution_url": "https://www.setlist.fm/setlist/dup.html",
+                    "tracks": [{"position": 1, "song_name": "Song A", "info": None}],
+                }
+            ],
+            mock_session,
+        )
+
+        sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list]
+        assert not any("setlist_track" in s for s in sqls)
 
 
 class TestSaveConcertArtists:

@@ -50,14 +50,14 @@ class TestTitlePhraseMatch:
         assert matches == []
         assert len(failures) == 1
 
-    def test_match_result_has_matched_by_field(self):
-        """매칭 결과에 matched_by 필드가 'title' 값으로 포함되어야 한다."""
+    def test_match_result_has_no_confidence_field(self):
+        """매칭 결과에 confidence 필드가 없어야 한다."""
         concert = {"concert_id": 26, "title": "BTS 콘서트", "cast": ""}
         matches, _ = match_concert(concert, _ALIASES)
 
         assert len(matches) == 1
         assert "confidence" not in matches[0]
-        assert matches[0]["matched_by"] == "title"
+        assert "matched_by" not in matches[0]
 
 
 class TestSpecialCharAndWordBoundary:
@@ -152,8 +152,8 @@ class TestJointConcertMultiArtist:
         assert len(matches) == 1
         assert matches[0]["artist_id"] == 40
 
-    def test_joint_concert_all_matched_by_title(self):
-        """합동 공연 다중 매칭 결과의 matched_by 필드가 모두 'title'이어야 한다."""
+    def test_joint_concert_matches_have_no_matched_by_field(self):
+        """합동 공연 다중 매칭 결과에 matched_by 필드가 없어야 한다."""
         aliases = [
             {"artist_id": 30, "name": "Perfume"},
             {"artist_id": 31, "name": "BABYMETAL"},
@@ -161,7 +161,7 @@ class TestJointConcertMultiArtist:
         concert = {"concert_id": 38, "title": "Perfume × BABYMETAL LIVE IN SEOUL"}
         matches, _ = match_concert(concert, aliases)
 
-        assert all(m["matched_by"] == "title" for m in matches)
+        assert all("matched_by" not in m for m in matches)
 
 
 class TestMatchFailure:

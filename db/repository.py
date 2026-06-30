@@ -78,6 +78,19 @@ def save_artists(artists: list[dict]) -> None:
     logger.info("아티스트 저장 완료: %d / %d건 처리", saved, len(artists))
 
 
+def upsert_artist_url(artist_id: int, url_type: str, url: str) -> None:
+    """artist_url에 (artist_id, type) 신규 저장. 이미 존재하면 무시."""
+    with get_session() as session:
+        session.execute(
+            text("""
+                INSERT INTO artist_url (artist_id, type, url)
+                VALUES (:artist_id, :type, :url)
+                ON CONFLICT (artist_id, type) DO NOTHING
+            """),
+            {"artist_id": artist_id, "type": url_type, "url": url},
+        )
+
+
 def save_releases(artist_id: int, releases: list[dict]) -> None:
     """수집된 릴리즈 목록을 DB에 저장한다. release_group 단위 독립 트랜잭션으로 격리."""
     saved = 0
@@ -264,12 +277,16 @@ def save_setlists(setlists: list[dict]) -> None:
         for item in setlists:
             row = session.execute(
                 text("""
-                    INSERT INTO setlist (concert_id, setlist_fm_id, collected_at)
-                    VALUES (:concert_id, :setlist_fm_id, NOW())
+                    INSERT INTO setlist (concert_id, setlist_fm_id, attribution_url, collected_at)
+                    VALUES (:concert_id, :setlist_fm_id, :attribution_url, NOW())
                     ON CONFLICT (setlist_fm_id) DO NOTHING
                     RETURNING id
                 """),
-                {"concert_id": item["concert_id"], "setlist_fm_id": item["setlist_fm_id"]},
+                {
+                    "concert_id": item["concert_id"],
+                    "setlist_fm_id": item["setlist_fm_id"],
+                    "attribution_url": item.get("attribution_url"),
+                },
             ).fetchone()
 
             if not row or not item.get("tracks"):
@@ -579,14 +596,13 @@ def save_concert_artist_candidates(matches: list[dict]) -> None:
             session.execute(
                 text("""
                     INSERT INTO concert_artist_candidate
-                        (concert_id, artist_id, matched_by)
-                    VALUES (:concert_id, :artist_id, :matched_by)
+                        (concert_id, artist_id)
+                    VALUES (:concert_id, :artist_id)
                     ON CONFLICT (concert_id, artist_id) DO NOTHING
                 """),
                 {
                     "concert_id": match["concert_id"],
                     "artist_id": match["artist_id"],
-                    "matched_by": match.get("matched_by", "title"),
                 },
             )
     logger.info("공연-아티스트 후보 저장 완료: %d건 처리", len(matches))

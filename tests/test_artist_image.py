@@ -52,9 +52,10 @@ class TestCollectArtistImage:
                                       return_value=_make_token_response()), \
                 patch("collectors.artist_image.requests.get",
                       side_effect=[mb_response, artist_response]):
-            result = collect_artist_image("mbid-001")
+            image_url, spotify_id = collect_artist_image("mbid-001")
 
-        assert result == "https://i.scdn.co/image/large.jpg"
+        assert image_url == "https://i.scdn.co/image/large.jpg"
+        assert spotify_id == "abc123"
 
     def test_returns_image_url_via_name_search(self):
         """MB URL relations에 Spotify 없음 → 이름 검색 fallback → 이미지 반환."""
@@ -72,9 +73,10 @@ class TestCollectArtistImage:
                                       return_value=_make_token_response()), \
                 patch("collectors.artist_image.requests.get",
                       side_effect=[mb_response, search_response, artist_response]):
-            result = collect_artist_image("mbid-002")
+            image_url, spotify_id = collect_artist_image("mbid-002")
 
-        assert result == "https://i.scdn.co/image/fallback.jpg"
+        assert image_url == "https://i.scdn.co/image/fallback.jpg"
+        assert spotify_id == "spotify-xyz"
 
     def test_returns_none_when_mb_artist_not_found(self):
         """MusicBrainz 404 → None 반환."""
@@ -86,7 +88,7 @@ class TestCollectArtistImage:
                 patch("collectors.artist_image.requests.get", return_value=mb_response):
             result = collect_artist_image("mbid-unknown")
 
-        assert result is None
+        assert result == (None, None)
 
     def test_returns_none_when_spotify_id_not_found(self):
         """Spotify ID 조회 실패 (검색 결과 없음) → None 반환."""
@@ -101,10 +103,10 @@ class TestCollectArtistImage:
                       side_effect=[mb_response, search_response]):
             result = collect_artist_image("mbid-003")
 
-        assert result is None
+        assert result == (None, None)
 
     def test_returns_none_when_images_empty(self):
-        """Spotify images 배열이 비어 있음 → None 반환."""
+        """Spotify images 배열이 비어 있음 → image_url은 None이지만 spotify_id는 반환."""
         mb_response = _make_mb_response(
             name="Yoasobi",
             spotify_url="https://open.spotify.com/artist/yoasobi123",
@@ -115,9 +117,10 @@ class TestCollectArtistImage:
                                       return_value=_make_token_response()), \
                 patch("collectors.artist_image.requests.get",
                       side_effect=[mb_response, artist_response]):
-            result = collect_artist_image("mbid-004")
+            image_url, spotify_id = collect_artist_image("mbid-004")
 
-        assert result is None
+        assert image_url is None
+        assert spotify_id == "yoasobi123"
 
     def test_skips_mb_api_when_spotify_url_provided(self):
         """spotify_url 파라미터 제공 시 MB API 호출 없이 Spotify ID 직접 사용."""
@@ -129,12 +132,13 @@ class TestCollectArtistImage:
         with self._patch_env(), patch("collectors.artist_image.requests.post",
                                       return_value=_make_token_response()), \
                 patch("collectors.artist_image.requests.get", mock_get):
-            result = collect_artist_image(
+            image_url, spotify_id = collect_artist_image(
                 "mbid-005",
                 spotify_url="https://open.spotify.com/artist/direct-id",
             )
 
-        assert result == "https://i.scdn.co/image/direct.jpg"
+        assert image_url == "https://i.scdn.co/image/direct.jpg"
+        assert spotify_id == "direct-id"
         # MB API가 아닌 Spotify artists 엔드포인트만 호출됐는지 확인
         call_url = mock_get.call_args[0][0]
         assert "spotify.com" in call_url or "api.spotify.com" in call_url
@@ -153,9 +157,10 @@ class TestCollectArtistImage:
                                       return_value=_make_token_response()), \
                 patch("collectors.artist_image.requests.get",
                       side_effect=[search_response, artist_response]) as mock_get:
-            result = collect_artist_image("mbid-006", name="YOASOBI")
+            image_url, spotify_id = collect_artist_image("mbid-006", name="YOASOBI")
 
-        assert result == "https://i.scdn.co/image/by-name.jpg"
+        assert image_url == "https://i.scdn.co/image/by-name.jpg"
+        assert spotify_id == "name-search-id"
         # 첫 번째 GET 호출이 MusicBrainz가 아닌 Spotify search여야 함
         first_call_url = mock_get.call_args_list[0][0][0]
         assert "musicbrainz" not in first_call_url

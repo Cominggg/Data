@@ -1,6 +1,7 @@
 """scheduler.py 단위 테스트."""
 import json
 import os
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -16,11 +17,12 @@ from scheduler import (
     _sort_releases,
     register_artist_by_mbid,
     run_artist_image_update,
+    run_concert_status_update,
     run_initial_collect,
     run_missing_release_update,
+    run_new_concert_collect,
     run_release_update,
     run_setlist_collect,
-    run_status_update,
 )
 
 
@@ -29,7 +31,7 @@ class TestRunInitialCollect:
     def mock_sub_jobs(self):
         with (
             patch("scheduler.run_wikipedia_collect"),
-            patch("scheduler.run_status_update"),
+            patch("scheduler.run_new_concert_collect"),
             patch("scheduler.get_matched_artists_with_spotify", return_value=[]),
             patch("scheduler.run_artist_image_update"),
             patch("scheduler.run_setlist_collect"),
@@ -115,10 +117,33 @@ class TestRunInitialCollect:
         mock_collect.assert_not_called()
         mock_save.assert_not_called()
 
+    def test_calls_new_concert_collect_with_init_stdate_and_use_prfstate(self):
+        """초기 수집은 stdate=20230101, use_prfstate=True로 KOPIS 수집을 호출해야 한다."""
+        with (
+            patch("scheduler.get_all_artist_mbids", return_value=[]),
+            patch("scheduler.musicbrainz.collect_artists", return_value=[]),
+            patch("scheduler.save_artists"),
+            patch("scheduler.run_new_concert_collect") as mock_new_concert,
+        ):
+            run_initial_collect()
+
+        mock_new_concert.assert_called_once_with(stdate="20230101", use_prfstate=True)
+
+    def test_skip_kopis_does_not_call_new_concert_collect(self):
+        """--skip-kopis 시 run_new_concert_collect가 호출되지 않아야 한다."""
+        with (
+            patch("scheduler.get_all_artist_mbids", return_value=[]),
+            patch("scheduler.musicbrainz.collect_artists", return_value=[]),
+            patch("scheduler.save_artists"),
+            patch("scheduler.run_new_concert_collect") as mock_new_concert,
+        ):
+            run_initial_collect(skip_kopis=True)
+
+        mock_new_concert.assert_not_called()
 
 
-class TestRunStatusUpdate:
-    # ── 상태 갱신 경로 ─────────────────────────────────────────────────────────
+class TestRunConcertStatusUpdate:
+    # ── 활성 공연 상태 갱신 잡 ─────────────────────────────────────────────────
 
     def test_calls_collect_by_id_for_each_active_concert(self):
         """활성 공연마다 kopis.collect_by_id가 호출되어야 한다."""
@@ -131,12 +156,9 @@ class TestRunStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=active),
             patch("scheduler.kopis.collect_by_id", return_value=fetched) as mock_by_id,
             patch("scheduler.update_concert_status"),
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.get_existing_kopis_ids", return_value=set()),
-            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_concert_status_update()
 
         assert mock_by_id.call_count == 2
         mock_by_id.assert_any_call("PF001")
@@ -150,12 +172,9 @@ class TestRunStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=active),
             patch("scheduler.kopis.collect_by_id", return_value=fetched),
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.get_existing_kopis_ids", return_value=set()),
-            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_concert_status_update()
 
         mock_update.assert_called_once_with([fetched])
 
@@ -165,12 +184,9 @@ class TestRunStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.kopis.collect_by_id") as mock_by_id,
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.get_existing_kopis_ids", return_value=set()),
-            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_concert_status_update()
 
         mock_by_id.assert_not_called()
         mock_update.assert_not_called()
@@ -182,27 +198,35 @@ class TestRunStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=active),
             patch("scheduler.kopis.collect_by_id", return_value=None),
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.get_existing_kopis_ids", return_value=set()),
-            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_concert_status_update()
 
         mock_update.assert_not_called()
-
-    # ── 신규 발견 경로 ─────────────────────────────────────────────────────────
 
     def test_updates_is_coming_after_status_update(self):
         """상태 갱신 후 update_artist_is_coming이 인자 없이 호출되어야 한다."""
         with (
             patch("scheduler.get_active_concerts", return_value=[]),
+            patch("scheduler.update_artist_is_coming") as mock_update,
+        ):
+            run_concert_status_update()
+
+        mock_update.assert_called_once_with()
+
+
+class TestRunNewConcertCollect:
+    # ── 신규 공연 탐지 잡 ─────────────────────────────────────────────────────
+
+    def test_updates_is_coming_after_new_concert_collect(self):
+        """신규 공연 탐지 후 update_artist_is_coming이 인자 없이 호출되어야 한다."""
+        with (
             patch("scheduler.kopis.collect", return_value=[]),
             patch("scheduler.get_existing_kopis_ids", return_value=set()),
             patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming") as mock_update,
         ):
-            run_status_update()
+            run_new_concert_collect()
 
         mock_update.assert_called_once_with()
 
@@ -210,7 +234,6 @@ class TestRunStatusUpdate:
         """DB에 없는 신규 공연이 alias 매칭 통과 시 save_concerts로 저장되어야 한다."""
         new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
         with (
-            patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.kopis.collect", return_value=[new_concert]),
             patch("scheduler.get_existing_kopis_ids", return_value=set()),
             patch("scheduler.get_all_aliases", return_value=[]),
@@ -220,15 +243,31 @@ class TestRunStatusUpdate:
             patch("scheduler.save_concert_artists"),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_new_concert_collect()
 
-        mock_save.assert_called_once_with([new_concert])
+        mock_save.assert_called_once_with([new_concert], use_prfstate=False)
+
+    def test_saves_with_actual_prfstate_when_use_prfstate_true(self):
+        """use_prfstate=True로 호출 시 save_concerts에 use_prfstate=True가 전달되어야 한다."""
+        new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
+        with (
+            patch("scheduler.kopis.collect", return_value=[new_concert]),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.save_concerts") as mock_save,
+            patch("scheduler.get_unmatched_concerts", return_value=[]),
+            patch("scheduler.save_concert_artists"),
+            patch("scheduler.update_artist_is_coming"),
+        ):
+            run_new_concert_collect(use_prfstate=True)
+
+        mock_save.assert_called_once_with([new_concert], use_prfstate=True)
 
     def test_skips_new_concerts_without_alias_match(self):
         """alias 매칭 없는 신규 공연은 save_concerts가 호출되지 않아야 한다."""
         new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
         with (
-            patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.kopis.collect", return_value=[new_concert]),
             patch("scheduler.get_existing_kopis_ids", return_value=set()),
             patch("scheduler.get_all_aliases", return_value=[]),
@@ -236,7 +275,7 @@ class TestRunStatusUpdate:
             patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_new_concert_collect()
 
         mock_save.assert_not_called()
 
@@ -244,7 +283,6 @@ class TestRunStatusUpdate:
         """이미 DB에 있는 공연은 save_concerts가 호출되지 않아야 한다."""
         existing_concert = {"kopis_id": "PF001", "prfstate": "공연완료"}
         with (
-            patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.kopis.collect", return_value=[existing_concert]),
             patch("scheduler.get_existing_kopis_ids", return_value={"PF001"}),
             patch("scheduler.get_all_aliases", return_value=[]),
@@ -252,7 +290,7 @@ class TestRunStatusUpdate:
             patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_new_concert_collect()
 
         mock_save.assert_not_called()
 
@@ -330,10 +368,10 @@ class TestRunSetlistCollect:
 
 
 class TestBuildScheduler:
-    def test_registers_five_jobs(self):
-        """스케줄러에 5개의 잡이 등록되어야 한다."""
+    def test_registers_six_jobs(self):
+        """스케줄러에 6개의 잡이 등록되어야 한다."""
         scheduler = _build_scheduler()
-        assert len(scheduler.get_jobs()) == 5
+        assert len(scheduler.get_jobs()) == 6
 
     def test_includes_tuesday_job(self):
         """화요일 릴리즈 갱신 잡이 등록되어야 한다."""
@@ -341,11 +379,17 @@ class TestBuildScheduler:
         job_funcs = [job.func for job in scheduler.get_jobs()]
         assert run_release_update in job_funcs
 
-    def test_includes_daily_status_job(self):
+    def test_includes_daily_concert_status_job(self):
         """매일 실행되는 공연 상태 갱신 잡이 등록되어야 한다."""
         scheduler = _build_scheduler()
         job_funcs = [job.func for job in scheduler.get_jobs()]
-        assert run_status_update in job_funcs
+        assert run_concert_status_update in job_funcs
+
+    def test_includes_daily_new_concert_collect_job(self):
+        """매일 실행되는 신규 공연 탐지 잡이 등록되어야 한다."""
+        scheduler = _build_scheduler()
+        job_funcs = [job.func for job in scheduler.get_jobs()]
+        assert run_new_concert_collect in job_funcs
 
     def test_includes_daily_setlist_job(self):
         """매일 실행되는 setlist 수집 잡이 등록되어야 한다."""
@@ -410,7 +454,10 @@ class TestRegisterArtistByMbid:
             patch("scheduler.musicbrainz.collect_single_artist", return_value=self._ARTIST),
             patch("scheduler.save_artists"),
             patch("scheduler.get_artist_by_mbid", return_value=self._SAVED),
-            patch("scheduler.artist_image.collect_artist_image", return_value="http://img.url"),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=("http://img.url", "sp999"),
+            ),
             patch("scheduler.update_artist_image"),
             patch("scheduler.release.collect_releases", return_value=([], 0)),
             patch("scheduler.save_releases"),
@@ -442,7 +489,8 @@ class TestRegisterArtistByMbid:
             patch("scheduler.get_artist_by_mbid", return_value=self._SAVED),
             patch(
                 "scheduler.artist_image.collect_artist_image",
-                side_effect=lambda *a, **kw: call_order.append("image") or "http://img",
+                side_effect=lambda *a, **kw: call_order.append("image")
+                or ("http://img", "sp999"),
             ),
             patch("scheduler.update_artist_image"),
             patch(
@@ -681,6 +729,173 @@ class TestRunArtistImageUpdateBanGuard:
         with patch("scheduler.artist_image.collect_artist_image") as mock_collect:
             run_artist_image_update()
         mock_collect.assert_not_called()
+
+    def test_saves_ban_and_stops_on_429(self, tmp_path, monkeypatch):
+        """429 발생 시 즉시 중단하고 ban을 저장하며, 이후 아티스트는 호출하지 않아야 한다."""
+        from collectors.spotify_client import SpotifyRateLimitError
+
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(tmp_path / "image_failed.json"))
+        artists = [
+            {"id": 1, "mbid": "mbid-1", "name": "A1", "spotify_url": None},
+            {"id": 2, "mbid": "mbid-2", "name": "A2", "spotify_url": None},
+        ]
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=artists),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                side_effect=SpotifyRateLimitError(),
+            ) as mock_collect,
+        ):
+            run_artist_image_update()
+
+        assert mock_collect.call_count == 1
+        assert os.path.exists(ban_path)
+        assert "banned_until" in json.load(open(ban_path))
+
+
+class TestRunArtistImageUpdate:
+    """run_artist_image_update()의 fallback Spotify URL 백필 검증."""
+
+    _ARTIST_NO_SPOTIFY = {"id": 1, "mbid": "mbid-1", "name": "NoSpotifyLink", "spotify_url": None}
+    _ARTIST_WITH_SPOTIFY = {
+        "id": 2,
+        "mbid": "mbid-2",
+        "name": "HasSpotifyLink",
+        "spotify_url": "https://open.spotify.com/artist/existing",
+    }
+
+    @pytest.fixture(autouse=True)
+    def isolate_image_failed_checkpoint(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(tmp_path / "image_failed.json"))
+
+    def test_upserts_artist_url_when_fallback_finds_spotify_id(self):
+        """spotify_url이 없었는데 fallback으로 찾았다면 artist_url에 저장해야 한다."""
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST_NO_SPOTIFY]),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=("http://img.url", "found-id"),
+            ),
+            patch("scheduler.update_artist_image") as mock_update_image,
+            patch("scheduler.upsert_artist_url") as mock_upsert,
+        ):
+            run_artist_image_update()
+
+        mock_update_image.assert_called_once_with(1, "http://img.url")
+        mock_upsert.assert_called_once_with(
+            1, "Spotify", "https://open.spotify.com/artist/found-id"
+        )
+
+    def test_does_not_upsert_when_spotify_url_already_present(self):
+        """이미 spotify_url이 있던 아티스트는 artist_url을 다시 저장하지 않아야 한다."""
+        with (
+            patch(
+                "scheduler.get_artists_without_image", return_value=[self._ARTIST_WITH_SPOTIFY]
+            ),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=("http://img.url", "existing"),
+            ),
+            patch("scheduler.update_artist_image"),
+            patch("scheduler.upsert_artist_url") as mock_upsert,
+        ):
+            run_artist_image_update()
+
+        mock_upsert.assert_not_called()
+
+    def test_does_not_upsert_when_spotify_id_not_found(self):
+        """spotify_id조차 못 찾으면 artist_url을 저장하지 않아야 한다."""
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST_NO_SPOTIFY]),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=(None, None),
+            ),
+            patch("scheduler.update_artist_image") as mock_update_image,
+            patch("scheduler.upsert_artist_url") as mock_upsert,
+        ):
+            run_artist_image_update()
+
+        mock_update_image.assert_not_called()
+        mock_upsert.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# run_artist_image_update — image_failed 체크포인트 기반 재시도 보류
+# ---------------------------------------------------------------------------
+class TestRunArtistImageUpdateRetrySkip:
+    _ARTIST = {"id": 1, "mbid": "mbid-1", "name": "아티스트", "spotify_url": None}
+
+    def test_skips_artist_failed_within_retry_window(self, tmp_path, monkeypatch):
+        """최근 실패 기록이 있는 아티스트는 재시도하지 않아야 한다."""
+        failed_path = tmp_path / "image_failed.json"
+        recent = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        failed_path.write_text(json.dumps({"1": recent}))
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(failed_path))
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST]),
+            patch("scheduler.artist_image.collect_artist_image") as mock_collect,
+        ):
+            run_artist_image_update()
+
+        mock_collect.assert_not_called()
+
+    def test_retries_artist_failed_outside_retry_window(self, tmp_path, monkeypatch):
+        """재시도 주기를 지난 실패 기록은 다시 시도해야 한다."""
+        failed_path = tmp_path / "image_failed.json"
+        old = (datetime.now() - timedelta(days=31)).strftime("%Y%m%d")
+        failed_path.write_text(json.dumps({"1": old}))
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(failed_path))
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST]),
+            patch(
+                "scheduler.artist_image.collect_artist_image", return_value=(None, None)
+            ) as mock_collect,
+        ):
+            run_artist_image_update()
+
+        mock_collect.assert_called_once()
+
+    def test_records_failure_when_image_not_found(self, tmp_path, monkeypatch):
+        """이미지를 찾지 못하면 image_failed 체크포인트에 오늘 날짜로 기록해야 한다."""
+        failed_path = tmp_path / "image_failed.json"
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(failed_path))
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST]),
+            patch("scheduler.artist_image.collect_artist_image", return_value=(None, None)),
+        ):
+            run_artist_image_update()
+
+        saved = json.loads(failed_path.read_text())
+        assert saved == {"1": datetime.now().strftime("%Y%m%d")}
+
+    def test_clears_failure_record_when_image_found(self, tmp_path, monkeypatch):
+        """이미지를 새로 찾으면 기존 실패 기록을 제거해야 한다."""
+        failed_path = tmp_path / "image_failed.json"
+        old = (datetime.now() - timedelta(days=31)).strftime("%Y%m%d")
+        failed_path.write_text(json.dumps({"1": old}))
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(failed_path))
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST]),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=("http://img.url", "found-id"),
+            ),
+            patch("scheduler.update_artist_image"),
+            patch("scheduler.upsert_artist_url"),
+        ):
+            run_artist_image_update()
+
+        saved = json.loads(failed_path.read_text())
+        assert saved == {}
 
 
 # ---------------------------------------------------------------------------

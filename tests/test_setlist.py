@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from collectors.setlist import _event_date_in_range, _parse_tracks, collect
+from collectors.setlist import _event_date_in_range, _parse_tracks, collect, collect_for_concert
 
 
 def _make_api_response(setlists: list[dict]) -> dict:
@@ -13,6 +13,7 @@ def _make_api_response(setlists: list[dict]) -> dict:
 def _sample_setlist(**kwargs) -> dict:
     base = {
         "id": "abc123def",
+        "url": "https://www.setlist.fm/setlist/artist/2024/venue-abc123def.html",
         "eventDate": "28-04-2024",
         "sets": {
             "set": [
@@ -66,6 +67,23 @@ class TestSetlistCollect:
         assert len(result) == 1
         assert result[0]["concert_id"] == 1
         assert result[0]["setlist_fm_id"] == "abc123def"
+        assert result[0]["attribution_url"] == (
+            "https://www.setlist.fm/setlist/artist/2024/venue-abc123def.html"
+        )
+
+    def test_attribution_url_none_when_missing_from_response(self):
+        """API 응답에 url 필드가 없으면 attribution_url은 None이어야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_api_response(
+            [_sample_setlist(url=None)]
+        )
+
+        with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
+            with patch("collectors.setlist.requests.get", return_value=mock_response):
+                result = collect()
+
+        assert result[0]["attribution_url"] is None
 
     def test_targets_completed_concerts_only(self):
         """prfstate=공연완료 건에 대해서만 수집을 시도해야 한다.
@@ -418,6 +436,26 @@ class TestSetlistFetchAttempted:
                     collect()
 
         mock_attempted.assert_called_once_with(1)
+
+
+class TestCollectForConcert:
+    @pytest.fixture(autouse=True)
+    def mock_sleep(self):
+        with patch("collectors.setlist.time.sleep"):
+            yield
+
+    def test_includes_attribution_url(self):
+        """단건 조회 결과에도 attribution_url이 포함되어야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _make_api_response([_sample_setlist()])
+
+        with patch("collectors.setlist.requests.get", return_value=mock_response):
+            result = collect_for_concert(_sample_concert())
+
+        assert result["attribution_url"] == (
+            "https://www.setlist.fm/setlist/artist/2024/venue-abc123def.html"
+        )
 
 
 class TestEventDateInRange:
