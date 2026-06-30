@@ -277,12 +277,16 @@ def save_setlists(setlists: list[dict]) -> None:
         for item in setlists:
             row = session.execute(
                 text("""
-                    INSERT INTO setlist (concert_id, setlist_fm_id, collected_at)
-                    VALUES (:concert_id, :setlist_fm_id, NOW())
+                    INSERT INTO setlist (concert_id, setlist_fm_id, attribution_url, collected_at)
+                    VALUES (:concert_id, :setlist_fm_id, :attribution_url, NOW())
                     ON CONFLICT (setlist_fm_id) DO NOTHING
                     RETURNING id
                 """),
-                {"concert_id": item["concert_id"], "setlist_fm_id": item["setlist_fm_id"]},
+                {
+                    "concert_id": item["concert_id"],
+                    "setlist_fm_id": item["setlist_fm_id"],
+                    "attribution_url": item.get("attribution_url"),
+                },
             ).fetchone()
 
             if not row or not item.get("tracks"):
