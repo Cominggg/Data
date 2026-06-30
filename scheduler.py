@@ -437,6 +437,10 @@ def run_artist_image_update() -> None:
                 spotify_url=a.get("spotify_url"),
                 name=a.get("name"),
             )
+        except SpotifyRateLimitError:
+            logger.error("Spotify 429 — 이미지 수집 중단 (artist_id=%d)", a["id"])
+            _save_ban()
+            break
         except Exception as e:
             logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", a["mbid"], e)
             continue

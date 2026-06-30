@@ -690,6 +690,32 @@ class TestRunArtistImageUpdateBanGuard:
             run_artist_image_update()
         mock_collect.assert_not_called()
 
+    def test_saves_ban_and_stops_on_429(self, tmp_path, monkeypatch):
+        """429 발생 시 즉시 중단하고 ban을 저장하며, 이후 아티스트는 호출하지 않아야 한다."""
+        from collectors.spotify_client import SpotifyRateLimitError
+
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(tmp_path / "image_failed.json"))
+        artists = [
+            {"id": 1, "mbid": "mbid-1", "name": "A1", "spotify_url": None},
+            {"id": 2, "mbid": "mbid-2", "name": "A2", "spotify_url": None},
+        ]
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=artists),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                side_effect=SpotifyRateLimitError(),
+            ) as mock_collect,
+        ):
+            run_artist_image_update()
+
+        assert mock_collect.call_count == 1
+        assert os.path.exists(ban_path)
+        assert "banned_until" in json.load(open(ban_path))
+
 
 class TestRunArtistImageUpdate:
     """run_artist_image_update()의 fallback Spotify URL 백필 검증."""
