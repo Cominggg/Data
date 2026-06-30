@@ -249,7 +249,7 @@ def run_initial_collect(
     else:
         # KOPIS 수집 + 매칭으로 내한 확정 아티스트를 먼저 파악한다.
         logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
-        run_status_update(stdate="20200101")
+        run_new_concert_collect(stdate="20200101")
 
     if skip_releases:
         logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
@@ -317,15 +317,10 @@ def run_wikipedia_collect() -> None:
 
 
 
-def run_status_update(stdate: Optional[str] = None) -> None:
-    """공연 상태 갱신 + 신규 공연 저장·매칭 + is_coming 동기화 (매일).
-
-    stdate 미전달 시 kopis.collect() 기본값(20250101)을 사용한다.
-    초기 수집 시에는 stdate="20200101"을 전달해 전체 기간을 탐색한다.
-    """
+def run_concert_status_update() -> None:
+    """활성 공연 상태 갱신 (매일). DB의 진행 중 공연을 개별 API로 최신 상태로 갱신한다."""
     logger.info("=== 공연 상태 갱신 잡 시작 ===")
 
-    # ① 상태 갱신: DB의 진행 중 공연을 개별 API로 최신 상태 갱신
     active = get_active_concerts()
     if active:
         logger.info("활성 공연 %d건 상태 갱신 시작", len(active))
@@ -345,7 +340,19 @@ def run_status_update(stdate: Optional[str] = None) -> None:
         if fetched:
             update_concert_status(fetched)
 
-    # ② 신규 발견: 마지막 수집일 이후 등록·수정된 공연만 증분 탐지
+    update_artist_is_coming()
+    logger.info("=== 공연 상태 갱신 잡 완료 ===")
+
+
+def run_new_concert_collect(stdate: Optional[str] = None) -> None:
+    """신규 공연 탐지·저장·매칭 + is_coming 동기화 (매일).
+
+    마지막 수집일 이후 등록·수정된 공연만 증분 탐지한다.
+    stdate 미전달 시 kopis.collect() 기본값(20250101)을 사용한다.
+    초기 수집 시에는 stdate="20200101"을 전달해 전체 기간을 탐색한다.
+    """
+    logger.info("=== 신규 공연 탐지 잡 시작 ===")
+
     last_date = _load_last_collect_date()
     if last_date:
         logger.info("증분 스캔 — afterdate=%s", last_date)
@@ -371,7 +378,7 @@ def run_status_update(stdate: Optional[str] = None) -> None:
 
     update_artist_is_coming()
     _save_last_collect_date(datetime.now().strftime("%Y%m%d"))
-    logger.info("=== 공연 상태 갱신 잡 완료 ===")
+    logger.info("=== 신규 공연 탐지 잡 완료 ===")
 
 
 
@@ -624,7 +631,8 @@ def collect_and_save_setlist(concert_id: int) -> bool:
 
 def _build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-    scheduler.add_job(run_status_update, "cron", hour=4)
+    scheduler.add_job(run_concert_status_update, "cron", hour=4, minute=0)
+    scheduler.add_job(run_new_concert_collect, "cron", hour=4, minute=30)
     scheduler.add_job(run_release_update, "cron", hour=2)
     scheduler.add_job(run_wikipedia_collect, "cron", day_of_week="thu", hour=3)
     scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=5)
@@ -694,7 +702,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--job",
-        choices=["status-update", "release-update", "wikipedia", "artist-image", "setlist"],
+        choices=[
+            "concert-status-update",
+            "new-concert-collect",
+            "release-update",
+            "wikipedia",
+            "artist-image",
+            "setlist",
+        ],
         help="즉시 실행할 잡 이름 (run-job 전용)",
     )
     args = parser.parse_args()
@@ -747,7 +762,8 @@ def main() -> None:
         if not args.job:
             parser.error("run-job 커맨드는 --job 이 필요합니다.")
         _job_map = {
-            "status-update": run_status_update,
+            "concert-status-update": run_concert_status_update,
+            "new-concert-collect": run_new_concert_collect,
             "release-update": run_release_update,
             "wikipedia": run_wikipedia_collect,
             "artist-image": run_artist_image_update,

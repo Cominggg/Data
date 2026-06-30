@@ -16,11 +16,12 @@ from scheduler import (
     _sort_releases,
     register_artist_by_mbid,
     run_artist_image_update,
+    run_concert_status_update,
     run_initial_collect,
     run_missing_release_update,
+    run_new_concert_collect,
     run_release_update,
     run_setlist_collect,
-    run_status_update,
 )
 
 
@@ -29,7 +30,7 @@ class TestRunInitialCollect:
     def mock_sub_jobs(self):
         with (
             patch("scheduler.run_wikipedia_collect"),
-            patch("scheduler.run_status_update"),
+            patch("scheduler.run_new_concert_collect"),
             patch("scheduler.get_matched_artists_with_spotify", return_value=[]),
             patch("scheduler.run_artist_image_update"),
             patch("scheduler.run_setlist_collect"),
@@ -117,8 +118,8 @@ class TestRunInitialCollect:
 
 
 
-class TestRunStatusUpdate:
-    # ── 상태 갱신 경로 ─────────────────────────────────────────────────────────
+class TestRunConcertStatusUpdate:
+    # ── 활성 공연 상태 갱신 잡 ─────────────────────────────────────────────────
 
     def test_calls_collect_by_id_for_each_active_concert(self):
         """활성 공연마다 kopis.collect_by_id가 호출되어야 한다."""
@@ -131,12 +132,9 @@ class TestRunStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=active),
             patch("scheduler.kopis.collect_by_id", return_value=fetched) as mock_by_id,
             patch("scheduler.update_concert_status"),
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.get_existing_kopis_ids", return_value=set()),
-            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_concert_status_update()
 
         assert mock_by_id.call_count == 2
         mock_by_id.assert_any_call("PF001")
@@ -150,12 +148,9 @@ class TestRunStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=active),
             patch("scheduler.kopis.collect_by_id", return_value=fetched),
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.get_existing_kopis_ids", return_value=set()),
-            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_concert_status_update()
 
         mock_update.assert_called_once_with([fetched])
 
@@ -165,12 +160,9 @@ class TestRunStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.kopis.collect_by_id") as mock_by_id,
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.get_existing_kopis_ids", return_value=set()),
-            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_concert_status_update()
 
         mock_by_id.assert_not_called()
         mock_update.assert_not_called()
@@ -182,27 +174,35 @@ class TestRunStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=active),
             patch("scheduler.kopis.collect_by_id", return_value=None),
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.kopis.collect", return_value=[]),
-            patch("scheduler.get_existing_kopis_ids", return_value=set()),
-            patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_concert_status_update()
 
         mock_update.assert_not_called()
-
-    # ── 신규 발견 경로 ─────────────────────────────────────────────────────────
 
     def test_updates_is_coming_after_status_update(self):
         """상태 갱신 후 update_artist_is_coming이 인자 없이 호출되어야 한다."""
         with (
             patch("scheduler.get_active_concerts", return_value=[]),
+            patch("scheduler.update_artist_is_coming") as mock_update,
+        ):
+            run_concert_status_update()
+
+        mock_update.assert_called_once_with()
+
+
+class TestRunNewConcertCollect:
+    # ── 신규 공연 탐지 잡 ─────────────────────────────────────────────────────
+
+    def test_updates_is_coming_after_new_concert_collect(self):
+        """신규 공연 탐지 후 update_artist_is_coming이 인자 없이 호출되어야 한다."""
+        with (
             patch("scheduler.kopis.collect", return_value=[]),
             patch("scheduler.get_existing_kopis_ids", return_value=set()),
             patch("scheduler.get_all_aliases", return_value=[]),
             patch("scheduler.update_artist_is_coming") as mock_update,
         ):
-            run_status_update()
+            run_new_concert_collect()
 
         mock_update.assert_called_once_with()
 
@@ -210,7 +210,6 @@ class TestRunStatusUpdate:
         """DB에 없는 신규 공연이 alias 매칭 통과 시 save_concerts로 저장되어야 한다."""
         new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
         with (
-            patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.kopis.collect", return_value=[new_concert]),
             patch("scheduler.get_existing_kopis_ids", return_value=set()),
             patch("scheduler.get_all_aliases", return_value=[]),
@@ -220,7 +219,7 @@ class TestRunStatusUpdate:
             patch("scheduler.save_concert_artists"),
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_new_concert_collect()
 
         mock_save.assert_called_once_with([new_concert])
 
@@ -228,7 +227,6 @@ class TestRunStatusUpdate:
         """alias 매칭 없는 신규 공연은 save_concerts가 호출되지 않아야 한다."""
         new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
         with (
-            patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.kopis.collect", return_value=[new_concert]),
             patch("scheduler.get_existing_kopis_ids", return_value=set()),
             patch("scheduler.get_all_aliases", return_value=[]),
@@ -236,7 +234,7 @@ class TestRunStatusUpdate:
             patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_new_concert_collect()
 
         mock_save.assert_not_called()
 
@@ -244,7 +242,6 @@ class TestRunStatusUpdate:
         """이미 DB에 있는 공연은 save_concerts가 호출되지 않아야 한다."""
         existing_concert = {"kopis_id": "PF001", "prfstate": "공연완료"}
         with (
-            patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.kopis.collect", return_value=[existing_concert]),
             patch("scheduler.get_existing_kopis_ids", return_value={"PF001"}),
             patch("scheduler.get_all_aliases", return_value=[]),
@@ -252,7 +249,7 @@ class TestRunStatusUpdate:
             patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.update_artist_is_coming"),
         ):
-            run_status_update()
+            run_new_concert_collect()
 
         mock_save.assert_not_called()
 
@@ -330,10 +327,10 @@ class TestRunSetlistCollect:
 
 
 class TestBuildScheduler:
-    def test_registers_five_jobs(self):
-        """스케줄러에 5개의 잡이 등록되어야 한다."""
+    def test_registers_six_jobs(self):
+        """스케줄러에 6개의 잡이 등록되어야 한다."""
         scheduler = _build_scheduler()
-        assert len(scheduler.get_jobs()) == 5
+        assert len(scheduler.get_jobs()) == 6
 
     def test_includes_tuesday_job(self):
         """화요일 릴리즈 갱신 잡이 등록되어야 한다."""
@@ -341,11 +338,17 @@ class TestBuildScheduler:
         job_funcs = [job.func for job in scheduler.get_jobs()]
         assert run_release_update in job_funcs
 
-    def test_includes_daily_status_job(self):
+    def test_includes_daily_concert_status_job(self):
         """매일 실행되는 공연 상태 갱신 잡이 등록되어야 한다."""
         scheduler = _build_scheduler()
         job_funcs = [job.func for job in scheduler.get_jobs()]
-        assert run_status_update in job_funcs
+        assert run_concert_status_update in job_funcs
+
+    def test_includes_daily_new_concert_collect_job(self):
+        """매일 실행되는 신규 공연 탐지 잡이 등록되어야 한다."""
+        scheduler = _build_scheduler()
+        job_funcs = [job.func for job in scheduler.get_jobs()]
+        assert run_new_concert_collect in job_funcs
 
     def test_includes_daily_setlist_job(self):
         """매일 실행되는 setlist 수집 잡이 등록되어야 한다."""
