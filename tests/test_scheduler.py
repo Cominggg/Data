@@ -410,7 +410,10 @@ class TestRegisterArtistByMbid:
             patch("scheduler.musicbrainz.collect_single_artist", return_value=self._ARTIST),
             patch("scheduler.save_artists"),
             patch("scheduler.get_artist_by_mbid", return_value=self._SAVED),
-            patch("scheduler.artist_image.collect_artist_image", return_value="http://img.url"),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=("http://img.url", "sp999"),
+            ),
             patch("scheduler.update_artist_image"),
             patch("scheduler.release.collect_releases", return_value=([], 0)),
             patch("scheduler.save_releases"),
@@ -442,7 +445,8 @@ class TestRegisterArtistByMbid:
             patch("scheduler.get_artist_by_mbid", return_value=self._SAVED),
             patch(
                 "scheduler.artist_image.collect_artist_image",
-                side_effect=lambda *a, **kw: call_order.append("image") or "http://img",
+                side_effect=lambda *a, **kw: call_order.append("image")
+                or ("http://img", "sp999"),
             ),
             patch("scheduler.update_artist_image"),
             patch(

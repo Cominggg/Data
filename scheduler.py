@@ -384,7 +384,7 @@ def run_artist_image_update() -> None:
     logger.info("이미지 미수집 아티스트: %d건", len(artists))
     for a in artists:
         try:
-            image_url = artist_image.collect_artist_image(
+            image_url, _ = artist_image.collect_artist_image(
                 a["mbid"],
                 spotify_url=a.get("spotify_url"),
                 name=a.get("name"),
@@ -514,7 +514,7 @@ def register_artist_by_mbid(mbid: str) -> bool:
 
     if spotify_url:
         try:
-            image_url = artist_image.collect_artist_image(
+            image_url, _ = artist_image.collect_artist_image(
                 mbid, spotify_url=spotify_url, name=saved.get("name")
             )
             if image_url:
