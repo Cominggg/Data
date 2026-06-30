@@ -55,7 +55,9 @@ _RELEASE_TYPE_ORDER = {"Album": 0, "Single": 1}
 _CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 _BAN_PATH = os.path.join(_CHECKPOINT_DIR, "spotify_ban.json")
 _STATUS_UPDATE_CHECKPOINT = os.path.join(_CHECKPOINT_DIR, "status_update.json")
+_IMAGE_FAILED_PATH = os.path.join(_CHECKPOINT_DIR, "image_failed.json")
 _BAN_MARGIN_HOURS = 25  # Spotify 24h 밴 + 1h 마진
+_IMAGE_RETRY_DAYS = 30  # 이미지 미해결 아티스트 재시도 주기
 
 
 def _progress_path(job_name: str) -> str:
@@ -149,6 +151,31 @@ def _clear_progress(job_name: str) -> None:
             os.remove(path)
         except Exception as e:
             logger.warning("진행 체크포인트 삭제 실패 (%s): %s", job_name, e)
+
+
+def _load_failed_image_artists() -> dict:
+    """image_failed 체크포인트에서 {artist_id: 마지막 실패일(YYYYMMDD)} 맵을 로드한다."""
+    if not os.path.exists(_IMAGE_FAILED_PATH):
+        return {}
+    try:
+        with open(_IMAGE_FAILED_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {int(k): v for k, v in data.items()}
+        return {}
+    except Exception as e:
+        logger.warning("image_failed 체크포인트 로드 실패 — 초기화: %s", e)
+        return {}
+
+
+def _save_failed_image_artists(failed: dict) -> None:
+    """{artist_id: 마지막 실패일(YYYYMMDD)} 맵을 image_failed 체크포인트에 저장한다."""
+    os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
+    try:
+        with open(_IMAGE_FAILED_PATH, "w", encoding="utf-8") as f:
+            json.dump({str(k): v for k, v in failed.items()}, f)
+    except Exception as e:
+        logger.warning("image_failed 체크포인트 저장 실패: %s", e)
 
 
 def _attach_file_handler(log_path: str, rotating: bool = False) -> None:
@@ -383,14 +410,27 @@ def run_new_concert_collect(stdate: Optional[str] = None) -> None:
 
 
 def run_artist_image_update() -> None:
-    """image_url 미수집 아티스트의 프로필 이미지를 수집한다 (주 1회, 목요일)."""
+    """image_url 미수집 아티스트의 프로필 이미지를 수집한다 (주 1회, 목요일).
+
+    한 번 실패(Spotify 미매칭·이미지 없음)한 아티스트는 image_failed 체크포인트에
+    마지막 실패일을 기록해두고, _IMAGE_RETRY_DAYS가 지나기 전까지는 재시도 대상에서
+    제외한다 — 매주 동일한 잔여 아티스트로 Spotify API를 반복 호출하지 않기 위함.
+    """
     logger.info("=== 아티스트 이미지 수집 잡 시작 ===")
     if _is_banned():
         logger.warning("Spotify 429 밴 유효 — 이미지 수집 건너뜀")
         return
     artists = get_artists_without_image()
-    logger.info("이미지 미수집 아티스트: %d건", len(artists))
-    for a in artists:
+    failed = _load_failed_image_artists()
+    cutoff = (datetime.now() - timedelta(days=_IMAGE_RETRY_DAYS)).strftime("%Y%m%d")
+    targets = [a for a in artists if failed.get(a["id"], "") < cutoff]
+    skipped = len(artists) - len(targets)
+    if skipped:
+        logger.info("최근 %d일 내 실패 기록 — 재시도 보류: %d건", _IMAGE_RETRY_DAYS, skipped)
+    logger.info("이미지 수집 시도 대상: %d건", len(targets))
+
+    today = datetime.now().strftime("%Y%m%d")
+    for a in targets:
         try:
             image_url, spotify_id = artist_image.collect_artist_image(
                 a["mbid"],
@@ -402,8 +442,12 @@ def run_artist_image_update() -> None:
             continue
         if image_url:
             update_artist_image(a["id"], image_url)
+            failed.pop(a["id"], None)
+        else:
+            failed[a["id"]] = today
         if not a.get("spotify_url") and spotify_id:
             upsert_artist_url(a["id"], "Spotify", artist_image.spotify_artist_url(spotify_id))
+    _save_failed_image_artists(failed)
     logger.info("=== 아티스트 이미지 수집 잡 완료 ===")
 
 
@@ -633,9 +677,9 @@ def _build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
     scheduler.add_job(run_concert_status_update, "cron", hour=4, minute=0)
     scheduler.add_job(run_new_concert_collect, "cron", hour=4, minute=30)
-    scheduler.add_job(run_release_update, "cron", hour=2)
+    scheduler.add_job(run_release_update, "cron", hour=5)
     scheduler.add_job(run_wikipedia_collect, "cron", day_of_week="thu", hour=3)
-    scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=5)
+    scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=2)
     scheduler.add_job(run_setlist_collect, "cron", hour=6)
     return scheduler
 

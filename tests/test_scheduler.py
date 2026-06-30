@@ -1,6 +1,7 @@
 """scheduler.py 단위 테스트."""
 import json
 import os
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -701,6 +702,10 @@ class TestRunArtistImageUpdate:
         "spotify_url": "https://open.spotify.com/artist/existing",
     }
 
+    @pytest.fixture(autouse=True)
+    def isolate_image_failed_checkpoint(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(tmp_path / "image_failed.json"))
+
     def test_upserts_artist_url_when_fallback_finds_spotify_id(self):
         """spotify_url이 없었는데 fallback으로 찾았다면 artist_url에 저장해야 한다."""
         with (
@@ -751,6 +756,80 @@ class TestRunArtistImageUpdate:
 
         mock_update_image.assert_not_called()
         mock_upsert.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# run_artist_image_update — image_failed 체크포인트 기반 재시도 보류
+# ---------------------------------------------------------------------------
+class TestRunArtistImageUpdateRetrySkip:
+    _ARTIST = {"id": 1, "mbid": "mbid-1", "name": "아티스트", "spotify_url": None}
+
+    def test_skips_artist_failed_within_retry_window(self, tmp_path, monkeypatch):
+        """최근 실패 기록이 있는 아티스트는 재시도하지 않아야 한다."""
+        failed_path = tmp_path / "image_failed.json"
+        recent = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        failed_path.write_text(json.dumps({"1": recent}))
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(failed_path))
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST]),
+            patch("scheduler.artist_image.collect_artist_image") as mock_collect,
+        ):
+            run_artist_image_update()
+
+        mock_collect.assert_not_called()
+
+    def test_retries_artist_failed_outside_retry_window(self, tmp_path, monkeypatch):
+        """재시도 주기를 지난 실패 기록은 다시 시도해야 한다."""
+        failed_path = tmp_path / "image_failed.json"
+        old = (datetime.now() - timedelta(days=31)).strftime("%Y%m%d")
+        failed_path.write_text(json.dumps({"1": old}))
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(failed_path))
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST]),
+            patch(
+                "scheduler.artist_image.collect_artist_image", return_value=(None, None)
+            ) as mock_collect,
+        ):
+            run_artist_image_update()
+
+        mock_collect.assert_called_once()
+
+    def test_records_failure_when_image_not_found(self, tmp_path, monkeypatch):
+        """이미지를 찾지 못하면 image_failed 체크포인트에 오늘 날짜로 기록해야 한다."""
+        failed_path = tmp_path / "image_failed.json"
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(failed_path))
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST]),
+            patch("scheduler.artist_image.collect_artist_image", return_value=(None, None)),
+        ):
+            run_artist_image_update()
+
+        saved = json.loads(failed_path.read_text())
+        assert saved == {"1": datetime.now().strftime("%Y%m%d")}
+
+    def test_clears_failure_record_when_image_found(self, tmp_path, monkeypatch):
+        """이미지를 새로 찾으면 기존 실패 기록을 제거해야 한다."""
+        failed_path = tmp_path / "image_failed.json"
+        old = (datetime.now() - timedelta(days=31)).strftime("%Y%m%d")
+        failed_path.write_text(json.dumps({"1": old}))
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(failed_path))
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST]),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=("http://img.url", "found-id"),
+            ),
+            patch("scheduler.update_artist_image"),
+            patch("scheduler.upsert_artist_url"),
+        ):
+            run_artist_image_update()
+
+        saved = json.loads(failed_path.read_text())
+        assert saved == {}
 
 
 # ---------------------------------------------------------------------------
