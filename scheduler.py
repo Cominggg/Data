@@ -275,8 +275,9 @@ def run_initial_collect(
         logger.info("--skip-kopis 플래그 감지 — KOPIS 수집·매칭 건너뜀")
     else:
         # KOPIS 수집 + 매칭으로 내한 확정 아티스트를 먼저 파악한다.
+        # use_prfstate=True — 초기 수집은 검수 큐(PENDING) 없이 실제 KOPIS 상태로 저장한다.
         logger.info("KOPIS 수집·매칭 실행 — 릴리즈 우선 수집 대상 결정")
-        run_new_concert_collect(stdate="20200101")
+        run_new_concert_collect(stdate="20230101", use_prfstate=True)
 
     if skip_releases:
         logger.info("--skip-releases 플래그 감지 — 릴리즈 수집 건너뜀")
@@ -371,12 +372,16 @@ def run_concert_status_update() -> None:
     logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
 
-def run_new_concert_collect(stdate: Optional[str] = None) -> None:
+def run_new_concert_collect(stdate: Optional[str] = None, use_prfstate: bool = False) -> None:
     """신규 공연 탐지·저장·매칭 + is_coming 동기화 (매일).
 
     마지막 수집일 이후 등록·수정된 공연만 증분 탐지한다.
     stdate 미전달 시 kopis.collect() 기본값(20250101)을 사용한다.
-    초기 수집 시에는 stdate="20200101"을 전달해 전체 기간을 탐색한다.
+    초기 수집 시에는 stdate="20230101"을 전달해 전체 기간을 탐색한다.
+
+    use_prfstate=False(기본, 스케줄러 잡)이면 status='PENDING'으로 저장해
+    어드민 검수 큐로 보낸다. use_prfstate=True(초기 수집 전용)이면 KOPIS
+    prfstate를 그대로 반영해 검수 없이 실제 상태로 저장한다.
     """
     logger.info("=== 신규 공연 탐지 잡 시작 ===")
 
@@ -394,7 +399,7 @@ def run_new_concert_collect(stdate: Optional[str] = None) -> None:
     ]
     if new_concerts:
         logger.info("신규 공연 %d건 저장 시작", len(new_concerts))
-        save_concerts(new_concerts)
+        save_concerts(new_concerts, use_prfstate=use_prfstate)
         unmatched = get_unmatched_concerts()
         all_matches: list[dict] = []
         for concert in unmatched:

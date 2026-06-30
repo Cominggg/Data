@@ -117,6 +117,29 @@ class TestRunInitialCollect:
         mock_collect.assert_not_called()
         mock_save.assert_not_called()
 
+    def test_calls_new_concert_collect_with_init_stdate_and_use_prfstate(self):
+        """초기 수집은 stdate=20230101, use_prfstate=True로 KOPIS 수집을 호출해야 한다."""
+        with (
+            patch("scheduler.get_all_artist_mbids", return_value=[]),
+            patch("scheduler.musicbrainz.collect_artists", return_value=[]),
+            patch("scheduler.save_artists"),
+            patch("scheduler.run_new_concert_collect") as mock_new_concert,
+        ):
+            run_initial_collect()
+
+        mock_new_concert.assert_called_once_with(stdate="20230101", use_prfstate=True)
+
+    def test_skip_kopis_does_not_call_new_concert_collect(self):
+        """--skip-kopis 시 run_new_concert_collect가 호출되지 않아야 한다."""
+        with (
+            patch("scheduler.get_all_artist_mbids", return_value=[]),
+            patch("scheduler.musicbrainz.collect_artists", return_value=[]),
+            patch("scheduler.save_artists"),
+            patch("scheduler.run_new_concert_collect") as mock_new_concert,
+        ):
+            run_initial_collect(skip_kopis=True)
+
+        mock_new_concert.assert_not_called()
 
 
 class TestRunConcertStatusUpdate:
@@ -222,7 +245,24 @@ class TestRunNewConcertCollect:
         ):
             run_new_concert_collect()
 
-        mock_save.assert_called_once_with([new_concert])
+        mock_save.assert_called_once_with([new_concert], use_prfstate=False)
+
+    def test_saves_with_actual_prfstate_when_use_prfstate_true(self):
+        """use_prfstate=True로 호출 시 save_concerts에 use_prfstate=True가 전달되어야 한다."""
+        new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
+        with (
+            patch("scheduler.kopis.collect", return_value=[new_concert]),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.save_concerts") as mock_save,
+            patch("scheduler.get_unmatched_concerts", return_value=[]),
+            patch("scheduler.save_concert_artists"),
+            patch("scheduler.update_artist_is_coming"),
+        ):
+            run_new_concert_collect(use_prfstate=True)
+
+        mock_save.assert_called_once_with([new_concert], use_prfstate=True)
 
     def test_skips_new_concerts_without_alias_match(self):
         """alias 매칭 없는 신규 공연은 save_concerts가 호출되지 않아야 한다."""
