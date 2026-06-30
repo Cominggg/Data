@@ -5,6 +5,7 @@ from db.repository import (
     save_artists,
     save_concert_artists,
     update_artist_is_coming,
+    upsert_artist_url,
 )
 
 
@@ -225,6 +226,35 @@ class TestSaveArtists:
             c for c in mock_session.execute.call_args_list if "INSERT INTO artist" in str(c.args[0])
         ]
         assert len(artist_insert_calls) == 3
+
+
+class TestUpsertArtistUrl:
+    def _run(self, artist_id, url_type, url, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            upsert_artist_url(artist_id, url_type, url)
+
+    def test_inserts_into_artist_url_table(self):
+        """artist_url 테이블에 INSERT되어야 한다."""
+        mock_session = MagicMock()
+        self._run(5, "Spotify", "https://open.spotify.com/artist/abc123", mock_session)
+
+        sql, params = mock_session.execute.call_args.args
+        assert "INSERT INTO artist_url" in str(sql)
+        assert params == {
+            "artist_id": 5,
+            "type": "Spotify",
+            "url": "https://open.spotify.com/artist/abc123",
+        }
+
+    def test_on_conflict_artist_id_type_do_nothing(self):
+        """(artist_id, type) 중복 시 ON CONFLICT DO NOTHING이 포함되어야 한다."""
+        mock_session = MagicMock()
+        self._run(5, "Spotify", "https://open.spotify.com/artist/abc123", mock_session)
+
+        sql = str(mock_session.execute.call_args.args[0])
+        assert "ON CONFLICT (artist_id, type) DO NOTHING" in sql
 
 
 class TestSaveConcertArtists:

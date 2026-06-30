@@ -78,6 +78,19 @@ def save_artists(artists: list[dict]) -> None:
     logger.info("아티스트 저장 완료: %d / %d건 처리", saved, len(artists))
 
 
+def upsert_artist_url(artist_id: int, url_type: str, url: str) -> None:
+    """artist_url에 (artist_id, type) 신규 저장. 이미 존재하면 무시."""
+    with get_session() as session:
+        session.execute(
+            text("""
+                INSERT INTO artist_url (artist_id, type, url)
+                VALUES (:artist_id, :type, :url)
+                ON CONFLICT (artist_id, type) DO NOTHING
+            """),
+            {"artist_id": artist_id, "type": url_type, "url": url},
+        )
+
+
 def save_releases(artist_id: int, releases: list[dict]) -> None:
     """수집된 릴리즈 목록을 DB에 저장한다. release_group 단위 독립 트랜잭션으로 격리."""
     saved = 0
