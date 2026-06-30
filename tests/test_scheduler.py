@@ -687,6 +687,69 @@ class TestRunArtistImageUpdateBanGuard:
         mock_collect.assert_not_called()
 
 
+class TestRunArtistImageUpdate:
+    """run_artist_image_update()의 fallback Spotify URL 백필 검증."""
+
+    _ARTIST_NO_SPOTIFY = {"id": 1, "mbid": "mbid-1", "name": "NoSpotifyLink", "spotify_url": None}
+    _ARTIST_WITH_SPOTIFY = {
+        "id": 2,
+        "mbid": "mbid-2",
+        "name": "HasSpotifyLink",
+        "spotify_url": "https://open.spotify.com/artist/existing",
+    }
+
+    def test_upserts_artist_url_when_fallback_finds_spotify_id(self):
+        """spotify_url이 없었는데 fallback으로 찾았다면 artist_url에 저장해야 한다."""
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST_NO_SPOTIFY]),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=("http://img.url", "found-id"),
+            ),
+            patch("scheduler.update_artist_image") as mock_update_image,
+            patch("scheduler.upsert_artist_url") as mock_upsert,
+        ):
+            run_artist_image_update()
+
+        mock_update_image.assert_called_once_with(1, "http://img.url")
+        mock_upsert.assert_called_once_with(
+            1, "Spotify", "https://open.spotify.com/artist/found-id"
+        )
+
+    def test_does_not_upsert_when_spotify_url_already_present(self):
+        """이미 spotify_url이 있던 아티스트는 artist_url을 다시 저장하지 않아야 한다."""
+        with (
+            patch(
+                "scheduler.get_artists_without_image", return_value=[self._ARTIST_WITH_SPOTIFY]
+            ),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=("http://img.url", "existing"),
+            ),
+            patch("scheduler.update_artist_image"),
+            patch("scheduler.upsert_artist_url") as mock_upsert,
+        ):
+            run_artist_image_update()
+
+        mock_upsert.assert_not_called()
+
+    def test_does_not_upsert_when_spotify_id_not_found(self):
+        """spotify_id조차 못 찾으면 artist_url을 저장하지 않아야 한다."""
+        with (
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST_NO_SPOTIFY]),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                return_value=(None, None),
+            ),
+            patch("scheduler.update_artist_image") as mock_update_image,
+            patch("scheduler.upsert_artist_url") as mock_upsert,
+        ):
+            run_artist_image_update()
+
+        mock_update_image.assert_not_called()
+        mock_upsert.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # 잡 간 체크포인트 격리
 # ---------------------------------------------------------------------------

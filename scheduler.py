@@ -40,6 +40,7 @@ from db.repository import (
     update_artist_is_coming,
     update_concert_status,
     update_spotify_album_total,
+    upsert_artist_url,
 )
 from matchers.artist_matcher import has_match, match_concert
 
@@ -384,7 +385,7 @@ def run_artist_image_update() -> None:
     logger.info("이미지 미수집 아티스트: %d건", len(artists))
     for a in artists:
         try:
-            image_url, _ = artist_image.collect_artist_image(
+            image_url, spotify_id = artist_image.collect_artist_image(
                 a["mbid"],
                 spotify_url=a.get("spotify_url"),
                 name=a.get("name"),
@@ -394,6 +395,8 @@ def run_artist_image_update() -> None:
             continue
         if image_url:
             update_artist_image(a["id"], image_url)
+        if not a.get("spotify_url") and spotify_id:
+            upsert_artist_url(a["id"], "Spotify", artist_image.spotify_artist_url(spotify_id))
     logger.info("=== 아티스트 이미지 수집 잡 완료 ===")
 
 
