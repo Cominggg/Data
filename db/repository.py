@@ -596,14 +596,13 @@ def save_concert_artist_candidates(matches: list[dict]) -> None:
             session.execute(
                 text("""
                     INSERT INTO concert_artist_candidate
-                        (concert_id, artist_id, matched_by)
-                    VALUES (:concert_id, :artist_id, :matched_by)
+                        (concert_id, artist_id)
+                    VALUES (:concert_id, :artist_id)
                     ON CONFLICT (concert_id, artist_id) DO NOTHING
                 """),
                 {
                     "concert_id": match["concert_id"],
                     "artist_id": match["artist_id"],
-                    "matched_by": match.get("matched_by", "title"),
                 },
             )
     logger.info("공연-아티스트 후보 저장 완료: %d건 처리", len(matches))

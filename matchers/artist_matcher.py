@@ -67,7 +67,7 @@ def match_concert(concert: dict, aliases: list[dict]) -> tuple[list[dict], list[
                 concert_id, alias["artist_id"], title,
             )
         matches = [
-            {"concert_id": concert_id, "artist_id": alias["artist_id"], "matched_by": "title"}
+            {"concert_id": concert_id, "artist_id": alias["artist_id"]}
             for alias in matched_aliases
         ]
         return matches, []
