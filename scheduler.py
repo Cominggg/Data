@@ -59,9 +59,24 @@ _IMAGE_FAILED_PATH = os.path.join(_CHECKPOINT_DIR, "image_failed.json")
 _BAN_MARGIN_HOURS = 25  # Spotify 24h 밴 + 1h 마진
 _IMAGE_RETRY_DAYS = 30  # 이미지 미해결 아티스트 재시도 주기
 
+_scheduler: Optional[BackgroundScheduler] = None  # main()에서 데몬 실행 시에만 할당됨
+
 
 def _progress_path(job_name: str) -> str:
     return os.path.join(_CHECKPOINT_DIR, f"{job_name}.json")
+
+
+def _reschedule_on_ban_lift(job_func, banned_until: datetime) -> None:
+    """밴 해제 시각에 job_func을 1회성으로 재실행하도록 스케줄러에 등록한다.
+
+    CLI 단발 실행 등 데몬으로 뜨지 않은 경우(_scheduler가 None)는 아무 것도 하지 않는다.
+    동일 잡에 대해 재밴이 걸려도 job id를 고정해 replace_existing으로 중복 등록을 막는다.
+    """
+    if _scheduler is None:
+        return
+    job_id = f"resume_{job_func.__name__}"
+    _scheduler.add_job(job_func, "date", run_date=banned_until, id=job_id, replace_existing=True)
+    logger.info("밴 해제 시각(%s)에 %s 재실행 예약", banned_until.isoformat(), job_func.__name__)
 
 
 def _is_banned() -> bool:
@@ -447,9 +462,10 @@ def run_artist_image_update() -> None:
                 spotify_url=a.get("spotify_url"),
                 name=a.get("name"),
             )
-        except SpotifyRateLimitError:
+        except SpotifyRateLimitError as e:
             logger.error("Spotify 429 — 이미지 수집 중단 (artist_id=%d)", a["id"])
-            _save_ban()
+            banned_until = _save_ban(getattr(e, "retry_after", 0))
+            _reschedule_on_ban_lift(run_artist_image_update, banned_until)
             break
         except Exception as e:
             logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", a["mbid"], e)
@@ -489,10 +505,11 @@ def run_release_update() -> None:
             if raw:
                 save_releases(artist_id, _sort_releases(raw))
             completed_ids.add(artist_id)
-        except SpotifyRateLimitError:
+        except SpotifyRateLimitError as e:
             logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%d)", artist_id)
-            _save_ban()
+            banned_until = _save_ban(getattr(e, "retry_after", 0))
             _save_progress("release_update", completed_ids)
+            _reschedule_on_ban_lift(run_release_update, banned_until)
             break
         except Exception as e:
             logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
@@ -883,14 +900,15 @@ def main() -> None:
     api_thread.start()
     logger.info("API 서버 시작: http://%s:%d", api_host, api_port)
 
-    scheduler = _build_scheduler()
-    scheduler.start()
+    global _scheduler
+    _scheduler = _build_scheduler()
+    _scheduler.start()
     logger.info("스케줄러 시작 (종료: Ctrl+C)")
     try:
         while True:
             time.sleep(60)
     except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown()
+        _scheduler.shutdown()
         logger.info("스케줄러 종료")
 
 

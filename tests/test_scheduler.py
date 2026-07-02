@@ -799,6 +799,35 @@ class TestRunReleaseUpdateCheckpoint:
         assert 1 in completed
         assert 2 not in completed
 
+    def test_reschedules_on_ban_lift_when_429(self, tmp_path, monkeypatch):
+        """429 발생 시 밴 해제 시각에 run_release_update를 재등록해야 한다."""
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
+        from unittest.mock import MagicMock
+
+        from collectors.spotify_client import SpotifyRateLimitError
+
+        mock_scheduler = MagicMock()
+        monkeypatch.setattr("scheduler._scheduler", mock_scheduler)
+
+        with (
+            patch("scheduler.get_matched_artists_with_spotify", return_value=self._ARTISTS),
+            patch("scheduler.get_spotify_album_total", return_value=None),
+            patch("scheduler.get_existing_release_spotify_ids", return_value=set()),
+            patch(
+                "scheduler.release.collect_releases",
+                side_effect=[([], 0), SpotifyRateLimitError(retry_after=30)],
+            ),
+            patch("scheduler.update_spotify_album_total"),
+            patch("scheduler.save_releases"),
+        ):
+            run_release_update()
+
+        mock_scheduler.add_job.assert_called_once()
+        _, kwargs = mock_scheduler.add_job.call_args
+        assert kwargs["id"] == "resume_run_release_update"
+        assert kwargs["replace_existing"] is True
+
     def test_clears_progress_on_normal_completion(self, tmp_path, monkeypatch):
         """정상 완료 시 잡별 progress 파일을 삭제해야 한다."""
         monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
@@ -905,6 +934,33 @@ class TestRunArtistImageUpdateBanGuard:
         assert mock_collect.call_count == 1
         assert os.path.exists(ban_path)
         assert "banned_until" in json.load(open(ban_path))
+
+    def test_reschedules_on_ban_lift_when_429(self, tmp_path, monkeypatch):
+        """429 발생 시 밴 해제 시각에 run_artist_image_update를 재등록해야 한다."""
+        from unittest.mock import MagicMock
+
+        from collectors.spotify_client import SpotifyRateLimitError
+
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        monkeypatch.setattr("scheduler._BAN_PATH", str(tmp_path / "spotify_ban.json"))
+        monkeypatch.setattr("scheduler._IMAGE_FAILED_PATH", str(tmp_path / "image_failed.json"))
+        mock_scheduler = MagicMock()
+        monkeypatch.setattr("scheduler._scheduler", mock_scheduler)
+        artists = [{"id": 1, "mbid": "mbid-1", "name": "A1", "spotify_url": None}]
+
+        with (
+            patch("scheduler.get_artists_without_image", return_value=artists),
+            patch(
+                "scheduler.artist_image.collect_artist_image",
+                side_effect=SpotifyRateLimitError(retry_after=30),
+            ),
+        ):
+            run_artist_image_update()
+
+        mock_scheduler.add_job.assert_called_once()
+        _, kwargs = mock_scheduler.add_job.call_args
+        assert kwargs["id"] == "resume_run_artist_image_update"
+        assert kwargs["replace_existing"] is True
 
 
 class TestRunArtistImageUpdate:
