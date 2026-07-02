@@ -332,13 +332,6 @@ def get_all_artist_mbids() -> list[str]:
     return [row[0] for row in rows]
 
 
-def get_all_artists() -> list[dict]:
-    """Wikipedia 수집용 아티스트 목록 (artist_id, name)을 반환한다."""
-    with get_session() as session:
-        rows = session.execute(text("SELECT id, name FROM artist")).fetchall()
-    return [{"artist_id": row[0], "name": row[1]} for row in rows]
-
-
 def get_artists_without_ko_alias() -> list[dict]:
     """artist_alias에 locale='ko' 행이 없는 아티스트 목록(artist_id, name, sort_name)을 반환한다."""
     with get_session() as session:

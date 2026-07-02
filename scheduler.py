@@ -465,7 +465,7 @@ def run_artist_image_update() -> None:
             )
         except SpotifyRateLimitError as e:
             logger.error("Spotify 429 — 이미지 수집 중단 (artist_id=%d)", a["id"])
-            banned_until = _save_ban(getattr(e, "retry_after", 0))
+            banned_until = _save_ban(e.retry_after)
             _reschedule_on_ban_lift(run_artist_image_update, banned_until)
             break
         except Exception as e:
@@ -508,7 +508,7 @@ def run_release_update() -> None:
             completed_ids.add(artist_id)
         except SpotifyRateLimitError as e:
             logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%d)", artist_id)
-            banned_until = _save_ban(getattr(e, "retry_after", 0))
+            banned_until = _save_ban(e.retry_after)
             _save_progress("release_update", completed_ids)
             _reschedule_on_ban_lift(run_release_update, banned_until)
             break
