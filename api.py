@@ -46,6 +46,20 @@ def _wrap(fn, key: Tuple, *args):
         _release_task(key)
 
 
+def _sync_response(result: dict) -> dict:
+    """scheduler.py의 discriminated dict를 동기 API 응답으로 변환한다.
+
+    status: not_found → 404, skipped → success:false + reason, ok → success:true + 데이터.
+    """
+    status = result["status"]
+    if status == "not_found":
+        raise HTTPException(status_code=404, detail="not found")
+    if status == "skipped":
+        return {"success": False, "reason": result["reason"]}
+    data = {k: v for k, v in result.items() if k != "status"}
+    return {"success": True, **data}
+
+
 def _verify_secret(x_internal_secret: Optional[str] = Header(default=None)) -> None:
     if not _INTERNAL_SECRET or x_internal_secret != _INTERNAL_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -59,17 +73,19 @@ class ArtistRegisterRequest(BaseModel):
     mbid: str
 
 
-@app.post("/collect/concert", status_code=202)
+@app.post("/collect/concert")
 def trigger_collect_concert(
     req: ConcertCollectRequest,
-    background_tasks: BackgroundTasks,
     _: None = Depends(_verify_secret),
 ) -> dict:
     key = ("concert", req.kopis_id)
     if not _acquire_task(key):
-        return {"accepted": False, "reason": "already running"}
-    background_tasks.add_task(_wrap, collect_and_save_concert, key, req.kopis_id)
-    return {"accepted": True}
+        raise HTTPException(status_code=409, detail="already running")
+    try:
+        result = collect_and_save_concert(req.kopis_id)
+    finally:
+        _release_task(key)
+    return _sync_response(result)
 
 
 @app.post("/collect/artist/{artist_id}/releases", status_code=202)
@@ -85,30 +101,34 @@ def trigger_collect_releases(
     return {"accepted": True}
 
 
-@app.post("/collect/concert/{concert_id}/setlist", status_code=202)
+@app.post("/collect/concert/{concert_id}/setlist")
 def trigger_collect_setlist(
     concert_id: int,
-    background_tasks: BackgroundTasks,
     _: None = Depends(_verify_secret),
 ) -> dict:
     key = ("setlist", concert_id)
     if not _acquire_task(key):
-        return {"accepted": False, "reason": "already running"}
-    background_tasks.add_task(_wrap, collect_and_save_setlist, key, concert_id)
-    return {"accepted": True}
+        raise HTTPException(status_code=409, detail="already running")
+    try:
+        result = collect_and_save_setlist(concert_id)
+    finally:
+        _release_task(key)
+    return _sync_response(result)
 
 
-@app.post("/collect/artist", status_code=202)
+@app.post("/collect/artist")
 def trigger_register_artist(
     req: ArtistRegisterRequest,
-    background_tasks: BackgroundTasks,
     _: None = Depends(_verify_secret),
 ) -> dict:
     key = ("artist", req.mbid)
     if not _acquire_task(key):
-        return {"accepted": False, "reason": "already running"}
-    background_tasks.add_task(_wrap, register_artist_by_mbid, key, req.mbid)
-    return {"accepted": True}
+        raise HTTPException(status_code=409, detail="already running")
+    try:
+        result = register_artist_by_mbid(req.mbid)
+    finally:
+        _release_task(key)
+    return _sync_response(result)
 
 
 @app.get("/search/artists")
