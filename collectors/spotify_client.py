@@ -13,6 +13,10 @@ load_dotenv()
 class SpotifyRateLimitError(requests.HTTPError):
     """Spotify 429 수신 시 발생. 호출부는 수집된 데이터를 저장하고 처리를 중단해야 한다."""
 
+    def __init__(self, *args, retry_after: int = 0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.retry_after = retry_after
+
 logger = logging.getLogger(__name__)
 
 _SPOTIFY_AUTH_URL = "https://accounts.spotify.com/api/token"
@@ -66,6 +70,7 @@ def spotify_get(path: str, params: Optional[dict] = None) -> dict:
         raise SpotifyRateLimitError(
             f"Spotify 429: Retry-After={retry_after}s, path={path}",
             response=response,
+            retry_after=retry_after,
         )
     response.raise_for_status()
     return response.json()

@@ -725,6 +725,26 @@ class TestIsBanned:
         data = json.load(open(ban_path))
         assert "banned_until" in data
 
+    def test_save_ban_without_retry_after_uses_fixed_margin(self, tmp_path, monkeypatch):
+        """retry_after 없으면 기존 고정 _BAN_MARGIN_HOURS 기준으로 계산해야 한다."""
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        before = datetime.now()
+        banned_until = _save_ban()
+        expected = before + timedelta(hours=25)
+        assert abs((banned_until - expected).total_seconds()) < 5
+
+    def test_save_ban_with_retry_after_uses_measured_value(self, tmp_path, monkeypatch):
+        """retry_after가 있으면 실측값 + 5초 마진 기준으로 계산해야 한다."""
+        ban_path = str(tmp_path / "spotify_ban.json")
+        monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
+        monkeypatch.setattr("scheduler._CHECKPOINT_DIR", str(tmp_path))
+        before = datetime.now()
+        banned_until = _save_ban(retry_after_seconds=30)
+        expected = before + timedelta(seconds=35)
+        assert abs((banned_until - expected).total_seconds()) < 5
+
 
 # ---------------------------------------------------------------------------
 # run_release_update — 체크포인트 + total 캐시

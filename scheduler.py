@@ -79,19 +79,24 @@ def _is_banned() -> bool:
         return False
 
 
-def _save_ban() -> None:
-    """Spotify 429 발생 시 ban 해제 시각을 spotify_ban.json에 저장한다."""
+def _save_ban(retry_after_seconds: int = 0) -> datetime:
+    """Spotify 429 발생 시 ban 해제 시각을 spotify_ban.json에 저장하고 반환한다.
+
+    retry_after_seconds가 양수면 실측 Retry-After 값(+5초 안전 마진) 기준으로,
+    아니면 기존 고정 _BAN_MARGIN_HOURS 기준으로 밴 해제 시각을 계산한다.
+    """
     os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
-    data = {
-        "banned_until": (datetime.now() + timedelta(hours=_BAN_MARGIN_HOURS)).isoformat(
-            timespec="seconds"
-        )
-    }
+    if retry_after_seconds > 0:
+        banned_until = datetime.now() + timedelta(seconds=retry_after_seconds + 5)
+    else:
+        banned_until = datetime.now() + timedelta(hours=_BAN_MARGIN_HOURS)
+    data = {"banned_until": banned_until.isoformat(timespec="seconds")}
     try:
         with open(_BAN_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f)
     except Exception as e:
         logger.warning("ban 파일 저장 실패: %s", e)
+    return banned_until
 
 
 def _load_progress(job_name: str) -> Set[int]:
