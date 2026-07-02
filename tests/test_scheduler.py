@@ -21,6 +21,7 @@ from scheduler import (
     run_artist_image_update,
     run_concert_status_update,
     run_initial_collect,
+    run_ja_romanize_collect,
     run_missing_release_update,
     run_new_concert_collect,
     run_release_update,
@@ -32,7 +33,7 @@ class TestRunInitialCollect:
     @pytest.fixture(autouse=True)
     def mock_sub_jobs(self):
         with (
-            patch("scheduler.run_wikipedia_collect"),
+            patch("scheduler.run_ja_romanize_collect"),
             patch("scheduler.run_new_concert_collect"),
             patch("scheduler.get_matched_artists_with_spotify", return_value=[]),
             patch("scheduler.run_artist_image_update"),
@@ -367,6 +368,46 @@ class TestRunSetlistCollect:
             run_setlist_collect()
 
         mock_collect.assert_called_once()
+
+
+class TestRunJaRomanizeCollect:
+    def test_skips_when_no_target_artists(self):
+        """대상 아티스트가 없으면 변환·저장을 시도하지 않는다."""
+        with (
+            patch("scheduler.get_artists_without_ko_alias", return_value=[]),
+            patch("scheduler.ja_romanize.collect_ko_aliases") as mock_convert,
+            patch("scheduler.save_aliases") as mock_save,
+        ):
+            run_ja_romanize_collect()
+
+        mock_convert.assert_not_called()
+        mock_save.assert_not_called()
+
+    def test_converts_and_saves_aliases(self):
+        """대상 아티스트를 변환해 save_aliases로 저장해야 한다."""
+        artists = [{"artist_id": 1, "name": "米津玄師", "sort_name": "Yonezu, Kenshi"}]
+        aliases = [{"artist_id": 1, "name": "요네즈 켄시", "locale": "ko"}]
+        with (
+            patch("scheduler.get_artists_without_ko_alias", return_value=artists),
+            patch("scheduler.ja_romanize.collect_ko_aliases", return_value=aliases) as mock_convert,
+            patch("scheduler.save_aliases") as mock_save,
+        ):
+            run_ja_romanize_collect()
+
+        mock_convert.assert_called_once_with(artists)
+        mock_save.assert_called_once_with(aliases)
+
+    def test_does_not_save_when_conversion_yields_nothing(self):
+        """변환 결과가 빈 리스트면 save_aliases를 호출하지 않는다."""
+        artists = [{"artist_id": 2, "name": "YOASOBI", "sort_name": "YOASOBI"}]
+        with (
+            patch("scheduler.get_artists_without_ko_alias", return_value=artists),
+            patch("scheduler.ja_romanize.collect_ko_aliases", return_value=[]),
+            patch("scheduler.save_aliases") as mock_save,
+        ):
+            run_ja_romanize_collect()
+
+        mock_save.assert_not_called()
 
 
 class TestBuildScheduler:

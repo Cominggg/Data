@@ -11,7 +11,7 @@ from typing import List, Optional, Set
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from collectors import artist_image, kopis, musicbrainz, release, setlist, wikipedia
+from collectors import artist_image, ja_romanize, kopis, musicbrainz, release, setlist
 from collectors.spotify_client import SpotifyRateLimitError
 from db.repository import (
     get_active_concerts,
@@ -255,7 +255,7 @@ def run_initial_collect(
     skip_artists: bool = False,
     force_artists: bool = False,
     skip_kopis: bool = False,
-    skip_wikipedia: bool = False,
+    skip_ja_romanize: bool = False,
     skip_releases: bool = False,
     skip_artist_image: bool = False,
     skip_setlist: bool = False,
@@ -265,7 +265,7 @@ def run_initial_collect(
     재개 지원: 이미 DB에 저장된 아티스트는 건너뛴다.
     force_artists=True 시 기존 DB 아티스트를 건너뛰지 않고 전체 재수집한다.
     skip_kopis=True 시 KOPIS 수집·매칭을 건너뛰고 릴리즈 수집으로 진행한다.
-    skip_wikipedia=True 시 Wikipedia alias 수집을 건너뛴다.
+    skip_ja_romanize=True 시 로마자→한글 alias 변환을 건너뛴다.
     skip_releases=True 시 릴리즈 수집을 건너뛴다.
     skip_artist_image=True 시 아티스트 이미지 수집을 건너뛴다.
     skip_setlist=True 시 setlist.fm 수집을 건너뛴다.
@@ -286,10 +286,10 @@ def run_initial_collect(
         artists = musicbrainz.collect_artists(skip_mbids=saved_mbids)
         save_artists(artists)
 
-    if skip_wikipedia:
-        logger.info("--skip-wikipedia 플래그 감지 — Wikipedia alias 수집 건너뜀")
+    if skip_ja_romanize:
+        logger.info("--skip-ja-romanize 플래그 감지 — 로마자→한글 alias 변환 건너뜀")
     else:
-        run_wikipedia_collect()
+        run_ja_romanize_collect()
 
     if skip_kopis:
         logger.info("--skip-kopis 플래그 감지 — KOPIS 수집·매칭 건너뜀")
@@ -347,21 +347,22 @@ def run_initial_collect(
     logger.info("=== 초기 수집 완료 ===")
 
 
-def run_wikipedia_collect() -> None:
-    """Wikipedia 한국어 alias 수집 (초기 1회 + 주 1회, 목요일).
+def run_ja_romanize_collect() -> None:
+    """일본어 아티스트명을 로마자 표기(sort_name) 기반 규칙 변환으로 한글 alias화한다 (주 1회).
 
-    locale='ko' alias가 이미 존재하는 아티스트는 건너뛴다.
+    locale='ko' alias가 이미 존재하는 아티스트는 건너뛴다. 외부 API 호출 없이
+    DB에 이미 저장된 sort_name만으로 동작한다.
     """
-    logger.info("=== Wikipedia 한국어 alias 수집 잡 시작 ===")
+    logger.info("=== 로마자→한글 alias 변환 잡 시작 ===")
     artists = get_artists_without_ko_alias()
     logger.info("한국어 alias 미수집 아티스트: %d건", len(artists))
     if not artists:
-        logger.info("=== Wikipedia 한국어 alias 수집 잡 완료 (대상 없음) ===")
+        logger.info("=== 로마자→한글 alias 변환 잡 완료 (대상 없음) ===")
         return
-    aliases = wikipedia.collect_korean_aliases(artists)
+    aliases = ja_romanize.collect_ko_aliases(artists)
     if aliases:
         save_aliases(aliases)
-    logger.info("=== Wikipedia 한국어 alias 수집 잡 완료 ===")
+    logger.info("=== 로마자→한글 alias 변환 잡 완료 ===")
 
 
 
@@ -739,7 +740,7 @@ def _build_scheduler() -> BackgroundScheduler:
     scheduler.add_job(run_concert_status_update, "cron", hour=4, minute=0)
     scheduler.add_job(run_new_concert_collect, "cron", hour=4, minute=30)
     scheduler.add_job(run_release_update, "cron", hour=5)
-    scheduler.add_job(run_wikipedia_collect, "cron", day_of_week="thu", hour=3)
+    scheduler.add_job(run_ja_romanize_collect, "cron", day_of_week="thu", hour=3)
     scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=2)
     scheduler.add_job(run_setlist_collect, "cron", hour=6)
     return scheduler
@@ -776,9 +777,9 @@ def main() -> None:
         help="KOPIS 수집·매칭을 건너뛰고 릴리즈 수집으로 바로 진행 (init 전용)",
     )
     parser.add_argument(
-        "--skip-wikipedia",
+        "--skip-ja-romanize",
         action="store_true",
-        help="Wikipedia alias 수집을 건너뜀 (init 전용)",
+        help="로마자→한글 alias 변환을 건너뜀 (init 전용)",
     )
     parser.add_argument(
         "--skip-releases",
@@ -811,7 +812,7 @@ def main() -> None:
             "concert-status-update",
             "new-concert-collect",
             "release-update",
-            "wikipedia",
+            "ja-romanize",
             "artist-image",
             "setlist",
         ],
@@ -830,7 +831,7 @@ def main() -> None:
             skip_artists=args.skip_artists,
             force_artists=args.force_artists,
             skip_kopis=args.skip_kopis,
-            skip_wikipedia=args.skip_wikipedia,
+            skip_ja_romanize=args.skip_ja_romanize,
             skip_releases=args.skip_releases,
             skip_artist_image=args.skip_artist_image,
             skip_setlist=args.skip_setlist,
@@ -870,7 +871,7 @@ def main() -> None:
             "concert-status-update": run_concert_status_update,
             "new-concert-collect": run_new_concert_collect,
             "release-update": run_release_update,
-            "wikipedia": run_wikipedia_collect,
+            "ja-romanize": run_ja_romanize_collect,
             "artist-image": run_artist_image_update,
             "setlist": run_setlist_collect,
         }

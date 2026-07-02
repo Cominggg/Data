@@ -10,10 +10,10 @@ coming-data/
 │   ├── artist_image.py    # Spotify Web API 아티스트 프로필 이미지 수집
 │   ├── kopis.py           # KOPIS API 수집
 │   ├── lastfm.py          # Last.fm 월간 리스너 수 수집
+│   ├── ja_romanize.py     # sort_name 로마자 표기 → 한글 alias 규칙 변환
 │   ├── musicbrainz.py     # MusicBrainz 아티스트·멤버 수집
 │   ├── release.py         # MusicBrainz 릴리즈(앨범·싱글·EP) + 트랙·커버 수집
-│   ├── setlist.py         # setlist.fm 셋리스트 수집
-│   └── wikipedia.py       # Wikipedia 한국어 alias 수집
+│   └── setlist.py         # setlist.fm 셋리스트 수집
 ├── matchers/
 │   └── artist_matcher.py  # alias 기반 매칭 로직 (rapidfuzz)
 ├── db/
@@ -39,7 +39,7 @@ python scheduler.py
 # 플래그
 python scheduler.py --skip-artists    # 아티스트 수집 건너뜀
 python scheduler.py --skip-kopis     # KOPIS 수집 건너뜀
-python scheduler.py --skip-wikipedia # Wikipedia alias 수집 건너뜀
+python scheduler.py --skip-ja-romanize # 로마자→한글 alias 변환 건너뜀
 python scheduler.py --force-artists  # 아티스트 강제 재수집
 ```
 
@@ -68,7 +68,6 @@ python scheduler.py --force-artists  # 아티스트 강제 재수집
 | setlist.fm | `GET https://api.setlist.fm/rest/1.0/search/setlists` | - | Header: `x-api-key`, `Accept: application/json` 필수 |
 | Spotify Web API | `POST https://accounts.spotify.com/api/token`, `GET https://api.spotify.com/v1/artists/{id}`, `GET /v1/search` | rolling 30초 윈도우 (관대함) | Client Credentials Flow; `Authorization: Bearer {token}`; access_token 1h 캐시 |
 | Last.fm | `GET https://ws.audioscrobbler.com/2.0/` | - | method=`artist.getinfo`; 월간 리스너 수 수집 |
-| Wikipedia (ko) | `GET https://ko.wikipedia.org/w/api.php` | 비공식 권장 | `time.sleep(0.5)` 적용 |
 
 ## 수집 파이프라인 단계
 
