@@ -548,13 +548,16 @@ def run_recover(skip_releases: bool = False, skip_artist_image: bool = False) ->
     logger.info("=== 복구 수집 완료 ===")
 
 
-def register_artist_by_mbid(mbid: str) -> bool:
+def register_artist_by_mbid(mbid: str) -> dict:
     """어드민 요청으로 단일 아티스트를 등록한다.
 
     1) MusicBrainz에서 아티스트 상세 수집 후 DB 저장
-    2) Spotify URL이 있으면 이미지·릴리즈 수집
+    2) Spotify URL이 있으면 이미지 수집 (릴리즈 수집은 별도 엔드포인트에서 수행)
     Last.fm 리스너 수 필터를 적용하지 않는다.
-    성공 시 True, 수집 실패 시 False 반환.
+
+    MusicBrainz에 아티스트가 없으면 {"status": "not_found"}, 성공 시
+    {"status": "ok", "artist_id", "mbid", "name", "image_url", "aliases"}를 반환한다.
+    저장 직후 재조회에 실패하면 (있어선 안 되는 내부 불일치) RuntimeError를 발생시킨다.
 
     관리자가 명시적으로 호출하는 단건 작업이므로 ban 상태와 무관하게 실행한다.
     """
@@ -563,17 +566,17 @@ def register_artist_by_mbid(mbid: str) -> bool:
     artist = musicbrainz.collect_single_artist(mbid)
     if artist is None:
         logger.error("아티스트 수집 실패 — 등록 중단: mbid=%s", mbid)
-        return False
+        return {"status": "not_found"}
 
     save_artists([artist])
 
     saved = get_artist_by_mbid(mbid)
     if saved is None:
-        logger.error("아티스트 DB 조회 실패 — 이후 수집 건너뜀: mbid=%s", mbid)
-        return False
+        raise RuntimeError(f"아티스트 저장 후 조회 실패: mbid={mbid}")
 
     artist_id = saved["id"]
     spotify_url = saved.get("spotify_url")
+    image_url = None
 
     if spotify_url:
         try:
@@ -584,21 +587,18 @@ def register_artist_by_mbid(mbid: str) -> bool:
                 update_artist_image(artist_id, image_url)
         except Exception as e:
             logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", mbid, e)
-
-        try:
-            spotify_id = _extract_spotify_id(spotify_url)
-            raw, _ = release.collect_releases(spotify_id)
-            releases = _sort_releases(raw)
-            save_releases(artist_id, releases)
-        except SpotifyRateLimitError:
-            logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", artist_id)
-        except Exception as e:
-            logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
     else:
-        logger.info("Spotify URL 없음 — 이미지·릴리즈 수집 건너뜀: mbid=%s", mbid)
+        logger.info("Spotify URL 없음 — 이미지 수집 건너뜀: mbid=%s", mbid)
 
     logger.info("어드민 아티스트 등록 완료: mbid=%s, artist_id=%s", mbid, artist_id)
-    return True
+    return {
+        "status": "ok",
+        "artist_id": artist_id,
+        "mbid": mbid,
+        "name": saved.get("name"),
+        "image_url": image_url,
+        "aliases": artist.get("aliases", []),
+    }
 
 
 def run_setlist_collect() -> None:
