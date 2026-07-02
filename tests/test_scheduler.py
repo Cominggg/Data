@@ -15,6 +15,8 @@ from scheduler import (
     _save_ban,
     _save_progress,
     _sort_releases,
+    collect_and_save_concert,
+    collect_and_save_setlist,
     register_artist_by_mbid,
     run_artist_image_update,
     run_concert_status_update,
@@ -520,6 +522,132 @@ class TestRegisterArtistByMbid:
         assert result["status"] == "ok"
         assert result["image_url"] is None
         mock_img.assert_not_called()
+
+
+class TestCollectAndSaveConcert:
+    _CONCERT_RAW = {"prfnm": "TestArtist Live", "visit": "Y"}
+    _ALIASES = [{"artist_id": 1, "name": "TestArtist"}]
+    _CONCERT_ROW = {"concert_id": 10, "title": "TestArtist Live", "cast": "TestArtist"}
+
+    def test_returns_not_found_when_kopis_has_no_data(self):
+        """KOPIS에 공연 데이터가 없으면 status:not_found를 반환해야 한다."""
+        with patch("scheduler.kopis.collect_by_id", return_value=None):
+            assert collect_and_save_concert("PF000") == {"status": "not_found"}
+
+    def test_returns_skipped_when_not_touring(self):
+        """내한 공연이 아니면 status:skipped, reason:not_touring을 반환해야 한다."""
+        concert = {**self._CONCERT_RAW, "visit": "N"}
+        with patch("scheduler.kopis.collect_by_id", return_value=concert):
+            result = collect_and_save_concert("PF001")
+        assert result == {"status": "skipped", "reason": "not_touring"}
+
+    def test_returns_skipped_when_no_alias_match(self):
+        """alias 매칭이 없으면 status:skipped, reason:no_alias_match를 반환해야 한다."""
+        with (
+            patch("scheduler.kopis.collect_by_id", return_value=self._CONCERT_RAW),
+            patch("scheduler.get_all_aliases", return_value=self._ALIASES),
+            patch("scheduler.has_match", return_value=False),
+        ):
+            result = collect_and_save_concert("PF001")
+        assert result == {"status": "skipped", "reason": "no_alias_match"}
+
+    def test_returns_ok_with_matched_artists_on_success(self):
+        """매칭 성공 시 status:ok와 matched_artists를 반환해야 한다."""
+        with (
+            patch("scheduler.kopis.collect_by_id", return_value=self._CONCERT_RAW),
+            patch("scheduler.get_all_aliases", return_value=self._ALIASES),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.save_concerts"),
+            patch("scheduler.get_concert_by_kopis_id", return_value=self._CONCERT_ROW),
+            patch(
+                "scheduler.match_concert",
+                return_value=([{"concert_id": 10, "artist_id": 1}], []),
+            ),
+            patch("scheduler.save_concert_artists"),
+            patch("scheduler.update_artist_is_coming"),
+        ):
+            result = collect_and_save_concert("PF001")
+        assert result == {
+            "status": "ok",
+            "concert_id": 10,
+            "title": "TestArtist Live",
+            "matched_artists": [{"artist_id": 1, "name": "TestArtist"}],
+        }
+
+    def test_returns_ok_with_empty_matches_when_no_match_found(self):
+        """저장은 됐지만 실제 매칭이 0건이면 matched_artists 빈 리스트로 성공 반환해야 한다."""
+        with (
+            patch("scheduler.kopis.collect_by_id", return_value=self._CONCERT_RAW),
+            patch("scheduler.get_all_aliases", return_value=self._ALIASES),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.save_concerts"),
+            patch("scheduler.get_concert_by_kopis_id", return_value=self._CONCERT_ROW),
+            patch("scheduler.match_concert", return_value=([], [{"concert_id": 10}])),
+        ):
+            result = collect_and_save_concert("PF001")
+        assert result["status"] == "ok"
+        assert result["matched_artists"] == []
+
+    def test_raises_when_db_lookup_fails_after_save(self):
+        """저장 직후 재조회에 실패하면 RuntimeError를 발생시켜야 한다."""
+        with (
+            patch("scheduler.kopis.collect_by_id", return_value=self._CONCERT_RAW),
+            patch("scheduler.get_all_aliases", return_value=self._ALIASES),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.save_concerts"),
+            patch("scheduler.get_concert_by_kopis_id", return_value=None),
+            pytest.raises(RuntimeError),
+        ):
+            collect_and_save_concert("PF001")
+
+
+class TestCollectAndSaveSetlist:
+    _CONCERT = {
+        "concert_id": 10,
+        "start_date": "2024-06-01",
+        "end_date": "2024-06-02",
+        "artist_mbid": "mbid-test",
+    }
+    _SETLIST_RESULT = {
+        "concert_id": 10,
+        "setlist_fm_id": "abc123",
+        "attribution_url": "https://setlist.fm/abc123",
+        "tracks": [{"position": 1, "song_name": "Song A", "info": None}],
+    }
+
+    def test_returns_not_found_when_concert_missing(self):
+        """공연 조회 실패 시 status:not_found를 반환해야 한다."""
+        with patch("scheduler.get_concert_with_artist", return_value=None):
+            assert collect_and_save_setlist(999) == {"status": "not_found"}
+
+    def test_returns_skipped_when_no_setlist_found(self):
+        """셋리스트가 없으면 status:skipped, reason:no_setlist_found를 반환해야 한다."""
+        with (
+            patch("scheduler.get_concert_with_artist", return_value=self._CONCERT),
+            patch("scheduler.setlist.collect_for_concert", return_value=None),
+        ):
+            result = collect_and_save_setlist(10)
+        assert result == {"status": "skipped", "reason": "no_setlist_found"}
+
+    def test_returns_ok_with_tracks_on_success(self):
+        """셋리스트 수집 성공 시 status:ok와 트랙 정보를 반환해야 한다."""
+        with (
+            patch("scheduler.get_concert_with_artist", return_value=self._CONCERT),
+            patch(
+                "scheduler.setlist.collect_for_concert",
+                return_value=self._SETLIST_RESULT,
+            ),
+            patch("scheduler.save_setlists") as mock_save,
+        ):
+            result = collect_and_save_setlist(10)
+        mock_save.assert_called_once_with([self._SETLIST_RESULT])
+        assert result == {
+            "status": "ok",
+            "concert_id": 10,
+            "setlist_fm_id": "abc123",
+            "attribution_url": "https://setlist.fm/abc123",
+            "tracks": [{"position": 1, "song_name": "Song A", "info": None}],
+        }
 
 
 # ---------------------------------------------------------------------------

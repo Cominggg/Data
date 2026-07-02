@@ -609,32 +609,51 @@ def run_setlist_collect() -> None:
     logger.info("=== setlist 수집 잡 완료 ===")
 
 
-def collect_and_save_concert(kopis_id: str) -> bool:
-    """단건 KOPIS 공연을 수집해 alias 매칭 후 DB에 저장한다. 성공 시 True 반환."""
+def collect_and_save_concert(kopis_id: str) -> dict:
+    """단건 KOPIS 공연을 수집해 alias 매칭 후 DB에 저장한다.
+
+    KOPIS에 데이터가 없으면 {"status": "not_found"}, 내한 공연이 아니거나
+    alias 매칭이 없으면 {"status": "skipped", "reason": ...}, 성공 시
+    {"status": "ok", "concert_id", "title", "matched_artists"}를 반환한다.
+    저장 직후 재조회에 실패하면 (있어선 안 되는 내부 불일치) RuntimeError를 발생시킨다.
+    """
     concert = kopis.collect_by_id(kopis_id)
     if concert is None:
         logger.warning("KOPIS 공연 데이터 없음: kopis_id=%s", kopis_id)
-        return False
+        return {"status": "not_found"}
     if concert.get("visit") != "Y":
         logger.info("내한 공연 아님 — 저장 건너뜀: kopis_id=%s", kopis_id)
-        return False
+        return {"status": "skipped", "reason": "not_touring"}
 
     aliases = get_all_aliases()
     if not has_match(concert, aliases):
         logger.info("alias 매칭 없음 — 저장 건너뜀: kopis_id=%s", kopis_id)
-        return False
+        return {"status": "skipped", "reason": "no_alias_match"}
 
     save_concerts([concert], use_prfstate=True)
 
     concert_row = get_concert_by_kopis_id(kopis_id)
-    if concert_row:
-        matches, _ = match_concert(concert_row, aliases)
-        if matches:
-            save_concert_artists(matches)
-            update_artist_is_coming()
+    if concert_row is None:
+        raise RuntimeError(f"공연 저장 후 조회 실패: kopis_id={kopis_id}")
+
+    matched_artists = []
+    matches, _ = match_concert(concert_row, aliases)
+    if matches:
+        save_concert_artists(matches)
+        update_artist_is_coming()
+        name_by_artist_id = {a["artist_id"]: a["name"] for a in aliases}
+        matched_artists = [
+            {"artist_id": m["artist_id"], "name": name_by_artist_id.get(m["artist_id"])}
+            for m in matches
+        ]
 
     logger.info("단건 공연 수집 완료: kopis_id=%s", kopis_id)
-    return True
+    return {
+        "status": "ok",
+        "concert_id": concert_row["concert_id"],
+        "title": concert_row["title"],
+        "matched_artists": matched_artists,
+    }
 
 
 
@@ -667,19 +686,30 @@ def collect_and_save_releases_for_artist(artist_id: int) -> bool:
     return True
 
 
-def collect_and_save_setlist(concert_id: int) -> bool:
-    """단건 공연의 셋리스트를 수집해 DB에 저장한다. 성공 시 True 반환."""
+def collect_and_save_setlist(concert_id: int) -> dict:
+    """단건 공연의 셋리스트를 수집해 DB에 저장한다.
+
+    공연이 없으면 {"status": "not_found"}, 셋리스트가 없으면
+    {"status": "skipped", "reason": "no_setlist_found"}, 성공 시
+    {"status": "ok", "concert_id", "setlist_fm_id", "attribution_url", "tracks"}를 반환한다.
+    """
     concert = get_concert_with_artist(concert_id)
     if concert is None:
         logger.warning("공연 조회 실패: concert_id=%d", concert_id)
-        return False
+        return {"status": "not_found"}
     result = setlist.collect_for_concert(concert)
     if result is None:
         logger.info("셋리스트 없음: concert_id=%d", concert_id)
-        return False
+        return {"status": "skipped", "reason": "no_setlist_found"}
     save_setlists([result])
     logger.info("단건 셋리스트 수집 완료: concert_id=%d", concert_id)
-    return True
+    return {
+        "status": "ok",
+        "concert_id": result["concert_id"],
+        "setlist_fm_id": result["setlist_fm_id"],
+        "attribution_url": result.get("attribution_url"),
+        "tracks": result.get("tracks", []),
+    }
 
 
 def _build_scheduler() -> BackgroundScheduler:
