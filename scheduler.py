@@ -11,7 +11,7 @@ from typing import List, Optional, Set
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from collectors import artist_image, kopis, musicbrainz, release, setlist, wikipedia
+from collectors import artist_image, ja_romanize, kopis, musicbrainz, release, setlist
 from collectors.spotify_client import SpotifyRateLimitError
 from db.repository import (
     get_active_concerts,
@@ -59,9 +59,24 @@ _IMAGE_FAILED_PATH = os.path.join(_CHECKPOINT_DIR, "image_failed.json")
 _BAN_MARGIN_HOURS = 25  # Spotify 24h 밴 + 1h 마진
 _IMAGE_RETRY_DAYS = 30  # 이미지 미해결 아티스트 재시도 주기
 
+_scheduler: Optional[BackgroundScheduler] = None  # main()에서 데몬 실행 시에만 할당됨
+
 
 def _progress_path(job_name: str) -> str:
     return os.path.join(_CHECKPOINT_DIR, f"{job_name}.json")
+
+
+def _reschedule_on_ban_lift(job_func, banned_until: datetime) -> None:
+    """밴 해제 시각에 job_func을 1회성으로 재실행하도록 스케줄러에 등록한다.
+
+    CLI 단발 실행 등 데몬으로 뜨지 않은 경우(_scheduler가 None)는 아무 것도 하지 않는다.
+    동일 잡에 대해 재밴이 걸려도 job id를 고정해 replace_existing으로 중복 등록을 막는다.
+    """
+    if _scheduler is None:
+        return
+    job_id = f"resume_{job_func.__name__}"
+    _scheduler.add_job(job_func, "date", run_date=banned_until, id=job_id, replace_existing=True)
+    logger.info("밴 해제 시각(%s)에 %s 재실행 예약", banned_until.isoformat(), job_func.__name__)
 
 
 def _is_banned() -> bool:
@@ -79,19 +94,24 @@ def _is_banned() -> bool:
         return False
 
 
-def _save_ban() -> None:
-    """Spotify 429 발생 시 ban 해제 시각을 spotify_ban.json에 저장한다."""
+def _save_ban(retry_after_seconds: int = 0) -> datetime:
+    """Spotify 429 발생 시 ban 해제 시각을 spotify_ban.json에 저장하고 반환한다.
+
+    retry_after_seconds가 양수면 실측 Retry-After 값(+5초 안전 마진) 기준으로,
+    아니면 기존 고정 _BAN_MARGIN_HOURS 기준으로 밴 해제 시각을 계산한다.
+    """
     os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
-    data = {
-        "banned_until": (datetime.now() + timedelta(hours=_BAN_MARGIN_HOURS)).isoformat(
-            timespec="seconds"
-        )
-    }
+    if retry_after_seconds > 0:
+        banned_until = datetime.now() + timedelta(seconds=retry_after_seconds + 5)
+    else:
+        banned_until = datetime.now() + timedelta(hours=_BAN_MARGIN_HOURS)
+    data = {"banned_until": banned_until.isoformat(timespec="seconds")}
     try:
         with open(_BAN_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f)
     except Exception as e:
         logger.warning("ban 파일 저장 실패: %s", e)
+    return banned_until
 
 
 def _load_progress(job_name: str) -> Set[int]:
@@ -235,7 +255,7 @@ def run_initial_collect(
     skip_artists: bool = False,
     force_artists: bool = False,
     skip_kopis: bool = False,
-    skip_wikipedia: bool = False,
+    skip_ja_romanize: bool = False,
     skip_releases: bool = False,
     skip_artist_image: bool = False,
     skip_setlist: bool = False,
@@ -245,7 +265,7 @@ def run_initial_collect(
     재개 지원: 이미 DB에 저장된 아티스트는 건너뛴다.
     force_artists=True 시 기존 DB 아티스트를 건너뛰지 않고 전체 재수집한다.
     skip_kopis=True 시 KOPIS 수집·매칭을 건너뛰고 릴리즈 수집으로 진행한다.
-    skip_wikipedia=True 시 Wikipedia alias 수집을 건너뛴다.
+    skip_ja_romanize=True 시 로마자→한글 alias 변환을 건너뛴다.
     skip_releases=True 시 릴리즈 수집을 건너뛴다.
     skip_artist_image=True 시 아티스트 이미지 수집을 건너뛴다.
     skip_setlist=True 시 setlist.fm 수집을 건너뛴다.
@@ -266,10 +286,10 @@ def run_initial_collect(
         artists = musicbrainz.collect_artists(skip_mbids=saved_mbids)
         save_artists(artists)
 
-    if skip_wikipedia:
-        logger.info("--skip-wikipedia 플래그 감지 — Wikipedia alias 수집 건너뜀")
+    if skip_ja_romanize:
+        logger.info("--skip-ja-romanize 플래그 감지 — 로마자→한글 alias 변환 건너뜀")
     else:
-        run_wikipedia_collect()
+        run_ja_romanize_collect()
 
     if skip_kopis:
         logger.info("--skip-kopis 플래그 감지 — KOPIS 수집·매칭 건너뜀")
@@ -327,21 +347,22 @@ def run_initial_collect(
     logger.info("=== 초기 수집 완료 ===")
 
 
-def run_wikipedia_collect() -> None:
-    """Wikipedia 한국어 alias 수집 (초기 1회 + 주 1회, 목요일).
+def run_ja_romanize_collect() -> None:
+    """일본어 아티스트명을 로마자 표기(sort_name) 기반 규칙 변환으로 한글 alias화한다 (주 1회).
 
-    locale='ko' alias가 이미 존재하는 아티스트는 건너뛴다.
+    locale='ko' alias가 이미 존재하는 아티스트는 건너뛴다. 외부 API 호출 없이
+    DB에 이미 저장된 sort_name만으로 동작한다.
     """
-    logger.info("=== Wikipedia 한국어 alias 수집 잡 시작 ===")
+    logger.info("=== 로마자→한글 alias 변환 잡 시작 ===")
     artists = get_artists_without_ko_alias()
     logger.info("한국어 alias 미수집 아티스트: %d건", len(artists))
     if not artists:
-        logger.info("=== Wikipedia 한국어 alias 수집 잡 완료 (대상 없음) ===")
+        logger.info("=== 로마자→한글 alias 변환 잡 완료 (대상 없음) ===")
         return
-    aliases = wikipedia.collect_korean_aliases(artists)
+    aliases = ja_romanize.collect_ko_aliases(artists)
     if aliases:
         save_aliases(aliases)
-    logger.info("=== Wikipedia 한국어 alias 수집 잡 완료 ===")
+    logger.info("=== 로마자→한글 alias 변환 잡 완료 ===")
 
 
 
@@ -442,9 +463,10 @@ def run_artist_image_update() -> None:
                 spotify_url=a.get("spotify_url"),
                 name=a.get("name"),
             )
-        except SpotifyRateLimitError:
+        except SpotifyRateLimitError as e:
             logger.error("Spotify 429 — 이미지 수집 중단 (artist_id=%d)", a["id"])
-            _save_ban()
+            banned_until = _save_ban(e.retry_after)
+            _reschedule_on_ban_lift(run_artist_image_update, banned_until)
             break
         except Exception as e:
             logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", a["mbid"], e)
@@ -484,10 +506,11 @@ def run_release_update() -> None:
             if raw:
                 save_releases(artist_id, _sort_releases(raw))
             completed_ids.add(artist_id)
-        except SpotifyRateLimitError:
+        except SpotifyRateLimitError as e:
             logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%d)", artist_id)
-            _save_ban()
+            banned_until = _save_ban(e.retry_after)
             _save_progress("release_update", completed_ids)
+            _reschedule_on_ban_lift(run_release_update, banned_until)
             break
         except Exception as e:
             logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
@@ -548,13 +571,16 @@ def run_recover(skip_releases: bool = False, skip_artist_image: bool = False) ->
     logger.info("=== 복구 수집 완료 ===")
 
 
-def register_artist_by_mbid(mbid: str) -> bool:
+def register_artist_by_mbid(mbid: str) -> dict:
     """어드민 요청으로 단일 아티스트를 등록한다.
 
     1) MusicBrainz에서 아티스트 상세 수집 후 DB 저장
-    2) Spotify URL이 있으면 이미지·릴리즈 수집
+    2) Spotify URL이 있으면 이미지 수집 (릴리즈 수집은 별도 엔드포인트에서 수행)
     Last.fm 리스너 수 필터를 적용하지 않는다.
-    성공 시 True, 수집 실패 시 False 반환.
+
+    MusicBrainz에 아티스트가 없으면 {"status": "not_found"}, 성공 시
+    {"status": "ok", "artist_id", "mbid", "name", "image_url", "aliases"}를 반환한다.
+    저장 직후 재조회에 실패하면 (있어선 안 되는 내부 불일치) RuntimeError를 발생시킨다.
 
     관리자가 명시적으로 호출하는 단건 작업이므로 ban 상태와 무관하게 실행한다.
     """
@@ -563,17 +589,17 @@ def register_artist_by_mbid(mbid: str) -> bool:
     artist = musicbrainz.collect_single_artist(mbid)
     if artist is None:
         logger.error("아티스트 수집 실패 — 등록 중단: mbid=%s", mbid)
-        return False
+        return {"status": "not_found"}
 
     save_artists([artist])
 
     saved = get_artist_by_mbid(mbid)
     if saved is None:
-        logger.error("아티스트 DB 조회 실패 — 이후 수집 건너뜀: mbid=%s", mbid)
-        return False
+        raise RuntimeError(f"아티스트 저장 후 조회 실패: mbid={mbid}")
 
     artist_id = saved["id"]
     spotify_url = saved.get("spotify_url")
+    image_url = None
 
     if spotify_url:
         try:
@@ -584,21 +610,18 @@ def register_artist_by_mbid(mbid: str) -> bool:
                 update_artist_image(artist_id, image_url)
         except Exception as e:
             logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", mbid, e)
-
-        try:
-            spotify_id = _extract_spotify_id(spotify_url)
-            raw, _ = release.collect_releases(spotify_id)
-            releases = _sort_releases(raw)
-            save_releases(artist_id, releases)
-        except SpotifyRateLimitError:
-            logger.error("Spotify 429 — 릴리즈 수집 중단 (artist_id=%s)", artist_id)
-        except Exception as e:
-            logger.warning("릴리즈 수집 실패 — artist_id=%s: %s", artist_id, e)
     else:
-        logger.info("Spotify URL 없음 — 이미지·릴리즈 수집 건너뜀: mbid=%s", mbid)
+        logger.info("Spotify URL 없음 — 이미지 수집 건너뜀: mbid=%s", mbid)
 
     logger.info("어드민 아티스트 등록 완료: mbid=%s, artist_id=%s", mbid, artist_id)
-    return True
+    return {
+        "status": "ok",
+        "artist_id": artist_id,
+        "mbid": mbid,
+        "name": saved.get("name"),
+        "image_url": image_url,
+        "aliases": artist.get("aliases", []),
+    }
 
 
 def run_setlist_collect() -> None:
@@ -609,32 +632,51 @@ def run_setlist_collect() -> None:
     logger.info("=== setlist 수집 잡 완료 ===")
 
 
-def collect_and_save_concert(kopis_id: str) -> bool:
-    """단건 KOPIS 공연을 수집해 alias 매칭 후 DB에 저장한다. 성공 시 True 반환."""
+def collect_and_save_concert(kopis_id: str) -> dict:
+    """단건 KOPIS 공연을 수집해 alias 매칭 후 DB에 저장한다.
+
+    KOPIS에 데이터가 없으면 {"status": "not_found"}, 내한 공연이 아니거나
+    alias 매칭이 없으면 {"status": "skipped", "reason": ...}, 성공 시
+    {"status": "ok", "concert_id", "title", "matched_artists"}를 반환한다.
+    저장 직후 재조회에 실패하면 (있어선 안 되는 내부 불일치) RuntimeError를 발생시킨다.
+    """
     concert = kopis.collect_by_id(kopis_id)
     if concert is None:
         logger.warning("KOPIS 공연 데이터 없음: kopis_id=%s", kopis_id)
-        return False
+        return {"status": "not_found"}
     if concert.get("visit") != "Y":
         logger.info("내한 공연 아님 — 저장 건너뜀: kopis_id=%s", kopis_id)
-        return False
+        return {"status": "skipped", "reason": "not_touring"}
 
     aliases = get_all_aliases()
     if not has_match(concert, aliases):
         logger.info("alias 매칭 없음 — 저장 건너뜀: kopis_id=%s", kopis_id)
-        return False
+        return {"status": "skipped", "reason": "no_alias_match"}
 
     save_concerts([concert], use_prfstate=True)
 
     concert_row = get_concert_by_kopis_id(kopis_id)
-    if concert_row:
-        matches, _ = match_concert(concert_row, aliases)
-        if matches:
-            save_concert_artists(matches)
-            update_artist_is_coming()
+    if concert_row is None:
+        raise RuntimeError(f"공연 저장 후 조회 실패: kopis_id={kopis_id}")
+
+    matched_artists = []
+    matches, _ = match_concert(concert_row, aliases)
+    if matches:
+        save_concert_artists(matches)
+        update_artist_is_coming()
+        name_by_artist_id = {a["artist_id"]: a["name"] for a in aliases}
+        matched_artists = [
+            {"artist_id": m["artist_id"], "name": name_by_artist_id.get(m["artist_id"])}
+            for m in matches
+        ]
 
     logger.info("단건 공연 수집 완료: kopis_id=%s", kopis_id)
-    return True
+    return {
+        "status": "ok",
+        "concert_id": concert_row["concert_id"],
+        "title": concert_row["title"],
+        "matched_artists": matched_artists,
+    }
 
 
 
@@ -667,19 +709,30 @@ def collect_and_save_releases_for_artist(artist_id: int) -> bool:
     return True
 
 
-def collect_and_save_setlist(concert_id: int) -> bool:
-    """단건 공연의 셋리스트를 수집해 DB에 저장한다. 성공 시 True 반환."""
+def collect_and_save_setlist(concert_id: int) -> dict:
+    """단건 공연의 셋리스트를 수집해 DB에 저장한다.
+
+    공연이 없으면 {"status": "not_found"}, 셋리스트가 없으면
+    {"status": "skipped", "reason": "no_setlist_found"}, 성공 시
+    {"status": "ok", "concert_id", "setlist_fm_id", "attribution_url", "tracks"}를 반환한다.
+    """
     concert = get_concert_with_artist(concert_id)
     if concert is None:
         logger.warning("공연 조회 실패: concert_id=%d", concert_id)
-        return False
+        return {"status": "not_found"}
     result = setlist.collect_for_concert(concert)
     if result is None:
         logger.info("셋리스트 없음: concert_id=%d", concert_id)
-        return False
+        return {"status": "skipped", "reason": "no_setlist_found"}
     save_setlists([result])
     logger.info("단건 셋리스트 수집 완료: concert_id=%d", concert_id)
-    return True
+    return {
+        "status": "ok",
+        "concert_id": result["concert_id"],
+        "setlist_fm_id": result["setlist_fm_id"],
+        "attribution_url": result.get("attribution_url"),
+        "tracks": result.get("tracks", []),
+    }
 
 
 def _build_scheduler() -> BackgroundScheduler:
@@ -687,7 +740,7 @@ def _build_scheduler() -> BackgroundScheduler:
     scheduler.add_job(run_concert_status_update, "cron", hour=4, minute=0)
     scheduler.add_job(run_new_concert_collect, "cron", hour=4, minute=30)
     scheduler.add_job(run_release_update, "cron", hour=5)
-    scheduler.add_job(run_wikipedia_collect, "cron", day_of_week="thu", hour=3)
+    scheduler.add_job(run_ja_romanize_collect, "cron", day_of_week="thu", hour=3)
     scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=2)
     scheduler.add_job(run_setlist_collect, "cron", hour=6)
     return scheduler
@@ -724,9 +777,9 @@ def main() -> None:
         help="KOPIS 수집·매칭을 건너뛰고 릴리즈 수집으로 바로 진행 (init 전용)",
     )
     parser.add_argument(
-        "--skip-wikipedia",
+        "--skip-ja-romanize",
         action="store_true",
-        help="Wikipedia alias 수집을 건너뜀 (init 전용)",
+        help="로마자→한글 alias 변환을 건너뜀 (init 전용)",
     )
     parser.add_argument(
         "--skip-releases",
@@ -759,7 +812,7 @@ def main() -> None:
             "concert-status-update",
             "new-concert-collect",
             "release-update",
-            "wikipedia",
+            "ja-romanize",
             "artist-image",
             "setlist",
         ],
@@ -778,7 +831,7 @@ def main() -> None:
             skip_artists=args.skip_artists,
             force_artists=args.force_artists,
             skip_kopis=args.skip_kopis,
-            skip_wikipedia=args.skip_wikipedia,
+            skip_ja_romanize=args.skip_ja_romanize,
             skip_releases=args.skip_releases,
             skip_artist_image=args.skip_artist_image,
             skip_setlist=args.skip_setlist,
@@ -818,7 +871,7 @@ def main() -> None:
             "concert-status-update": run_concert_status_update,
             "new-concert-collect": run_new_concert_collect,
             "release-update": run_release_update,
-            "wikipedia": run_wikipedia_collect,
+            "ja-romanize": run_ja_romanize_collect,
             "artist-image": run_artist_image_update,
             "setlist": run_setlist_collect,
         }
@@ -848,14 +901,15 @@ def main() -> None:
     api_thread.start()
     logger.info("API 서버 시작: http://%s:%d", api_host, api_port)
 
-    scheduler = _build_scheduler()
-    scheduler.start()
+    global _scheduler
+    _scheduler = _build_scheduler()
+    _scheduler.start()
     logger.info("스케줄러 시작 (종료: Ctrl+C)")
     try:
         while True:
             time.sleep(60)
     except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown()
+        _scheduler.shutdown()
         logger.info("스케줄러 종료")
 
 

@@ -42,39 +42,64 @@ class TestAuth:
 
     def test_correct_secret_is_accepted(self, client):
         """올바른 시크릿이면 401이 아니어야 한다."""
-        with patch("api.collect_and_save_concert"):
+        with patch("api.collect_and_save_concert", return_value={"status": "not_found"}):
             res = client.post("/collect/concert", json={"kopis_id": "PF001"}, headers=_AUTH)
         assert res.status_code != 401
 
 
 class TestCollectConcertEndpoint:
-    def test_returns_202(self, client):
-        """POST /collect/concert 는 202를 반환해야 한다."""
-        with patch("api.collect_and_save_concert"):
-            res = client.post("/collect/concert", json={"kopis_id": "PF001"}, headers=_AUTH)
-        assert res.status_code == 202
+    _OK_RESULT = {
+        "status": "ok",
+        "concert_id": 1,
+        "title": "TestArtist Live",
+        "matched_artists": [{"artist_id": 1, "name": "TestArtist"}],
+    }
 
-    def test_response_body_accepted(self, client):
-        """응답 body에 accepted:true가 있어야 한다."""
-        with patch("api.collect_and_save_concert"):
+    def test_returns_200_and_data_on_success(self, client):
+        """수집 성공 시 200과 success:true + 데이터를 반환해야 한다."""
+        with patch("api.collect_and_save_concert", return_value=self._OK_RESULT):
             res = client.post("/collect/concert", json={"kopis_id": "PF001"}, headers=_AUTH)
-        assert res.json()["accepted"] is True
+        assert res.status_code == 200
+        assert res.json() == {
+            "success": True,
+            "concert_id": 1,
+            "title": "TestArtist Live",
+            "matched_artists": [{"artist_id": 1, "name": "TestArtist"}],
+        }
 
-    def test_background_task_called(self, client):
-        """collect_and_save_concert가 BackgroundTask로 호출되어야 한다."""
-        with patch("api.collect_and_save_concert") as mock_fn:
+    def test_returns_404_when_not_found(self, client):
+        """KOPIS에 데이터가 없으면 404를 반환해야 한다."""
+        with patch("api.collect_and_save_concert", return_value={"status": "not_found"}):
+            res = client.post("/collect/concert", json={"kopis_id": "PF001"}, headers=_AUTH)
+        assert res.status_code == 404
+
+    def test_returns_200_with_success_false_when_skipped(self, client):
+        """비즈니스 스킵(내한 아님 등)이면 200 + success:false를 반환해야 한다."""
+        with patch(
+            "api.collect_and_save_concert",
+            return_value={"status": "skipped", "reason": "not_touring"},
+        ):
+            res = client.post("/collect/concert", json={"kopis_id": "PF001"}, headers=_AUTH)
+        assert res.status_code == 200
+        assert res.json() == {"success": False, "reason": "not_touring"}
+
+    def test_called_with_kopis_id(self, client):
+        """collect_and_save_concert가 kopis_id로 직접 호출되어야 한다."""
+        with patch(
+            "api.collect_and_save_concert", return_value={"status": "not_found"}
+        ) as mock_fn:
             client.post("/collect/concert", json={"kopis_id": "PF123"}, headers=_AUTH)
         mock_fn.assert_called_once_with("PF123")
 
-    def test_duplicate_request_not_accepted(self, client):
-        """동일 kopis_id가 이미 실행 중이면 accepted:false를 반환해야 한다."""
+    def test_duplicate_request_returns_409(self, client):
+        """동일 kopis_id가 이미 실행 중이면 409를 반환해야 한다."""
         import api as api_module
         key = ("concert", "PF_DUP")
         api_module._running_tasks.add(key)
         try:
-            with patch("api.collect_and_save_concert"):
+            with patch("api.collect_and_save_concert", return_value={"status": "not_found"}):
                 res = client.post("/collect/concert", json={"kopis_id": "PF_DUP"}, headers=_AUTH)
-            assert res.json()["accepted"] is False
+            assert res.status_code == 409
         finally:
             api_module._running_tasks.discard(key)
 
@@ -106,53 +131,106 @@ class TestCollectReleasesEndpoint:
 
 
 class TestCollectSetlistEndpoint:
-    def test_returns_202(self, client):
-        """POST /collect/concert/{id}/setlist 는 202를 반환해야 한다."""
-        with patch("api.collect_and_save_setlist"):
-            res = client.post("/collect/concert/7/setlist", headers=_AUTH)
-        assert res.status_code == 202
+    _OK_RESULT = {
+        "status": "ok",
+        "concert_id": 7,
+        "setlist_fm_id": "abc123",
+        "attribution_url": "https://setlist.fm/abc123",
+        "tracks": [{"position": 1, "song_name": "Song A", "info": None}],
+    }
 
-    def test_background_task_called_with_concert_id(self, client):
-        """collect_and_save_setlist가 concert_id로 호출되어야 한다."""
-        with patch("api.collect_and_save_setlist") as mock_fn:
+    def test_returns_200_and_data_on_success(self, client):
+        """수집 성공 시 200과 success:true + 데이터를 반환해야 한다."""
+        with patch("api.collect_and_save_setlist", return_value=self._OK_RESULT):
+            res = client.post("/collect/concert/7/setlist", headers=_AUTH)
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+        assert res.json()["tracks"] == [{"position": 1, "song_name": "Song A", "info": None}]
+
+    def test_returns_404_when_concert_not_found(self, client):
+        """공연 조회 실패 시 404를 반환해야 한다."""
+        with patch("api.collect_and_save_setlist", return_value={"status": "not_found"}):
+            res = client.post("/collect/concert/7/setlist", headers=_AUTH)
+        assert res.status_code == 404
+
+    def test_returns_200_with_success_false_when_no_setlist(self, client):
+        """셋리스트가 없으면 200 + success:false를 반환해야 한다."""
+        with patch(
+            "api.collect_and_save_setlist",
+            return_value={"status": "skipped", "reason": "no_setlist_found"},
+        ):
+            res = client.post("/collect/concert/7/setlist", headers=_AUTH)
+        assert res.status_code == 200
+        assert res.json() == {"success": False, "reason": "no_setlist_found"}
+
+    def test_called_with_concert_id(self, client):
+        """collect_and_save_setlist가 concert_id로 직접 호출되어야 한다."""
+        with patch(
+            "api.collect_and_save_setlist", return_value={"status": "not_found"}
+        ) as mock_fn:
             client.post("/collect/concert/7/setlist", headers=_AUTH)
         mock_fn.assert_called_once_with(7)
 
-    def test_duplicate_request_not_accepted(self, client):
-        """동일 concert_id가 이미 실행 중이면 accepted:false를 반환해야 한다."""
+    def test_duplicate_request_returns_409(self, client):
+        """동일 concert_id가 이미 실행 중이면 409를 반환해야 한다."""
         import api as api_module
         key = ("setlist", 7)
         api_module._running_tasks.add(key)
         try:
-            with patch("api.collect_and_save_setlist"):
+            with patch("api.collect_and_save_setlist", return_value={"status": "not_found"}):
                 res = client.post("/collect/concert/7/setlist", headers=_AUTH)
-            assert res.json()["accepted"] is False
+            assert res.status_code == 409
         finally:
             api_module._running_tasks.discard(key)
 
 
 class TestRegisterArtistEndpoint:
-    def test_returns_202(self, client):
-        """POST /collect/artist 는 202를 반환해야 한다."""
-        with patch("api.register_artist_by_mbid"):
-            res = client.post("/collect/artist", json={"mbid": "mbid-abc"}, headers=_AUTH)
-        assert res.status_code == 202
+    _OK_RESULT = {
+        "status": "ok",
+        "artist_id": 1,
+        "mbid": "mbid-abc",
+        "name": "TestArtist",
+        "image_url": "http://img.url",
+        "aliases": [{"name": "テストアーティスト", "locale": "ja"}],
+    }
 
-    def test_background_task_called_with_mbid(self, client):
-        """register_artist_by_mbid가 mbid로 호출되어야 한다."""
-        with patch("api.register_artist_by_mbid") as mock_fn:
+    def test_returns_200_and_data_on_success(self, client):
+        """등록 성공 시 200과 success:true + 아티스트 정보를 반환해야 한다."""
+        with patch("api.register_artist_by_mbid", return_value=self._OK_RESULT):
+            res = client.post("/collect/artist", json={"mbid": "mbid-abc"}, headers=_AUTH)
+        assert res.status_code == 200
+        assert res.json() == {
+            "success": True,
+            "artist_id": 1,
+            "mbid": "mbid-abc",
+            "name": "TestArtist",
+            "image_url": "http://img.url",
+            "aliases": [{"name": "テストアーティスト", "locale": "ja"}],
+        }
+
+    def test_returns_404_when_not_found(self, client):
+        """MusicBrainz에 아티스트가 없으면 404를 반환해야 한다."""
+        with patch("api.register_artist_by_mbid", return_value={"status": "not_found"}):
+            res = client.post("/collect/artist", json={"mbid": "mbid-bad"}, headers=_AUTH)
+        assert res.status_code == 404
+
+    def test_called_with_mbid(self, client):
+        """register_artist_by_mbid가 mbid로 직접 호출되어야 한다."""
+        with patch(
+            "api.register_artist_by_mbid", return_value={"status": "not_found"}
+        ) as mock_fn:
             client.post("/collect/artist", json={"mbid": "mbid-xyz"}, headers=_AUTH)
         mock_fn.assert_called_once_with("mbid-xyz")
 
-    def test_duplicate_request_not_accepted(self, client):
-        """동일 mbid가 이미 실행 중이면 accepted:false를 반환해야 한다."""
+    def test_duplicate_request_returns_409(self, client):
+        """동일 mbid가 이미 실행 중이면 409를 반환해야 한다."""
         import api as api_module
         key = ("artist", "mbid-dup")
         api_module._running_tasks.add(key)
         try:
-            with patch("api.register_artist_by_mbid"):
+            with patch("api.register_artist_by_mbid", return_value={"status": "not_found"}):
                 res = client.post("/collect/artist", json={"mbid": "mbid-dup"}, headers=_AUTH)
-            assert res.json()["accepted"] is False
+            assert res.status_code == 409
         finally:
             api_module._running_tasks.discard(key)
 
