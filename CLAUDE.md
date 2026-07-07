@@ -68,6 +68,7 @@ python scheduler.py --force-artists  # 아티스트 강제 재수집
 | setlist.fm | `GET https://api.setlist.fm/rest/1.0/search/setlists` | - | Header: `x-api-key`, `Accept: application/json` 필수 |
 | Spotify Web API | `POST https://accounts.spotify.com/api/token`, `GET https://api.spotify.com/v1/artists/{id}`, `GET /v1/search` | rolling 30초 윈도우 (관대함) | Client Credentials Flow; `Authorization: Bearer {token}`; access_token 1h 캐시 |
 | Last.fm | `GET https://ws.audioscrobbler.com/2.0/` | - | method=`artist.getinfo`; 월간 리스너 수 수집 |
+| Discord Webhook | `POST {webhook_url}` | 웹훅당 분당 약 30건 | 신규 공연 수집 결과 알림; `DISCORD_WEBHOOK_URL` 미설정 시 알림 생략 |
 
 ## 수집 파이프라인 단계
 

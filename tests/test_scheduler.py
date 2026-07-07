@@ -235,7 +235,7 @@ class TestRunNewConcertCollect:
 
     def test_saves_new_concerts_with_alias_match(self):
         """DB에 없는 신규 공연이 alias 매칭 통과 시 save_concerts로 저장되어야 한다."""
-        new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
+        new_concert = {"kopis_id": "PF999", "prfnm": "테스트 공연", "prfstate": "공연예정"}
         with (
             patch("scheduler.kopis.collect", return_value=[new_concert]),
             patch("scheduler.get_existing_kopis_ids", return_value=set()),
@@ -243,6 +243,7 @@ class TestRunNewConcertCollect:
             patch("scheduler.has_match", return_value=True),
             patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.get_unmatched_concerts", return_value=[]),
+            patch("scheduler.get_concert_by_kopis_id", return_value=None),
             patch("scheduler.save_concert_artists"),
             patch("scheduler.update_artist_is_coming"),
         ):
@@ -252,7 +253,7 @@ class TestRunNewConcertCollect:
 
     def test_saves_with_actual_prfstate_when_use_prfstate_true(self):
         """use_prfstate=True로 호출 시 save_concerts에 use_prfstate=True가 전달되어야 한다."""
-        new_concert = {"kopis_id": "PF999", "prfstate": "공연예정"}
+        new_concert = {"kopis_id": "PF999", "prfnm": "테스트 공연", "prfstate": "공연예정"}
         with (
             patch("scheduler.kopis.collect", return_value=[new_concert]),
             patch("scheduler.get_existing_kopis_ids", return_value=set()),
@@ -260,6 +261,7 @@ class TestRunNewConcertCollect:
             patch("scheduler.has_match", return_value=True),
             patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.get_unmatched_concerts", return_value=[]),
+            patch("scheduler.get_concert_by_kopis_id", return_value=None),
             patch("scheduler.save_concert_artists"),
             patch("scheduler.update_artist_is_coming"),
         ):
@@ -296,6 +298,83 @@ class TestRunNewConcertCollect:
             run_new_concert_collect()
 
         mock_save.assert_not_called()
+
+    def test_notifies_once_per_newly_matched_concert(self):
+        """신규 공연이 매칭되면 공연당 1회, (title, artist_names)로 알림이 호출되어야 한다."""
+        new_concert = {"kopis_id": "PF999", "prfnm": "NewJeans 내한공연", "prfstate": "공연예정"}
+        with (
+            patch("scheduler.kopis.collect", return_value=[new_concert]),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.save_concerts"),
+            patch(
+                "scheduler.get_concert_by_kopis_id",
+                return_value={"concert_id": 42, "title": "NewJeans 내한공연", "cast": None},
+            ),
+            patch(
+                "scheduler.get_unmatched_concerts",
+                return_value=[{"concert_id": 42, "title": "NewJeans 내한공연", "cast": None}],
+            ),
+            patch(
+                "scheduler.match_concert",
+                return_value=([{"concert_id": 42, "artist_id": 7}], []),
+            ),
+            patch("scheduler.save_concert_artist_candidates"),
+            patch("scheduler.get_artist_names_by_ids", return_value={7: "NewJeans"}),
+            patch("scheduler.update_artist_is_coming"),
+            patch("scheduler.notify_new_concert") as mock_notify,
+        ):
+            run_new_concert_collect()
+
+        mock_notify.assert_called_once_with("NewJeans 내한공연", ["NewJeans"])
+
+    def test_excludes_stale_unmatched_concerts_not_in_new_concerts(self):
+        """과거부터 미매칭으로 남아있던 잔여 공연은 알림 대상에서 제외되어야 한다."""
+        new_concert = {"kopis_id": "PF999", "prfnm": "NewJeans 내한공연", "prfstate": "공연예정"}
+        with (
+            patch("scheduler.kopis.collect", return_value=[new_concert]),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.save_concerts"),
+            patch(
+                "scheduler.get_concert_by_kopis_id",
+                return_value={"concert_id": 42, "title": "NewJeans 내한공연", "cast": None},
+            ),
+            patch(
+                "scheduler.get_unmatched_concerts",
+                return_value=[{"concert_id": 999, "title": "과거 잔여 공연", "cast": None}],
+            ),
+            patch(
+                "scheduler.match_concert",
+                return_value=([{"concert_id": 999, "artist_id": 3}], []),
+            ),
+            patch("scheduler.save_concert_artist_candidates"),
+            patch("scheduler.get_artist_names_by_ids", return_value={3: "OldArtist"}),
+            patch("scheduler.update_artist_is_coming"),
+            patch("scheduler.notify_new_concert") as mock_notify,
+        ):
+            run_new_concert_collect()
+
+        mock_notify.assert_not_called()
+
+    def test_does_not_notify_when_no_new_concerts(self):
+        """신규 공연 자체가 없으면 save_concerts·notify_new_concert 모두 호출되지 않아야 한다."""
+        new_concert = {"kopis_id": "PF999", "prfnm": "NewJeans 내한공연", "prfstate": "공연예정"}
+        with (
+            patch("scheduler.kopis.collect", return_value=[new_concert]),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=False),
+            patch("scheduler.save_concerts") as mock_save,
+            patch("scheduler.update_artist_is_coming"),
+            patch("scheduler.notify_new_concert") as mock_notify,
+        ):
+            run_new_concert_collect()
+
+        mock_save.assert_not_called()
+        mock_notify.assert_not_called()
 
 
 class TestRunReleaseUpdate:
