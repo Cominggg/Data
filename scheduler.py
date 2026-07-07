@@ -19,10 +19,12 @@ from db.repository import (
     get_all_artist_mbids,
     get_all_artists_with_spotify,
     get_artist_by_mbid,
+    get_artist_names_by_ids,
     get_artists_without_image,
     get_artists_without_ko_alias,
     get_artists_without_releases,
     get_concert_by_kopis_id,
+    get_concert_ids_by_kopis_ids,
     get_concert_with_artist,
     get_existing_kopis_ids,
     get_existing_release_spotify_ids,
@@ -43,6 +45,7 @@ from db.repository import (
     upsert_artist_url,
 )
 from matchers.artist_matcher import has_match, match_concert
+from notifier.discord import notify_new_concert
 
 logging.basicConfig(
     level=logging.INFO,
@@ -428,6 +431,25 @@ def run_new_concert_collect(stdate: Optional[str] = None, use_prfstate: bool = F
             all_matches.extend(matches)
         if all_matches:
             save_concert_artist_candidates(all_matches)
+
+        new_kopis_titles = {c["kopis_id"]: c["prfnm"] for c in new_concerts}
+        concert_ids_by_kopis_id = get_concert_ids_by_kopis_ids(list(new_kopis_titles))
+        title_by_concert_id = {
+            concert_id: new_kopis_titles[kopis_id]
+            for kopis_id, concert_id in concert_ids_by_kopis_id.items()
+        }
+
+        matches_by_concert: dict = {}
+        for match in all_matches:
+            if match["concert_id"] in title_by_concert_id:
+                matches_by_concert.setdefault(match["concert_id"], []).append(match["artist_id"])
+
+        if matches_by_concert:
+            all_artist_ids = {aid for ids in matches_by_concert.values() for aid in ids}
+            artist_names = get_artist_names_by_ids(list(all_artist_ids))
+            for concert_id, artist_ids in matches_by_concert.items():
+                names = [artist_names[aid] for aid in artist_ids if aid in artist_names]
+                notify_new_concert(title_by_concert_id[concert_id], names)
 
     update_artist_is_coming()
     _save_last_collect_date(datetime.now().strftime("%Y%m%d"))

@@ -468,6 +468,18 @@ def get_artist_by_mbid(mbid: str) -> Optional[dict]:
     return {"id": row[0], "name": row[1], "spotify_url": row[2]}
 
 
+def get_artist_names_by_ids(artist_ids: list) -> dict:
+    """artist_id 목록으로 canonical artist.name을 일괄 조회한다. alias는 포함하지 않는다."""
+    if not artist_ids:
+        return {}
+    with get_session() as session:
+        rows = session.execute(
+            text('SELECT id, name FROM artist WHERE id = ANY(:ids)'),
+            {"ids": artist_ids},
+        ).fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
 def get_artists_without_image() -> list[dict]:
     """image_url이 없는 artist의 id·mbid·name·spotify_url 목록을 반환한다."""
     with get_session() as session:
@@ -547,6 +559,18 @@ def get_concert_by_kopis_id(kopis_id: str) -> Optional[dict]:
     if row is None:
         return None
     return {"concert_id": row[0], "title": row[1], "cast": row[2]}
+
+
+def get_concert_ids_by_kopis_ids(kopis_ids: list) -> dict:
+    """kopis_id 목록으로 concert_id를 일괄 조회한다 (kopis_id -> concert_id)."""
+    if not kopis_ids:
+        return {}
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT kopis_id, id FROM concert WHERE kopis_id = ANY(:kopis_ids)"),
+            {"kopis_ids": kopis_ids},
+        ).fetchall()
+    return {row[0]: row[1] for row in rows}
 
 
 def get_unmatched_concerts() -> list[dict]:
