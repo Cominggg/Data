@@ -243,7 +243,7 @@ class TestRunNewConcertCollect:
             patch("scheduler.has_match", return_value=True),
             patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.get_unmatched_concerts", return_value=[]),
-            patch("scheduler.get_concert_by_kopis_id", return_value=None),
+            patch("scheduler.get_concert_ids_by_kopis_ids", return_value={}),
             patch("scheduler.save_concert_artists"),
             patch("scheduler.update_artist_is_coming"),
         ):
@@ -261,7 +261,7 @@ class TestRunNewConcertCollect:
             patch("scheduler.has_match", return_value=True),
             patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.get_unmatched_concerts", return_value=[]),
-            patch("scheduler.get_concert_by_kopis_id", return_value=None),
+            patch("scheduler.get_concert_ids_by_kopis_ids", return_value={}),
             patch("scheduler.save_concert_artists"),
             patch("scheduler.update_artist_is_coming"),
         ):
@@ -309,8 +309,8 @@ class TestRunNewConcertCollect:
             patch("scheduler.has_match", return_value=True),
             patch("scheduler.save_concerts"),
             patch(
-                "scheduler.get_concert_by_kopis_id",
-                return_value={"concert_id": 42, "title": "NewJeans 내한공연", "cast": None},
+                "scheduler.get_concert_ids_by_kopis_ids",
+                return_value={"PF999": 42},
             ),
             patch(
                 "scheduler.get_unmatched_concerts",
@@ -339,8 +339,8 @@ class TestRunNewConcertCollect:
             patch("scheduler.has_match", return_value=True),
             patch("scheduler.save_concerts"),
             patch(
-                "scheduler.get_concert_by_kopis_id",
-                return_value={"concert_id": 42, "title": "NewJeans 내한공연", "cast": None},
+                "scheduler.get_concert_ids_by_kopis_ids",
+                return_value={"PF999": 42},
             ),
             patch(
                 "scheduler.get_unmatched_concerts",

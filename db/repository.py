@@ -561,6 +561,18 @@ def get_concert_by_kopis_id(kopis_id: str) -> Optional[dict]:
     return {"concert_id": row[0], "title": row[1], "cast": row[2]}
 
 
+def get_concert_ids_by_kopis_ids(kopis_ids: list) -> dict:
+    """kopis_id 목록으로 concert_id를 일괄 조회한다 (kopis_id -> concert_id)."""
+    if not kopis_ids:
+        return {}
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT kopis_id, id FROM concert WHERE kopis_id = ANY(:kopis_ids)"),
+            {"kopis_ids": kopis_ids},
+        ).fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
 def get_unmatched_concerts() -> list[dict]:
     """concert_artist 매칭이 없는 공연을 반환한다. EXCLUDED 상태 공연은 제외한다."""
     with get_session() as session:
