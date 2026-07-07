@@ -51,13 +51,14 @@ jobs:
           V_SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
           V_SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
           V_INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
+          V_DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           V_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           V_GITHUB_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: V_DB_HOST,V_DB_PORT,V_DB_NAME,V_DB_USER,V_DB_PASSWORD,V_KOPIS_API_KEY,V_MUSICBRAINZ_USER_AGENT,V_SETLISTFM_API_KEY,V_SPOTIFY_CLIENT_ID,V_SPOTIFY_CLIENT_SECRET,V_INTERNAL_SECRET,V_GITHUB_TOKEN,V_GITHUB_ACTOR
+          envs: V_DB_HOST,V_DB_PORT,V_DB_NAME,V_DB_USER,V_DB_PASSWORD,V_KOPIS_API_KEY,V_MUSICBRAINZ_USER_AGENT,V_SETLISTFM_API_KEY,V_SPOTIFY_CLIENT_ID,V_SPOTIFY_CLIENT_SECRET,V_INTERNAL_SECRET,V_DISCORD_WEBHOOK_URL,V_GITHUB_TOKEN,V_GITHUB_ACTOR
           script: |
             set -e
             mkdir -p ~/compose
@@ -72,6 +73,7 @@ jobs:
             printf 'SPOTIFY_CLIENT_ID=%s\n'     "$V_SPOTIFY_CLIENT_ID"     >> ~/compose/data.env
             printf 'SPOTIFY_CLIENT_SECRET=%s\n' "$V_SPOTIFY_CLIENT_SECRET" >> ~/compose/data.env
             printf 'INTERNAL_SECRET=%s\n'       "$V_INTERNAL_SECRET"       >> ~/compose/data.env
+            printf 'DISCORD_WEBHOOK_URL=%s\n'   "$V_DISCORD_WEBHOOK_URL"   >> ~/compose/data.env
 
             echo "$V_GITHUB_TOKEN" | docker login ghcr.io -u "$V_GITHUB_ACTOR" --password-stdin
             docker compose -f ~/compose/docker-compose.yml pull data
