@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from db.repository import (
     get_active_concerts,
+    get_artist_names_by_ids,
     save_artists,
     save_concert_artists,
     save_setlists,
@@ -227,6 +228,35 @@ class TestSaveArtists:
             c for c in mock_session.execute.call_args_list if "INSERT INTO artist" in str(c.args[0])
         ]
         assert len(artist_insert_calls) == 3
+
+
+class TestGetArtistNamesByIds:
+    def _run(self, artist_ids, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            return get_artist_names_by_ids(artist_ids)
+
+    def test_returns_empty_dict_without_db_call_for_empty_list(self):
+        """artist_ids가 빈 리스트면 DB 조회 없이 {} 반환해야 한다."""
+        mock_session = MagicMock()
+        with patch("db.repository.get_session") as mock_get_session:
+            result = get_artist_names_by_ids([])
+
+        mock_get_session.assert_not_called()
+        mock_session.execute.assert_not_called()
+        assert result == {}
+
+    def test_returns_id_to_name_dict(self):
+        """조회된 (id, name) 행들을 {id: name} dict로 반환해야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [
+            (1, "아이유"),
+            (2, "NewJeans"),
+        ]
+        result = self._run([1, 2], mock_session)
+
+        assert result == {1: "아이유", 2: "NewJeans"}
 
 
 class TestUpsertArtistUrl:
