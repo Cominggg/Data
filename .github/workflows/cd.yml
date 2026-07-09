@@ -56,6 +56,7 @@ jobs:
           V_GITHUB_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: V_DB_HOST,V_DB_PORT,V_DB_NAME,V_DB_USER,V_DB_PASSWORD,V_KOPIS_API_KEY,V_MUSICBRAINZ_USER_AGENT,V_SETLISTFM_API_KEY,V_SPOTIFY_CLIENT_ID,V_SPOTIFY_CLIENT_SECRET,V_INTERNAL_SECRET,V_DISCORD_WEBHOOK_URL,V_GITHUB_TOKEN,V_GITHUB_ACTOR
