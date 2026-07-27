@@ -654,29 +654,25 @@ class TestCollectAndSaveConcert:
         with patch("scheduler.kopis.collect_by_id", return_value=None):
             assert collect_and_save_concert("PF000") == {"status": "not_found"}
 
-    def test_returns_skipped_when_not_touring(self):
-        """내한 공연이 아니면 status:skipped, reason:not_touring을 반환해야 한다."""
+    def test_saves_even_when_not_touring(self):
+        """내한 공연이 아니어도 저장된다 (어드민이 직접 고른 공연이므로 visit 무관)."""
         concert = {**self._CONCERT_RAW, "visit": "N"}
-        with patch("scheduler.kopis.collect_by_id", return_value=concert):
-            result = collect_and_save_concert("PF001")
-        assert result == {"status": "skipped", "reason": "not_touring"}
-
-    def test_returns_skipped_when_no_alias_match(self):
-        """alias 매칭이 없으면 status:skipped, reason:no_alias_match를 반환해야 한다."""
         with (
-            patch("scheduler.kopis.collect_by_id", return_value=self._CONCERT_RAW),
+            patch("scheduler.kopis.collect_by_id", return_value=concert),
             patch("scheduler.get_all_aliases", return_value=self._ALIASES),
-            patch("scheduler.has_match", return_value=False),
+            patch("scheduler.save_concerts") as mock_save,
+            patch("scheduler.get_concert_by_kopis_id", return_value=self._CONCERT_ROW),
+            patch("scheduler.match_concert", return_value=([], [{"concert_id": 10}])),
         ):
             result = collect_and_save_concert("PF001")
-        assert result == {"status": "skipped", "reason": "no_alias_match"}
+        mock_save.assert_called_once()
+        assert result["status"] == "ok"
 
     def test_returns_ok_with_matched_artists_on_success(self):
         """매칭 성공 시 status:ok와 matched_artists를 반환해야 한다."""
         with (
             patch("scheduler.kopis.collect_by_id", return_value=self._CONCERT_RAW),
             patch("scheduler.get_all_aliases", return_value=self._ALIASES),
-            patch("scheduler.has_match", return_value=True),
             patch("scheduler.save_concerts"),
             patch("scheduler.get_concert_by_kopis_id", return_value=self._CONCERT_ROW),
             patch(
@@ -695,16 +691,16 @@ class TestCollectAndSaveConcert:
         }
 
     def test_returns_ok_with_empty_matches_when_no_match_found(self):
-        """저장은 됐지만 실제 매칭이 0건이면 matched_artists 빈 리스트로 성공 반환해야 한다."""
+        """alias 매칭이 없어도 저장되고, matched_artists 빈 리스트로 성공 반환해야 한다."""
         with (
             patch("scheduler.kopis.collect_by_id", return_value=self._CONCERT_RAW),
             patch("scheduler.get_all_aliases", return_value=self._ALIASES),
-            patch("scheduler.has_match", return_value=True),
-            patch("scheduler.save_concerts"),
+            patch("scheduler.save_concerts") as mock_save,
             patch("scheduler.get_concert_by_kopis_id", return_value=self._CONCERT_ROW),
             patch("scheduler.match_concert", return_value=([], [{"concert_id": 10}])),
         ):
             result = collect_and_save_concert("PF001")
+        mock_save.assert_called_once()
         assert result["status"] == "ok"
         assert result["matched_artists"] == []
 
@@ -713,7 +709,6 @@ class TestCollectAndSaveConcert:
         with (
             patch("scheduler.kopis.collect_by_id", return_value=self._CONCERT_RAW),
             patch("scheduler.get_all_aliases", return_value=self._ALIASES),
-            patch("scheduler.has_match", return_value=True),
             patch("scheduler.save_concerts"),
             patch("scheduler.get_concert_by_kopis_id", return_value=None),
             pytest.raises(RuntimeError),

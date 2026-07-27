@@ -74,14 +74,14 @@ class TestCollectConcertEndpoint:
         assert res.status_code == 404
 
     def test_returns_200_with_success_false_when_skipped(self, client):
-        """비즈니스 스킵(내한 아님 등)이면 200 + success:false를 반환해야 한다."""
+        """비즈니스 스킵이면 200 + success:false를 반환해야 한다."""
         with patch(
             "api.collect_and_save_concert",
-            return_value={"status": "skipped", "reason": "not_touring"},
+            return_value={"status": "skipped", "reason": "some_reason"},
         ):
             res = client.post("/collect/concert", json={"kopis_id": "PF001"}, headers=_AUTH)
         assert res.status_code == 200
-        assert res.json() == {"success": False, "reason": "not_touring"}
+        assert res.json() == {"success": False, "reason": "some_reason"}
 
     def test_called_with_kopis_id(self, client):
         """collect_and_save_concert가 kopis_id로 직접 호출되어야 한다."""
