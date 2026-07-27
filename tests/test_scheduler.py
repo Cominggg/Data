@@ -715,6 +715,15 @@ class TestCollectAndSaveConcert:
         ):
             collect_and_save_concert("PF001")
 
+    def test_returns_skipped_when_duplicate_title(self):
+        """save_concerts가 kopis_id를 중복으로 반환하면 status:skipped를 반환해야 한다."""
+        with (
+            patch("scheduler.kopis.collect_by_id", return_value=self._CONCERT_RAW),
+            patch("scheduler.save_concerts", return_value={"PF001"}),
+        ):
+            result = collect_and_save_concert("PF001")
+        assert result == {"status": "skipped", "reason": "duplicate_title"}
+
 
 class TestCollectAndSaveSetlist:
     _CONCERT = {

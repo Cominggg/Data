@@ -660,8 +660,10 @@ def collect_and_save_concert(kopis_id: str) -> dict:
     어드민이 KOPIS에서 직접 골라 트리거하는 수집이므로 (자동 매칭에서 누락된 공연을
     구제하는 용도) 내한 여부·alias 매칭 여부와 무관하게 저장한다.
 
-    KOPIS에 데이터가 없으면 {"status": "not_found"}, 성공 시
-    {"status": "ok", "concert_id", "title", "matched_artists"}를 반환한다.
+    KOPIS에 데이터가 없으면 {"status": "not_found"}, 동일 title·기간의 공연이
+    이미 존재하면(예: 어드민 수동 등록과 중복) {"status": "skipped",
+    "reason": "duplicate_title"}, 성공 시 {"status": "ok", "concert_id", "title",
+    "matched_artists"}를 반환한다.
     저장 직후 재조회에 실패하면 (있어선 안 되는 내부 불일치) RuntimeError를 발생시킨다.
     """
     concert = kopis.collect_by_id(kopis_id)
@@ -669,7 +671,9 @@ def collect_and_save_concert(kopis_id: str) -> dict:
         logger.warning("KOPIS 공연 데이터 없음: kopis_id=%s", kopis_id)
         return {"status": "not_found"}
 
-    save_concerts([concert], use_prfstate=True)
+    duplicate_kopis_ids = save_concerts([concert], use_prfstate=True)
+    if kopis_id in duplicate_kopis_ids:
+        return {"status": "skipped", "reason": "duplicate_title"}
 
     concert_row = get_concert_by_kopis_id(kopis_id)
     if concert_row is None:

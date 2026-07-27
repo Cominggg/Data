@@ -159,16 +159,42 @@ def save_releases(artist_id: int, releases: list[dict]) -> None:
     logger.info("릴리즈 저장 완료: %d / %d건 처리", saved, len(releases))
 
 
-def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> None:
+def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
     """수집된 공연 목록을 concert 테이블에 저장한다. kopis_id 중복 시 무시.
+
+    title·start_date·end_date가 모두 일치하는 공연이 이미 존재하면(예: 어드민이
+    kopis_id 없이 수동 등록한 공연과 동일 공연) 신규 저장을 건너뛴다.
 
     use_prfstate=True이면 prfstate → _KOPIS_STATUS_MAP으로 status를 결정한다.
     기본값(False)은 배치 수집용 PENDING을 사용한다.
+
+    반환값: title·기간 중복으로 저장을 건너뛴 concert들의 kopis_id 집합
     """
     saved = 0
+    duplicate_kopis_ids = set()
     for concert in concerts:
         try:
             with get_session() as session:
+                title_match = session.execute(
+                    text("""
+                        SELECT id FROM concert
+                        WHERE title = :title AND start_date = :start_date
+                          AND end_date = :end_date
+                    """),
+                    {
+                        "title": concert["prfnm"],
+                        "start_date": concert["prfpdfrom"],
+                        "end_date": concert["prfpdto"],
+                    },
+                ).fetchone()
+                if title_match is not None:
+                    logger.info(
+                        "동일 공연명·기간 이미 존재 — 저장 건너뜀: title=%s, kopis_id=%s",
+                        concert["prfnm"], concert["kopis_id"],
+                    )
+                    duplicate_kopis_ids.add(concert["kopis_id"])
+                    continue
+
                 status = (
                     _KOPIS_STATUS_MAP.get(concert.get("prfstate"), "PENDING")
                     if use_prfstate
@@ -237,7 +263,11 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> None:
                 saved += 1
         except SQLAlchemyError as e:
             logger.error("공연 저장 실패 — 건너뜀: kopis_id=%s, 오류=%s", concert["kopis_id"], e)
-    logger.info("공연 저장 완료: %d / %d건 처리", saved, len(concerts))
+    logger.info(
+        "공연 저장 완료: %d / %d건 처리 (title·기간 중복 %d건 제외)",
+        saved, len(concerts), len(duplicate_kopis_ids),
+    )
+    return duplicate_kopis_ids
 
 
 def get_completed_concerts() -> list[dict]:
