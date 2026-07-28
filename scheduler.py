@@ -657,30 +657,29 @@ def run_setlist_collect() -> None:
 def collect_and_save_concert(kopis_id: str) -> dict:
     """단건 KOPIS 공연을 수집해 alias 매칭 후 DB에 저장한다.
 
-    KOPIS에 데이터가 없으면 {"status": "not_found"}, 내한 공연이 아니거나
-    alias 매칭이 없으면 {"status": "skipped", "reason": ...}, 성공 시
-    {"status": "ok", "concert_id", "title", "matched_artists"}를 반환한다.
+    어드민이 KOPIS에서 직접 골라 트리거하는 수집이므로 (자동 매칭에서 누락된 공연을
+    구제하는 용도) 내한 여부·alias 매칭 여부와 무관하게 저장한다.
+
+    KOPIS에 데이터가 없으면 {"status": "not_found"}, 동일 title·기간의 공연이
+    이미 존재하면(예: 어드민 수동 등록과 중복) {"status": "skipped",
+    "reason": "duplicate_title"}, 성공 시 {"status": "ok", "concert_id", "title",
+    "matched_artists"}를 반환한다.
     저장 직후 재조회에 실패하면 (있어선 안 되는 내부 불일치) RuntimeError를 발생시킨다.
     """
     concert = kopis.collect_by_id(kopis_id)
     if concert is None:
         logger.warning("KOPIS 공연 데이터 없음: kopis_id=%s", kopis_id)
         return {"status": "not_found"}
-    if concert.get("visit") != "Y":
-        logger.info("내한 공연 아님 — 저장 건너뜀: kopis_id=%s", kopis_id)
-        return {"status": "skipped", "reason": "not_touring"}
 
-    aliases = get_all_aliases()
-    if not has_match(concert, aliases):
-        logger.info("alias 매칭 없음 — 저장 건너뜀: kopis_id=%s", kopis_id)
-        return {"status": "skipped", "reason": "no_alias_match"}
-
-    save_concerts([concert], use_prfstate=True)
+    duplicate_kopis_ids = save_concerts([concert], use_prfstate=True)
+    if kopis_id in duplicate_kopis_ids:
+        return {"status": "skipped", "reason": "duplicate_title"}
 
     concert_row = get_concert_by_kopis_id(kopis_id)
     if concert_row is None:
         raise RuntimeError(f"공연 저장 후 조회 실패: kopis_id={kopis_id}")
 
+    aliases = get_all_aliases()
     matched_artists = []
     matches, _ = match_concert(concert_row, aliases)
     if matches:

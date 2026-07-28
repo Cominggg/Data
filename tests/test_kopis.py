@@ -622,6 +622,7 @@ class TestSaveConcerts:
     def test_insert_sql_contains_on_conflict(self):
         """INSERT SQL에 ON CONFLICT가 포함되어야 한다."""
         mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -637,6 +638,7 @@ class TestSaveConcerts:
     def test_insert_sql_includes_poster_url(self):
         """INSERT SQL에 poster_url 컬럼이 포함되어야 한다."""
         mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -651,6 +653,7 @@ class TestSaveConcerts:
     def test_poster_url_param_passed(self):
         """INSERT 파라미터에 poster_url 값이 전달되어야 한다."""
         mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -665,6 +668,7 @@ class TestSaveConcerts:
     def test_insert_sql_includes_price(self):
         """INSERT SQL에 price 컬럼이 포함되어야 한다."""
         mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -679,6 +683,7 @@ class TestSaveConcerts:
     def test_price_param_passed(self):
         """INSERT 파라미터에 price 값이 전달되어야 한다."""
         mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -693,7 +698,7 @@ class TestSaveConcerts:
     def test_booking_links_inserted_for_new_concert(self):
         """신규 공연 저장 시 relates가 concert_booking_link 테이블에 별도 INSERT되어야 한다."""
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = (1,)
+        mock_session.execute.return_value.fetchone.side_effect = [None, (1,)]
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -713,7 +718,7 @@ class TestSaveConcerts:
     def test_booking_links_inserted_for_existing_concert(self):
         """기존 공연(INSERT DO NOTHING)도 SELECT fallback으로 booking_link가 INSERT되어야 한다."""
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.side_effect = [None, (5,)]
+        mock_session.execute.return_value.fetchone.side_effect = [None, None, (5,)]
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -731,7 +736,7 @@ class TestSaveConcerts:
     def test_booking_link_insert_has_on_conflict(self):
         """concert_booking_link INSERT에 ON CONFLICT DO NOTHING이 포함되어야 한다."""
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = (1,)
+        mock_session.execute.return_value.fetchone.side_effect = [None, (1,)]
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -749,7 +754,7 @@ class TestSaveConcerts:
     def test_concert_image_inserted_for_new_concert(self):
         """신규 공연 저장 시 still_urls가 concert_image에 position 순으로 INSERT되어야 한다."""
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = (1,)
+        mock_session.execute.return_value.fetchone.side_effect = [None, (1,)]
         concert = self._make_concert(still_urls=["http://still1.jpg", "http://still2.jpg"])
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -768,7 +773,7 @@ class TestSaveConcerts:
     def test_concert_image_not_inserted_for_existing_concert(self):
         """기존 공연(RETURNING None)이면 concert_image INSERT가 실행되지 않아야 한다."""
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.side_effect = [None, (5,)]
+        mock_session.execute.return_value.fetchone.side_effect = [None, None, (5,)]
         concert = self._make_concert(still_urls=["http://still1.jpg"])
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -780,10 +785,40 @@ class TestSaveConcerts:
         ]
         assert len(image_inserts) == 0
 
+    def test_skips_insert_when_title_and_dates_match_existing(self):
+        """title·start_date·end_date가 모두 일치하는 공연이 있으면 INSERT를 건너뛴다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (99,)
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            duplicates = save_concerts([self._make_concert()])
+
+        insert_sqls = [
+            str(c.args[0]) for c in mock_session.execute.call_args_list
+            if "INSERT INTO concert" in str(c.args[0])
+        ]
+        assert insert_sqls == []
+        assert duplicates == {"PF123456"}
+
+    def test_title_date_check_uses_concert_fields(self):
+        """중복 검사 쿼리에 title·start_date·end_date 파라미터가 전달되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concerts([self._make_concert()])
+
+        check_call = mock_session.execute.call_args_list[0]
+        assert check_call.args[1] == {
+            "title": "공연명", "start_date": "2024-01-01", "end_date": "2024-01-31",
+        }
+
     def test_concert_image_not_inserted_when_still_urls_empty(self):
         """still_urls가 빈 리스트이면 concert_image INSERT가 실행되지 않아야 한다."""
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = (1,)
+        mock_session.execute.return_value.fetchone.side_effect = [None, (1,)]
         concert = self._make_concert(still_urls=[])
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
