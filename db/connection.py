@@ -17,7 +17,11 @@ _DATABASE_URL = (
     f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
 )
 
-engine = create_engine(_DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(
+    _DATABASE_URL,
+    pool_pre_ping=True,
+    connect_args={"options": "-c statement_timeout=10000 -c lock_timeout=5000"},
+)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
