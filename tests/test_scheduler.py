@@ -1,5 +1,6 @@
 """scheduler.py 단위 테스트."""
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -10,6 +11,7 @@ from scheduler import (
     _build_scheduler,
     _clear_progress,
     _is_banned,
+    _job_timer,
     _load_progress,
     _progress_path,
     _save_ban,
@@ -27,6 +29,38 @@ from scheduler import (
     run_release_update,
     run_setlist_collect,
 )
+
+
+class TestJobTimer:
+    # ── 배치 잡 소요시간 로깅 ────────────────────────────────────────────────
+
+    def test_logs_duration_on_normal_completion(self, caplog):
+        """정상 종료 시 소요시간이 로깅되어야 한다."""
+        with caplog.at_level(logging.INFO, logger="scheduler"):
+            with _job_timer("테스트 잡"):
+                pass
+
+        assert any("테스트 잡 소요시간" in r.message for r in caplog.records)
+
+    def test_logs_duration_on_early_return(self, caplog):
+        """with 블록 중간에 return으로 빠져나가도 소요시간이 로깅되어야 한다."""
+        def _early_return():
+            with _job_timer("테스트 잡"):
+                return
+
+        with caplog.at_level(logging.INFO, logger="scheduler"):
+            _early_return()
+
+        assert any("테스트 잡 소요시간" in r.message for r in caplog.records)
+
+    def test_logs_duration_even_on_exception(self, caplog):
+        """예외가 발생해도 소요시간이 로깅되고, 예외는 그대로 전파되어야 한다."""
+        with caplog.at_level(logging.INFO, logger="scheduler"):
+            with pytest.raises(ValueError):
+                with _job_timer("테스트 잡"):
+                    raise ValueError("boom")
+
+        assert any("테스트 잡 소요시간" in r.message for r in caplog.records)
 
 
 class TestRunInitialCollect:
