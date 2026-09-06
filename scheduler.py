@@ -392,7 +392,6 @@ def run_concert_status_update() -> None:
         if fetched:
             update_concert_status(fetched)
 
-    update_artist_is_coming()
     logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
 

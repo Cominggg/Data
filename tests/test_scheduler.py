@@ -159,7 +159,6 @@ class TestRunConcertStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=active),
             patch("scheduler.kopis.collect_by_id", return_value=fetched) as mock_by_id,
             patch("scheduler.update_concert_status"),
-            patch("scheduler.update_artist_is_coming"),
         ):
             run_concert_status_update()
 
@@ -175,7 +174,6 @@ class TestRunConcertStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=active),
             patch("scheduler.kopis.collect_by_id", return_value=fetched),
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.update_artist_is_coming"),
         ):
             run_concert_status_update()
 
@@ -187,7 +185,6 @@ class TestRunConcertStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.kopis.collect_by_id") as mock_by_id,
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.update_artist_is_coming"),
         ):
             run_concert_status_update()
 
@@ -201,21 +198,20 @@ class TestRunConcertStatusUpdate:
             patch("scheduler.get_active_concerts", return_value=active),
             patch("scheduler.kopis.collect_by_id", return_value=None),
             patch("scheduler.update_concert_status") as mock_update,
-            patch("scheduler.update_artist_is_coming"),
         ):
             run_concert_status_update()
 
         mock_update.assert_not_called()
 
-    def test_updates_is_coming_after_status_update(self):
-        """상태 갱신 후 update_artist_is_coming이 인자 없이 호출되어야 한다."""
+    def test_does_not_update_is_coming(self):
+        """is_coming 갱신은 run_new_concert_collect로 일원화됐으므로 이 잡에서는 호출 안 된다."""
         with (
             patch("scheduler.get_active_concerts", return_value=[]),
             patch("scheduler.update_artist_is_coming") as mock_update,
         ):
             run_concert_status_update()
 
-        mock_update.assert_called_once_with()
+        mock_update.assert_not_called()
 
 
 class TestRunNewConcertCollect:
