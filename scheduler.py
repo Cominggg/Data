@@ -69,11 +69,11 @@ _scheduler: Optional[BackgroundScheduler] = None  # main()에서 데몬 실행 �
 @contextmanager
 def _job_timer(job_name: str):
     """잡의 소요시간을 로깅한다. 조기 반환·예외 등 모든 종료 경로를 포함한다."""
-    start = time.time()
+    start = time.monotonic()
     try:
         yield
     finally:
-        logger.info("%s 소요시간: %.1f초", job_name, time.time() - start)
+        logger.info("%s 소요시간: %.1f초", job_name, time.monotonic() - start)
 
 
 def _progress_path(job_name: str) -> str:
