@@ -1,10 +1,13 @@
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from db.repository import (
     get_active_concerts,
     get_artist_names_by_ids,
     get_concert_ids_by_kopis_ids,
     save_artists,
+    save_concert_artist_candidates,
     save_concert_artists,
     save_setlists,
     update_artist_is_coming,
@@ -414,6 +417,22 @@ class TestSaveSetlists:
         sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list]
         assert not any("setlist_track" in s for s in sqls)
 
+    def test_one_failure_does_not_stop_others(self):
+        """한 건이 SQLAlchemyError로 실패해도 나머지 건은 계속 저장 시도되어야 한다."""
+        mock_session = MagicMock()
+        # tracks=[]인 항목은 execute().fetchone() 반환값이 사용되지 않으므로
+        # 성공 케이스는 임의의 MagicMock, 실패 케이스만 예외로 지정한다.
+        mock_session.execute.side_effect = [MagicMock(), SQLAlchemyError("boom"), MagicMock()]
+        setlists = [
+            {"concert_id": 1, "setlist_fm_id": "abc1", "tracks": []},
+            {"concert_id": 2, "setlist_fm_id": "abc2", "tracks": []},
+            {"concert_id": 3, "setlist_fm_id": "abc3", "tracks": []},
+        ]
+
+        self._run(setlists, mock_session)
+
+        assert mock_session.execute.call_count == 3
+
 
 class TestSaveConcertArtists:
     def _run(self, matches, mock_session):
@@ -471,6 +490,50 @@ class TestSaveConcertArtists:
         mock_session = MagicMock()
         self._run([], mock_session)
         mock_session.execute.assert_not_called()
+
+    def test_one_failure_does_not_stop_others(self):
+        """한 건이 SQLAlchemyError로 실패해도 나머지 건은 계속 저장 시도되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.side_effect = [None, SQLAlchemyError("boom"), None]
+        matches = [
+            {"concert_id": 1, "artist_id": 10},
+            {"concert_id": 2, "artist_id": 20},
+            {"concert_id": 3, "artist_id": 30},
+        ]
+
+        self._run(matches, mock_session)
+
+        assert mock_session.execute.call_count == 3
+
+
+class TestSaveConcertArtistCandidates:
+    def _run(self, matches, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            save_concert_artist_candidates(matches)
+
+    def test_inserts_into_concert_artist_candidate(self):
+        """매칭 결과가 concert_artist_candidate 테이블에 INSERT되어야 한다."""
+        mock_session = MagicMock()
+        self._run([{"concert_id": 1, "artist_id": 10}], mock_session)
+
+        insert_sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "INSERT INTO concert_artist_candidate" in insert_sql
+
+    def test_one_failure_does_not_stop_others(self):
+        """한 건이 SQLAlchemyError로 실패해도 나머지 건은 계속 저장 시도되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.side_effect = [SQLAlchemyError("boom"), None, None]
+        matches = [
+            {"concert_id": 1, "artist_id": 10},
+            {"concert_id": 2, "artist_id": 20},
+            {"concert_id": 3, "artist_id": 30},
+        ]
+
+        self._run(matches, mock_session)
+
+        assert mock_session.execute.call_count == 3
 
 
 class TestUpdateArtistIsComing:

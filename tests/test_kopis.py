@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from sqlalchemy.exc import SQLAlchemyError
 
 from collectors.kopis import (
     _fetch_and_merge,
@@ -868,6 +869,27 @@ class TestUpdateConcertStatus:
         update_params = update_calls[0].args[1]
         assert update_params["status"] == "ENDED"
         assert update_params["kopis_update_date"] == "2024-01-20"
+
+    def test_one_failure_does_not_stop_others(self):
+        """한 건이 SQLAlchemyError로 실패해도 나머지 건은 계속 처리되어야 한다."""
+        mock_session = MagicMock()
+        exec_result_1 = MagicMock()
+        exec_result_1.fetchone.return_value = ("2024-01-01",)
+        exec_result_3 = MagicMock()
+        exec_result_3.fetchone.return_value = ("2024-01-03",)
+        mock_session.execute.side_effect = [exec_result_1, SQLAlchemyError("boom"), exec_result_3]
+        concerts = [
+            {"kopis_id": "PF001", "prfstate": "공연예정", "updatedate": "2024-01-01"},
+            {"kopis_id": "PF002", "prfstate": "공연예정", "updatedate": "2024-01-02"},
+            {"kopis_id": "PF003", "prfstate": "공연예정", "updatedate": "2024-01-03"},
+        ]
+
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            update_concert_status(concerts)
+
+        assert mock_session.execute.call_count == 3
 
 
 # ─── TestKopisHttpErrors ──────────────────────────────────────────────────────
