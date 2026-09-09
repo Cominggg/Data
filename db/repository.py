@@ -302,44 +302,54 @@ def get_completed_concerts() -> list[dict]:
 
 
 def save_setlists(setlists: list[dict]) -> None:
-    """수집된 셋리스트를 setlist·setlist_track 테이블에 저장한다. 중복 시 무시."""
-    with get_session() as session:
-        for item in setlists:
-            row = session.execute(
-                text("""
-                    INSERT INTO setlist (concert_id, setlist_fm_id, attribution_url, collected_at)
-                    VALUES (:concert_id, :setlist_fm_id, :attribution_url, NOW())
-                    ON CONFLICT (setlist_fm_id) DO NOTHING
-                    RETURNING id
-                """),
-                {
-                    "concert_id": item["concert_id"],
-                    "setlist_fm_id": item["setlist_fm_id"],
-                    "attribution_url": item.get("attribution_url"),
-                },
-            ).fetchone()
+    """수집된 셋리스트를 setlist·setlist_track 테이블에 저장한다. 중복 시 무시.
 
-            if not row or not item.get("tracks"):
-                continue
-
-            setlist_id = row[0]
-            session.execute(
-                text("""
-                    INSERT INTO setlist_track (setlist_id, position, song_name, info)
-                    VALUES (:setlist_id, :position, :song_name, :info)
-                """),
-                [
+    셋리스트별 독립 트랜잭션을 사용해 한 건 실패가 전체에 영향을 주지 않는다.
+    """
+    saved = 0
+    for item in setlists:
+        try:
+            with get_session() as session:
+                row = session.execute(
+                    text("""
+                        INSERT INTO setlist
+                            (concert_id, setlist_fm_id, attribution_url, collected_at)
+                        VALUES (:concert_id, :setlist_fm_id, :attribution_url, NOW())
+                        ON CONFLICT (setlist_fm_id) DO NOTHING
+                        RETURNING id
+                    """),
                     {
-                        "setlist_id": setlist_id,
-                        "position": track["position"],
-                        "song_name": track["song_name"],
-                        "info": track.get("info"),
-                    }
-                    for track in item["tracks"]
-                ],
+                        "concert_id": item["concert_id"],
+                        "setlist_fm_id": item["setlist_fm_id"],
+                        "attribution_url": item.get("attribution_url"),
+                    },
+                ).fetchone()
+
+                if row and item.get("tracks"):
+                    setlist_id = row[0]
+                    session.execute(
+                        text("""
+                            INSERT INTO setlist_track (setlist_id, position, song_name, info)
+                            VALUES (:setlist_id, :position, :song_name, :info)
+                        """),
+                        [
+                            {
+                                "setlist_id": setlist_id,
+                                "position": track["position"],
+                                "song_name": track["song_name"],
+                                "info": track.get("info"),
+                            }
+                            for track in item["tracks"]
+                        ],
+                    )
+            saved += 1
+        except SQLAlchemyError as e:
+            logger.error(
+                "셋리스트 저장 실패 — 건너뜀: setlist_fm_id=%s, 오류=%s",
+                item.get("setlist_fm_id"), e,
             )
 
-    logger.info("셋리스트 저장 완료: %d건 처리", len(setlists))
+    logger.info("셋리스트 저장 완료: %d / %d건 처리", saved, len(setlists))
 
 
 def get_all_aliases() -> list[dict]:
@@ -619,40 +629,62 @@ def get_unmatched_concerts() -> list[dict]:
 
 
 def save_concert_artists(matches: list[dict]) -> None:
-    """매칭 결과를 concert_artist 테이블에 저장한다."""
-    with get_session() as session:
-        for match in matches:
-            session.execute(
-                text("""
-                    INSERT INTO concert_artist (concert_id, artist_id)
-                    VALUES (:concert_id, :artist_id)
-                    ON CONFLICT (concert_id, artist_id) DO NOTHING
-                """),
-                {
-                    "concert_id": match["concert_id"],
-                    "artist_id": match["artist_id"],
-                },
+    """매칭 결과를 concert_artist 테이블에 저장한다.
+
+    매칭별 독립 트랜잭션을 사용해 한 건 실패가 전체에 영향을 주지 않는다.
+    """
+    saved = 0
+    for match in matches:
+        try:
+            with get_session() as session:
+                session.execute(
+                    text("""
+                        INSERT INTO concert_artist (concert_id, artist_id)
+                        VALUES (:concert_id, :artist_id)
+                        ON CONFLICT (concert_id, artist_id) DO NOTHING
+                    """),
+                    {
+                        "concert_id": match["concert_id"],
+                        "artist_id": match["artist_id"],
+                    },
+                )
+            saved += 1
+        except SQLAlchemyError as e:
+            logger.error(
+                "공연-아티스트 매칭 저장 실패 — 건너뜀: concert_id=%s, artist_id=%s, 오류=%s",
+                match["concert_id"], match["artist_id"], e,
             )
-    logger.info("공연-아티스트 매칭 저장 완료: %d건 처리", len(matches))
+    logger.info("공연-아티스트 매칭 저장 완료: %d / %d건 처리", saved, len(matches))
 
 
 def save_concert_artist_candidates(matches: list[dict]) -> None:
-    """자동 매칭 결과를 concert_artist_candidate 테이블에 저장한다. 중복 시 무시."""
-    with get_session() as session:
-        for match in matches:
-            session.execute(
-                text("""
-                    INSERT INTO concert_artist_candidate
-                        (concert_id, artist_id)
-                    VALUES (:concert_id, :artist_id)
-                    ON CONFLICT (concert_id, artist_id) DO NOTHING
-                """),
-                {
-                    "concert_id": match["concert_id"],
-                    "artist_id": match["artist_id"],
-                },
+    """자동 매칭 결과를 concert_artist_candidate 테이블에 저장한다. 중복 시 무시.
+
+    매칭별 독립 트랜잭션을 사용해 한 건 실패가 전체에 영향을 주지 않는다.
+    """
+    saved = 0
+    for match in matches:
+        try:
+            with get_session() as session:
+                session.execute(
+                    text("""
+                        INSERT INTO concert_artist_candidate
+                            (concert_id, artist_id)
+                        VALUES (:concert_id, :artist_id)
+                        ON CONFLICT (concert_id, artist_id) DO NOTHING
+                    """),
+                    {
+                        "concert_id": match["concert_id"],
+                        "artist_id": match["artist_id"],
+                    },
+                )
+            saved += 1
+        except SQLAlchemyError as e:
+            logger.error(
+                "공연-아티스트 후보 저장 실패 — 건너뜀: concert_id=%s, artist_id=%s, 오류=%s",
+                match["concert_id"], match["artist_id"], e,
             )
-    logger.info("공연-아티스트 후보 저장 완료: %d건 처리", len(matches))
+    logger.info("공연-아티스트 후보 저장 완료: %d / %d건 처리", saved, len(matches))
 
 
 
@@ -722,31 +754,39 @@ def update_concert_fetch_attempted(concert_id: int) -> None:
 
 
 def update_concert_status(concerts: list[dict]) -> None:
-    """updatedate 변화 감지 시 status와 kopis_update_date를 갱신한다."""
+    """updatedate 변화 감지 시 status와 kopis_update_date를 갱신한다.
+
+    공연별 독립 트랜잭션을 사용해 한 건 실패가 전체에 영향을 주지 않는다.
+    """
     updated = 0
-    with get_session() as session:
-        for concert in concerts:
-            row = session.execute(
-                text("SELECT kopis_update_date FROM concert WHERE kopis_id = :kopis_id"),
-                {"kopis_id": concert["kopis_id"]},
-            ).fetchone()
+    for concert in concerts:
+        try:
+            with get_session() as session:
+                row = session.execute(
+                    text("SELECT kopis_update_date FROM concert WHERE kopis_id = :kopis_id"),
+                    {"kopis_id": concert["kopis_id"]},
+                ).fetchone()
 
-            if row is None:
-                continue
+                if row is None:
+                    continue
 
-            if row[0] != concert["updatedate"]:
-                session.execute(
-                    text("""
-                        UPDATE concert
-                        SET status = :status, kopis_update_date = :kopis_update_date
-                        WHERE kopis_id = :kopis_id
-                    """),
-                    {
-                        "status": _KOPIS_STATUS_MAP.get(concert["prfstate"], "PENDING"),
-                        "kopis_update_date": concert["updatedate"],
-                        "kopis_id": concert["kopis_id"],
-                    },
-                )
-                updated += 1
+                if row[0] != concert["updatedate"]:
+                    session.execute(
+                        text("""
+                            UPDATE concert
+                            SET status = :status, kopis_update_date = :kopis_update_date
+                            WHERE kopis_id = :kopis_id
+                        """),
+                        {
+                            "status": _KOPIS_STATUS_MAP.get(concert["prfstate"], "PENDING"),
+                            "kopis_update_date": concert["updatedate"],
+                            "kopis_id": concert["kopis_id"],
+                        },
+                    )
+                    updated += 1
+        except SQLAlchemyError as e:
+            logger.error(
+                "공연 상태 갱신 실패 — 건너뜀: kopis_id=%s, 오류=%s", concert["kopis_id"], e
+            )
 
     logger.info("공연 상태 갱신 완료: %d건 변경", updated)

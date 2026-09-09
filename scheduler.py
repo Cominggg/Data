@@ -6,6 +6,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Set
 
@@ -63,6 +64,16 @@ _BAN_MARGIN_HOURS = 25  # Spotify 24h 밴 + 1h 마진
 _IMAGE_RETRY_DAYS = 30  # 이미지 미해결 아티스트 재시도 주기
 
 _scheduler: Optional[BackgroundScheduler] = None  # main()에서 데몬 실행 시에만 할당됨
+
+
+@contextmanager
+def _job_timer(job_name: str):
+    """잡의 소요시간을 로깅한다. 조기 반환·예외 등 모든 종료 경로를 포함한다."""
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        logger.info("%s 소요시간: %.1f초", job_name, time.monotonic() - start)
 
 
 def _progress_path(job_name: str) -> str:
@@ -356,44 +367,45 @@ def run_ja_romanize_collect() -> None:
     locale='ko' alias가 이미 존재하는 아티스트는 건너뛴다. 외부 API 호출 없이
     DB에 이미 저장된 sort_name만으로 동작한다.
     """
-    logger.info("=== 로마자→한글 alias 변환 잡 시작 ===")
-    artists = get_artists_without_ko_alias()
-    logger.info("한국어 alias 미수집 아티스트: %d건", len(artists))
-    if not artists:
-        logger.info("=== 로마자→한글 alias 변환 잡 완료 (대상 없음) ===")
-        return
-    aliases = ja_romanize.collect_ko_aliases(artists)
-    if aliases:
-        save_aliases(aliases)
-    logger.info("=== 로마자→한글 alias 변환 잡 완료 ===")
+    with _job_timer("로마자→한글 alias 변환 잡"):
+        logger.info("=== 로마자→한글 alias 변환 잡 시작 ===")
+        artists = get_artists_without_ko_alias()
+        logger.info("한국어 alias 미수집 아티스트: %d건", len(artists))
+        if not artists:
+            logger.info("=== 로마자→한글 alias 변환 잡 완료 (대상 없음) ===")
+            return
+        aliases = ja_romanize.collect_ko_aliases(artists)
+        if aliases:
+            save_aliases(aliases)
+        logger.info("=== 로마자→한글 alias 변환 잡 완료 ===")
 
 
 
 def run_concert_status_update() -> None:
     """활성 공연 상태 갱신 (매일). DB의 진행 중 공연을 개별 API로 최신 상태로 갱신한다."""
-    logger.info("=== 공연 상태 갱신 잡 시작 ===")
+    with _job_timer("공연 상태 갱신 잡"):
+        logger.info("=== 공연 상태 갱신 잡 시작 ===")
 
-    active = get_active_concerts()
-    if active:
-        logger.info("활성 공연 %d건 상태 갱신 시작", len(active))
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            futures = {
-                pool.submit(kopis.collect_by_id, c["kopis_id"]): c["kopis_id"]
-                for c in active
-            }
-        fetched = []
-        for future, kopis_id in futures.items():
-            try:
-                result = future.result()
-                if result is not None:
-                    fetched.append(result)
-            except Exception as e:
-                logger.warning("상태 갱신 API 실패 kopis_id=%s: %s", kopis_id, e)
-        if fetched:
-            update_concert_status(fetched)
+        active = get_active_concerts()
+        if active:
+            logger.info("활성 공연 %d건 상태 갱신 시작", len(active))
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures = {
+                    pool.submit(kopis.collect_by_id, c["kopis_id"]): c["kopis_id"]
+                    for c in active
+                }
+            fetched = []
+            for future, kopis_id in futures.items():
+                try:
+                    result = future.result()
+                    if result is not None:
+                        fetched.append(result)
+                except Exception as e:
+                    logger.warning("상태 갱신 API 실패 kopis_id=%s: %s", kopis_id, e)
+            if fetched:
+                update_concert_status(fetched)
 
-    update_artist_is_coming()
-    logger.info("=== 공연 상태 갱신 잡 완료 ===")
+        logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
 
 def run_new_concert_collect(stdate: Optional[str] = None, use_prfstate: bool = False) -> None:
@@ -407,53 +419,56 @@ def run_new_concert_collect(stdate: Optional[str] = None, use_prfstate: bool = F
     어드민 검수 큐로 보낸다. use_prfstate=True(초기 수집 전용)이면 KOPIS
     prfstate를 그대로 반영해 검수 없이 실제 상태로 저장한다.
     """
-    logger.info("=== 신규 공연 탐지 잡 시작 ===")
+    with _job_timer("신규 공연 탐지 잡"):
+        logger.info("=== 신규 공연 탐지 잡 시작 ===")
 
-    last_date = _load_last_collect_date()
-    if last_date:
-        logger.info("증분 스캔 — afterdate=%s", last_date)
-    else:
-        logger.info("초기 전체 스캔 (체크포인트 없음, stdate=%s)", stdate or "20250101")
-    concerts = kopis.collect(stdate=stdate, afterdate=last_date)
-    existing_ids = get_existing_kopis_ids()
-    aliases = get_all_aliases()
-    new_concerts = [
-        c for c in concerts
-        if c["kopis_id"] not in existing_ids and has_match(c, aliases)
-    ]
-    if new_concerts:
-        logger.info("신규 공연 %d건 저장 시작", len(new_concerts))
-        save_concerts(new_concerts, use_prfstate=use_prfstate)
-        unmatched = get_unmatched_concerts()
-        all_matches: list[dict] = []
-        for concert in unmatched:
-            matches, _ = match_concert(concert, aliases)
-            all_matches.extend(matches)
-        if all_matches:
-            save_concert_artist_candidates(all_matches)
+        last_date = _load_last_collect_date()
+        if last_date:
+            logger.info("증분 스캔 — afterdate=%s", last_date)
+        else:
+            logger.info("초기 전체 스캔 (체크포인트 없음, stdate=%s)", stdate or "20250101")
+        concerts = kopis.collect(stdate=stdate, afterdate=last_date)
+        existing_ids = get_existing_kopis_ids()
+        aliases = get_all_aliases()
+        new_concerts = [
+            c for c in concerts
+            if c["kopis_id"] not in existing_ids and has_match(c, aliases)
+        ]
+        if new_concerts:
+            logger.info("신규 공연 %d건 저장 시작", len(new_concerts))
+            save_concerts(new_concerts, use_prfstate=use_prfstate)
+            unmatched = get_unmatched_concerts()
+            all_matches: list[dict] = []
+            for concert in unmatched:
+                matches, _ = match_concert(concert, aliases)
+                all_matches.extend(matches)
+            if all_matches:
+                save_concert_artist_candidates(all_matches)
 
-        new_kopis_titles = {c["kopis_id"]: c["prfnm"] for c in new_concerts}
-        concert_ids_by_kopis_id = get_concert_ids_by_kopis_ids(list(new_kopis_titles))
-        title_by_concert_id = {
-            concert_id: new_kopis_titles[kopis_id]
-            for kopis_id, concert_id in concert_ids_by_kopis_id.items()
-        }
+            new_kopis_titles = {c["kopis_id"]: c["prfnm"] for c in new_concerts}
+            concert_ids_by_kopis_id = get_concert_ids_by_kopis_ids(list(new_kopis_titles))
+            title_by_concert_id = {
+                concert_id: new_kopis_titles[kopis_id]
+                for kopis_id, concert_id in concert_ids_by_kopis_id.items()
+            }
 
-        matches_by_concert: dict = {}
-        for match in all_matches:
-            if match["concert_id"] in title_by_concert_id:
-                matches_by_concert.setdefault(match["concert_id"], []).append(match["artist_id"])
+            matches_by_concert: dict = {}
+            for match in all_matches:
+                if match["concert_id"] in title_by_concert_id:
+                    matches_by_concert.setdefault(
+                        match["concert_id"], []
+                    ).append(match["artist_id"])
 
-        if matches_by_concert:
-            all_artist_ids = {aid for ids in matches_by_concert.values() for aid in ids}
-            artist_names = get_artist_names_by_ids(list(all_artist_ids))
-            for concert_id, artist_ids in matches_by_concert.items():
-                names = [artist_names[aid] for aid in artist_ids if aid in artist_names]
-                notify_new_concert(title_by_concert_id[concert_id], names)
+            if matches_by_concert:
+                all_artist_ids = {aid for ids in matches_by_concert.values() for aid in ids}
+                artist_names = get_artist_names_by_ids(list(all_artist_ids))
+                for concert_id, artist_ids in matches_by_concert.items():
+                    names = [artist_names[aid] for aid in artist_ids if aid in artist_names]
+                    notify_new_concert(title_by_concert_id[concert_id], names)
 
-    update_artist_is_coming()
-    _save_last_collect_date(datetime.now().strftime("%Y%m%d"))
-    logger.info("=== 신규 공연 탐지 잡 완료 ===")
+        update_artist_is_coming()
+        _save_last_collect_date(datetime.now().strftime("%Y%m%d"))
+        logger.info("=== 신규 공연 탐지 잡 완료 ===")
 
 
 
@@ -464,81 +479,85 @@ def run_artist_image_update() -> None:
     마지막 실패일을 기록해두고, _IMAGE_RETRY_DAYS가 지나기 전까지는 재시도 대상에서
     제외한다 — 매주 동일한 잔여 아티스트로 Spotify API를 반복 호출하지 않기 위함.
     """
-    logger.info("=== 아티스트 이미지 수집 잡 시작 ===")
-    if _is_banned():
-        logger.warning("Spotify 429 밴 유효 — 이미지 수집 건너뜀")
-        return
-    artists = get_artists_without_image()
-    failed = _load_failed_image_artists()
-    cutoff = (datetime.now() - timedelta(days=_IMAGE_RETRY_DAYS)).strftime("%Y%m%d")
-    targets = [a for a in artists if failed.get(a["id"], "") < cutoff]
-    skipped = len(artists) - len(targets)
-    if skipped:
-        logger.info("최근 %d일 내 실패 기록 — 재시도 보류: %d건", _IMAGE_RETRY_DAYS, skipped)
-    logger.info("이미지 수집 시도 대상: %d건", len(targets))
+    with _job_timer("아티스트 이미지 수집 잡"):
+        logger.info("=== 아티스트 이미지 수집 잡 시작 ===")
+        if _is_banned():
+            logger.warning("Spotify 429 밴 유효 — 이미지 수집 건너뜀")
+            return
+        artists = get_artists_without_image()
+        failed = _load_failed_image_artists()
+        cutoff = (datetime.now() - timedelta(days=_IMAGE_RETRY_DAYS)).strftime("%Y%m%d")
+        targets = [a for a in artists if failed.get(a["id"], "") < cutoff]
+        skipped = len(artists) - len(targets)
+        if skipped:
+            logger.info("최근 %d일 내 실패 기록 — 재시도 보류: %d건", _IMAGE_RETRY_DAYS, skipped)
+        logger.info("이미지 수집 시도 대상: %d건", len(targets))
 
-    today = datetime.now().strftime("%Y%m%d")
-    for a in targets:
-        try:
-            image_url, spotify_id = artist_image.collect_artist_image(
-                a["mbid"],
-                spotify_url=a.get("spotify_url"),
-                name=a.get("name"),
-            )
-        except SpotifyRateLimitError as e:
-            logger.error("Spotify 429 — 이미지 수집 중단 (artist_id=%d)", a["id"])
-            banned_until = _save_ban(e.retry_after)
-            _reschedule_on_ban_lift(run_artist_image_update, banned_until)
-            break
-        except Exception as e:
-            logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", a["mbid"], e)
-            continue
-        if image_url:
-            update_artist_image(a["id"], image_url)
-            failed.pop(a["id"], None)
-        else:
-            failed[a["id"]] = today
-        if not a.get("spotify_url") and spotify_id:
-            upsert_artist_url(a["id"], "Spotify", artist_image.spotify_artist_url(spotify_id))
-    _save_failed_image_artists(failed)
-    logger.info("=== 아티스트 이미지 수집 잡 완료 ===")
+        today = datetime.now().strftime("%Y%m%d")
+        for a in targets:
+            try:
+                image_url, spotify_id = artist_image.collect_artist_image(
+                    a["mbid"],
+                    spotify_url=a.get("spotify_url"),
+                    name=a.get("name"),
+                )
+            except SpotifyRateLimitError as e:
+                logger.error("Spotify 429 — 이미지 수집 중단 (artist_id=%d)", a["id"])
+                banned_until = _save_ban(e.retry_after)
+                _reschedule_on_ban_lift(run_artist_image_update, banned_until)
+                break
+            except Exception as e:
+                logger.warning("아티스트 이미지 수집 실패 mbid=%s: %s", a["mbid"], e)
+                continue
+            if image_url:
+                update_artist_image(a["id"], image_url)
+                failed.pop(a["id"], None)
+            else:
+                failed[a["id"]] = today
+            if not a.get("spotify_url") and spotify_id:
+                upsert_artist_url(
+                    a["id"], "Spotify", artist_image.spotify_artist_url(spotify_id)
+                )
+        _save_failed_image_artists(failed)
+        logger.info("=== 아티스트 이미지 수집 잡 완료 ===")
 
 
 def run_release_update() -> None:
     """릴리즈 갱신 (매일). 내한 공연 매칭 아티스트만 대상."""
-    logger.info("=== 릴리즈 갱신 잡 시작 ===")
-    if _is_banned():
-        logger.warning("Spotify 429 밴 유효 — 릴리즈 갱신 건너뜀")
-        return
-    completed_ids = _load_progress("release_update")
-    for a in get_matched_artists_with_spotify():
-        artist_id = a["artist_id"]
-        if artist_id in completed_ids:
-            logger.info("체크포인트 — 완료 아티스트 건너뜀: artist_id=%d", artist_id)
-            continue
-        try:
-            spotify_id = _extract_spotify_id(a["spotify_url"])
-            cached_total = get_spotify_album_total(artist_id)
-            existing_ids = get_existing_release_spotify_ids(artist_id)
-            raw, spotify_total = release.collect_releases(
-                spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
-            )
-            if spotify_total > 0 and spotify_total != cached_total:
-                update_spotify_album_total(artist_id, spotify_total)
-            if raw:
-                save_releases(artist_id, _sort_releases(raw))
-            completed_ids.add(artist_id)
-        except SpotifyRateLimitError as e:
-            logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%d)", artist_id)
-            banned_until = _save_ban(e.retry_after)
-            _save_progress("release_update", completed_ids)
-            _reschedule_on_ban_lift(run_release_update, banned_until)
-            break
-        except Exception as e:
-            logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
-    else:
-        _clear_progress("release_update")
-    logger.info("=== 릴리즈 갱신 잡 완료 ===")
+    with _job_timer("릴리즈 갱신 잡"):
+        logger.info("=== 릴리즈 갱신 잡 시작 ===")
+        if _is_banned():
+            logger.warning("Spotify 429 밴 유효 — 릴리즈 갱신 건너뜀")
+            return
+        completed_ids = _load_progress("release_update")
+        for a in get_matched_artists_with_spotify():
+            artist_id = a["artist_id"]
+            if artist_id in completed_ids:
+                logger.info("체크포인트 — 완료 아티스트 건너뜀: artist_id=%d", artist_id)
+                continue
+            try:
+                spotify_id = _extract_spotify_id(a["spotify_url"])
+                cached_total = get_spotify_album_total(artist_id)
+                existing_ids = get_existing_release_spotify_ids(artist_id)
+                raw, spotify_total = release.collect_releases(
+                    spotify_id, skip_spotify_ids=existing_ids, cached_total=cached_total
+                )
+                if spotify_total > 0 and spotify_total != cached_total:
+                    update_spotify_album_total(artist_id, spotify_total)
+                if raw:
+                    save_releases(artist_id, _sort_releases(raw))
+                completed_ids.add(artist_id)
+            except SpotifyRateLimitError as e:
+                logger.error("Spotify 429 — 릴리즈 갱신 중단 (artist_id=%d)", artist_id)
+                banned_until = _save_ban(e.retry_after)
+                _save_progress("release_update", completed_ids)
+                _reschedule_on_ban_lift(run_release_update, banned_until)
+                break
+            except Exception as e:
+                logger.error("릴리즈 수집 실패 — artist_id=%d: %s", artist_id, e)
+        else:
+            _clear_progress("release_update")
+        logger.info("=== 릴리즈 갱신 잡 완료 ===")
 
 
 def run_missing_release_update() -> None:
@@ -648,10 +667,11 @@ def register_artist_by_mbid(mbid: str) -> dict:
 
 def run_setlist_collect() -> None:
     """setlist.fm 수집 (매일)."""
-    logger.info("=== setlist 수집 잡 시작 ===")
-    setlists = setlist.collect()
-    save_setlists(setlists)
-    logger.info("=== setlist 수집 잡 완료 ===")
+    with _job_timer("setlist 수집 잡"):
+        logger.info("=== setlist 수집 잡 시작 ===")
+        setlists = setlist.collect()
+        save_setlists(setlists)
+        logger.info("=== setlist 수집 잡 완료 ===")
 
 
 def collect_and_save_concert(kopis_id: str) -> dict:
