@@ -683,7 +683,10 @@ class TestSaveConcerts:
         duplicates = self._run([concert], mock_session)
 
         assert duplicates == {"PF300"}
-        assert mock_session.execute.call_count == 1
+        assert mock_session.execute.call_count == 2
+        sql, params = mock_session.execute.call_args_list[1].args
+        assert "UPDATE concert" in str(sql)
+        assert params == {"kopis_id": "PF300", "kopis_update_date": "20240401120000", "id": 5}
 
     def test_skips_when_artist_and_period_match_found(self):
         """title 불일치 + artist_match(동일 아티스트·기간) 쿼리 히트 시 저장을 건너뛰어야 한다."""
@@ -696,7 +699,11 @@ class TestSaveConcerts:
         assert duplicates == {"PF100"}
         sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list]
         assert not any("INSERT INTO concert" in s for s in sqls)
-        assert mock_session.execute.call_count == 2
+        assert mock_session.execute.call_count == 3
+        sql, params = mock_session.execute.call_args_list[2].args
+        assert "UPDATE concert" in str(sql)
+        assert params["id"] == 55
+        assert params["kopis_id"] == "PF100"
 
     def test_artist_match_query_uses_matched_artist_ids_and_period(self):
         """artist_match 쿼리 파라미터에 _matched_artist_ids·기간이 그대로 전달되어야 한다."""
@@ -711,6 +718,27 @@ class TestSaveConcerts:
         assert params["artist_ids"] == [1, 2]
         assert params["start_date"] == "20240101"
         assert params["end_date"] == "20240102"
+
+    def test_update_query_only_touches_kopis_id_and_update_date(self):
+        """매치 시 UPDATE는 kopis_id·kopis_update_date만 채우고 kopis_id IS NULL 조건을
+        가져야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (5,)
+        concert = {
+            "kopis_id": "PF300",
+            "prfnm": "Existing Title",
+            "prfcast": "Cast",
+            "prfpdfrom": "20240401",
+            "prfpdto": "20240402",
+            "fcltynm": "Venue",
+            "updatedate": "20240401120000",
+        }
+
+        self._run([concert], mock_session)
+
+        sql, params = mock_session.execute.call_args_list[1].args
+        assert "kopis_id IS NULL" in str(sql)
+        assert set(params.keys()) == {"kopis_id", "kopis_update_date", "id"}
 
     def test_proceeds_to_insert_when_artist_match_misses(self):
         """artist_match 쿼리가 미스면 정상적으로 INSERT가 진행되어야 한다."""
