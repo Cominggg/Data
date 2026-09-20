@@ -738,13 +738,15 @@ def end_expired_concerts() -> int:
 
 
 def get_active_concerts() -> list[dict]:
-    """status가 UPCOMING 또는 ONGOING인 공연의 kopis_id·kopis_update_date를 반환한다."""
+    """status가 UPCOMING 또는 ONGOING이고 kopis_id가 있는 공연의 kopis_id·kopis_update_date를
+    반환한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
                 SELECT kopis_id, kopis_update_date
                 FROM concert
                 WHERE status IN ('UPCOMING', 'ONGOING')
+                  AND kopis_id IS NOT NULL
             """)
         ).fetchall()
     return [

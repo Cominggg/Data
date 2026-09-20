@@ -38,6 +38,18 @@ class TestGetActiveConcerts:
         assert "UPCOMING" in sql
         assert "ONGOING" in sql
 
+    def test_filters_by_kopis_id_not_null(self):
+        """kopis_id IS NOT NULL 조건이 SQL에 포함되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = []
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            get_active_concerts()
+
+        sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "kopis_id IS NOT NULL" in sql
+
     def test_returns_kopis_id_and_update_date(self):
         """반환값에 kopis_id와 kopis_update_date 키가 포함되어야 한다."""
         result = self._run([("PF123", "2024-01-01"), ("PF456", "2024-02-01")])
