@@ -187,9 +187,27 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
                         "end_date": concert["prfpdto"],
                     },
                 ).fetchone()
-                if title_match is not None:
+                artist_match = None
+                if title_match is None and concert.get("_matched_artist_ids"):
+                    artist_match = session.execute(
+                        text("""
+                            SELECT c.id FROM concert c
+                            JOIN concert_artist ca ON ca.concert_id = c.id
+                            WHERE ca.artist_id = ANY(:artist_ids)
+                              AND c.start_date = :start_date AND c.end_date = :end_date
+                            LIMIT 1
+                        """),
+                        {
+                            "artist_ids": concert["_matched_artist_ids"],
+                            "start_date": concert["prfpdfrom"],
+                            "end_date": concert["prfpdto"],
+                        },
+                    ).fetchone()
+
+                if title_match is not None or artist_match is not None:
                     logger.info(
-                        "동일 공연명·기간 이미 존재 — 저장 건너뜀: title=%s, kopis_id=%s",
+                        "동일 공연명·기간 또는 동일 아티스트·기간 이미 존재 — 저장 건너뜀: "
+                        "title=%s, kopis_id=%s",
                         concert["prfnm"], concert["kopis_id"],
                     )
                     duplicate_kopis_ids.add(concert["kopis_id"])

@@ -10,6 +10,7 @@ from db.repository import (
     save_artists,
     save_concert_artist_candidates,
     save_concert_artists,
+    save_concerts,
     save_setlists,
     update_artist_is_coming,
     upsert_artist_url,
@@ -645,4 +646,118 @@ class TestEndExpiredConcerts:
         result = self._run(mock_session)
 
         assert result == 0
+
+
+class TestSaveConcerts:
+    _CONCERT_WITH_MATCH = {
+        "kopis_id": "PF100",
+        "prfnm": "New Concert Title",
+        "prfcast": "Cast",
+        "prfpdfrom": "20240101",
+        "prfpdto": "20240102",
+        "fcltynm": "Venue",
+        "updatedate": "20240101120000",
+        "_matched_artist_ids": [1, 2],
+    }
+
+    def _run(self, concerts, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            return save_concerts(concerts)
+
+    def test_skips_when_title_and_period_match_found(self):
+        """title·기간 완전일치 시 저장을 건너뛰어야 한다 (회귀)."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (5,)
+        concert = {
+            "kopis_id": "PF300",
+            "prfnm": "Existing Title",
+            "prfcast": "Cast",
+            "prfpdfrom": "20240401",
+            "prfpdto": "20240402",
+            "fcltynm": "Venue",
+            "updatedate": "20240401120000",
+        }
+
+        duplicates = self._run([concert], mock_session)
+
+        assert duplicates == {"PF300"}
+        assert mock_session.execute.call_count == 1
+
+    def test_skips_when_artist_and_period_match_found(self):
+        """title 불일치 + artist_match(동일 아티스트·기간) 쿼리 히트 시 저장을 건너뛰어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, (55,)]
+        concert = dict(self._CONCERT_WITH_MATCH)
+
+        duplicates = self._run([concert], mock_session)
+
+        assert duplicates == {"PF100"}
+        sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list]
+        assert not any("INSERT INTO concert" in s for s in sqls)
+        assert mock_session.execute.call_count == 2
+
+    def test_artist_match_query_uses_matched_artist_ids_and_period(self):
+        """artist_match 쿼리 파라미터에 _matched_artist_ids·기간이 그대로 전달되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, None, (1,)]
+        concert = dict(self._CONCERT_WITH_MATCH)
+
+        self._run([concert], mock_session)
+
+        sql, params = mock_session.execute.call_args_list[1].args
+        assert "concert_artist" in str(sql)
+        assert params["artist_ids"] == [1, 2]
+        assert params["start_date"] == "20240101"
+        assert params["end_date"] == "20240102"
+
+    def test_proceeds_to_insert_when_artist_match_misses(self):
+        """artist_match 쿼리가 미스면 정상적으로 INSERT가 진행되어야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, None, (10,)]
+        concert = dict(self._CONCERT_WITH_MATCH)
+
+        duplicates = self._run([concert], mock_session)
+
+        assert duplicates == set()
+        sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list]
+        assert any("INSERT INTO concert" in s for s in sqls)
+
+    def test_skips_artist_match_query_when_matched_artist_ids_missing(self):
+        """_matched_artist_ids가 없으면 artist_match 2차 쿼리가 실행되지 않아야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, (20,)]
+        concert = {
+            "kopis_id": "PF200",
+            "prfnm": "No Match Concert",
+            "prfcast": "Cast",
+            "prfpdfrom": "20240201",
+            "prfpdto": "20240202",
+            "fcltynm": "Venue",
+            "updatedate": "20240201120000",
+        }
+
+        self._run([concert], mock_session)
+
+        assert mock_session.execute.call_count == 2
+
+    def test_skips_artist_match_query_when_matched_artist_ids_empty(self):
+        """_matched_artist_ids가 빈 리스트면 artist_match 2차 쿼리가 실행되지 않아야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, (21,)]
+        concert = {
+            "kopis_id": "PF201",
+            "prfnm": "Empty Match Concert",
+            "prfcast": "Cast",
+            "prfpdfrom": "20240301",
+            "prfpdto": "20240302",
+            "fcltynm": "Venue",
+            "updatedate": "20240301120000",
+            "_matched_artist_ids": [],
+        }
+
+        self._run([concert], mock_session)
+
+        assert mock_session.execute.call_count == 2
 
