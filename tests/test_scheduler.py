@@ -440,6 +440,49 @@ class TestRunNewConcertCollect:
         mock_save.assert_not_called()
         mock_notify.assert_not_called()
 
+    def test_attaches_matched_artist_ids_to_new_concerts_before_save(self):
+        """save_concerts 호출 시 각 concert에 matched_artist_ids 결과가 채워져 있어야 한다."""
+        new_concert = {"kopis_id": "PF999", "prfnm": "NewJeans 내한공연", "prfstate": "공연예정"}
+        aliases = [{"artist_id": 1, "name": "NewJeans"}]
+        with (
+            patch("scheduler.kopis.collect", return_value=[new_concert]),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=aliases),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.matched_artist_ids", return_value=[1, 2]) as mock_matched,
+            patch("scheduler.save_concerts") as mock_save,
+            patch("scheduler.get_unmatched_concerts", return_value=[]),
+            patch("scheduler.get_concert_ids_by_kopis_ids", return_value={}),
+            patch("scheduler.update_artist_is_coming"),
+        ):
+            run_new_concert_collect()
+
+        mock_matched.assert_called_once_with("NewJeans 내한공연", aliases)
+        saved_concerts = mock_save.call_args.args[0]
+        assert saved_concerts[0]["_matched_artist_ids"] == [1, 2]
+
+    def test_attaches_empty_list_when_matched_artist_ids_finds_nothing(self):
+        """matched_artist_ids가 빈 리스트를 반환해도 _matched_artist_ids 키가 명시적으로 붙어야
+        한다."""
+        new_concert = {"kopis_id": "PF998", "prfnm": "매칭 안되는 공연", "prfstate": "공연예정"}
+        with (
+            patch("scheduler.kopis.collect", return_value=[new_concert]),
+            patch("scheduler.get_existing_kopis_ids", return_value=set()),
+            patch("scheduler.get_all_aliases", return_value=[]),
+            patch("scheduler.has_match", return_value=True),
+            patch("scheduler.matched_artist_ids", return_value=[]),
+            patch("scheduler.save_concerts") as mock_save,
+            patch("scheduler.get_unmatched_concerts", return_value=[]),
+            patch("scheduler.get_concert_ids_by_kopis_ids", return_value={}),
+            patch("scheduler.update_artist_is_coming"),
+        ):
+            run_new_concert_collect()
+
+        saved_concerts = mock_save.call_args.args[0]
+        assert "_matched_artist_ids" in saved_concerts[0]
+        assert saved_concerts[0]["_matched_artist_ids"] == []
+
+
 class TestRunReleaseUpdate:
     def test_collects_releases_for_all_spotify_artists(self):
         """내한 매칭 아티스트에 대해 collect_releases가 호출되어야 한다."""

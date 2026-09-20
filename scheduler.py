@@ -46,7 +46,7 @@ from db.repository import (
     update_spotify_album_total,
     upsert_artist_url,
 )
-from matchers.artist_matcher import has_match, match_concert
+from matchers.artist_matcher import has_match, match_concert, matched_artist_ids
 from notifier.discord import notify_new_concert
 
 logging.basicConfig(
@@ -437,6 +437,8 @@ def run_new_concert_collect(stdate: Optional[str] = None, use_prfstate: bool = F
             c for c in concerts
             if c["kopis_id"] not in existing_ids and has_match(c, aliases)
         ]
+        for c in new_concerts:
+            c["_matched_artist_ids"] = matched_artist_ids(c["prfnm"], aliases)
         if new_concerts:
             logger.info("신규 공연 %d건 저장 시작", len(new_concerts))
             save_concerts(new_concerts, use_prfstate=use_prfstate)
