@@ -15,6 +15,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from collectors import artist_image, ja_romanize, kopis, musicbrainz, release, setlist
 from collectors.spotify_client import SpotifyRateLimitError
 from db.repository import (
+    end_expired_concerts,
     get_active_concerts,
     get_all_aliases,
     get_all_artist_mbids,
@@ -385,6 +386,8 @@ def run_concert_status_update() -> None:
     """활성 공연 상태 갱신 (매일). DB의 진행 중 공연을 개별 API로 최신 상태로 갱신한다."""
     with _job_timer("공연 상태 갱신 잡"):
         logger.info("=== 공연 상태 갱신 잡 시작 ===")
+
+        end_expired_concerts()
 
         active = get_active_concerts()
         if active:
