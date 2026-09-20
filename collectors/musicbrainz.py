@@ -52,6 +52,25 @@ def _get(path: str, params: dict) -> dict:
     return response.json()
 
 
+def _with_retry(fn, retries: int = 3, backoff: float = 1.0):
+    """5xx·네트워크 오류만 재시도한다. 4xx는 즉시 재발생시킨다."""
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            return fn()
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status is not None and 400 <= status < 500:
+                raise
+            last_exc = e
+        except requests.RequestException as e:
+            last_exc = e
+        if attempt < retries:
+            logger.debug("MusicBrainz 요청 재시도 %d/%d: %s", attempt, retries, last_exc)
+            time.sleep(backoff * attempt)
+    raise last_exc
+
+
 def _search_artists(offset: int) -> dict:
     return _get(
         "/artist/",
@@ -128,12 +147,34 @@ def _parse_artist(detail: dict) -> dict:
 
 
 def search_artists(name: str) -> list[dict]:
-    """아티스트명으로 MusicBrainz 검색. 최대 10건 반환."""
+    """아티스트명으로 MusicBrainz 검색. 최대 10건 반환.
+
+    1차로 구문(phrase) 검색을 시도하고, 결과가 없으면 unquoted 쿼리로 폴백한다.
+    """
+    escaped = name.replace("\\", "\\\\").replace('"', '\\"')
     try:
-        data = _get("/artist/", {"query": f"artist:{name}", "fmt": "json", "limit": 10})
+        data = _with_retry(
+            lambda: _get(
+                "/artist/",
+                {"query": f'artist:"{escaped}"', "fmt": "json", "limit": 10},
+            )
+        )
     except requests.RequestException as e:
         logger.error("아티스트 검색 실패 name=%s: %s", name, e)
         return []
+
+    if not data.get("artists"):
+        try:
+            data = _with_retry(
+                lambda: _get(
+                    "/artist/",
+                    {"query": f"artist:{escaped}", "fmt": "json", "limit": 10},
+                )
+            )
+        except requests.RequestException as e:
+            logger.error("아티스트 검색 실패(폴백) name=%s: %s", name, e)
+            return []
+
     return [
         {
             "mbid": item.get("id"),
@@ -153,7 +194,7 @@ def collect_single_artist(mbid: str) -> Optional[dict]:
     수집 실패 시 None을 반환한다.
     """
     try:
-        detail = _fetch_artist_detail(mbid)
+        detail = _with_retry(lambda: _fetch_artist_detail(mbid))
     except requests.RequestException as e:
         logger.error("단건 아티스트 수집 실패 mbid=%s: %s", mbid, e)
         return None

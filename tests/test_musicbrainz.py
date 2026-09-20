@@ -1,13 +1,16 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 
 from collectors.musicbrainz import (
     _parse_aliases,
     _parse_artist,
     _parse_url_rels,
+    _with_retry,
     collect_artists,
     collect_single_artist,
+    search_artists,
 )
 from db.repository import save_artists
 
@@ -388,12 +391,43 @@ class TestCollectSingleArtist:
         spotify = next((u for u in result["url_rels"] if u["type"] == "Spotify"), None)
         assert spotify is not None
 
+    @patch("collectors.musicbrainz.time.sleep")
     @patch("collectors.musicbrainz._fetch_artist_detail")
-    def test_returns_none_on_request_exception(self, mock_detail):
-        """네트워크 오류 시 None을 반환해야 한다."""
+    def test_returns_none_on_request_exception(self, mock_detail, mock_sleep):
+        """네트워크 오류 시 (재시도 3회 소진 후) None을 반환해야 한다."""
         mock_detail.side_effect = requests.RequestException("timeout")
         result = collect_single_artist("mbid-fail")
         assert result is None
+        assert mock_detail.call_count == 3
+
+    @patch("collectors.musicbrainz.time.sleep")
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    def test_retries_on_5xx_then_succeeds(self, mock_detail, mock_sleep):
+        """5xx로 실패해도 재시도 끝에 성공하면 정상 결과를 반환해야 한다."""
+        response = MagicMock()
+        response.status_code = 503
+        error = requests.HTTPError(response=response)
+        mock_detail.side_effect = [error, self._DETAIL]
+
+        result = collect_single_artist("mbid-single")
+
+        assert result is not None
+        assert result["mbid"] == "mbid-single"
+        assert mock_detail.call_count == 2
+
+    @patch("collectors.musicbrainz.time.sleep")
+    @patch("collectors.musicbrainz._fetch_artist_detail")
+    def test_does_not_retry_on_4xx(self, mock_detail, mock_sleep):
+        """4xx는 즉시 실패해 재시도하지 않고 None을 반환해야 한다."""
+        response = MagicMock()
+        response.status_code = 404
+        error = requests.HTTPError(response=response)
+        mock_detail.side_effect = error
+
+        result = collect_single_artist("mbid-notfound")
+
+        assert result is None
+        assert mock_detail.call_count == 1
 
     @patch("collectors.musicbrainz._fetch_artist_detail")
     def test_skips_no_listener_filter(self, mock_detail):
@@ -422,3 +456,141 @@ class TestCollectSingleArtist:
         result = collect_single_artist("mbid-nospot")
         assert result is not None
         assert result["url_rels"] == []
+
+
+class TestWithRetry:
+    @patch("collectors.musicbrainz.time.sleep")
+    def test_retries_5xx_twice_then_succeeds_on_third_attempt(self, mock_sleep):
+        """5xx로 2회 실패 후 3번째 시도에서 성공하면 결과를 반환하고 3회 호출되어야 한다."""
+        response = MagicMock()
+        response.status_code = 503
+        error = requests.HTTPError(response=response)
+        fn = MagicMock(side_effect=[error, error, "ok"])
+
+        result = _with_retry(fn)
+
+        assert result == "ok"
+        assert fn.call_count == 3
+
+    @patch("collectors.musicbrainz.time.sleep")
+    def test_retries_on_network_error_without_status_code(self, mock_sleep):
+        """response가 없는 네트워크 오류(RequestException)도 재시도되어야 한다."""
+        error = requests.ConnectionError("network down")
+        fn = MagicMock(side_effect=[error, "ok"])
+
+        result = _with_retry(fn)
+
+        assert result == "ok"
+        assert fn.call_count == 2
+
+    def test_does_not_retry_on_4xx(self):
+        """4xx는 즉시 재발생시키고 재시도하지 않아야 한다."""
+        response = MagicMock()
+        response.status_code = 400
+        error = requests.HTTPError(response=response)
+        fn = MagicMock(side_effect=error)
+
+        with pytest.raises(requests.HTTPError):
+            _with_retry(fn)
+
+        assert fn.call_count == 1
+
+    @patch("collectors.musicbrainz.time.sleep")
+    def test_raises_last_exception_after_all_retries_fail(self, mock_sleep):
+        """5xx로 3회 모두 실패하면 마지막 예외가 그대로 raise되어야 한다."""
+        response = MagicMock()
+        response.status_code = 503
+        error = requests.HTTPError(response=response)
+        fn = MagicMock(side_effect=[error, error, error])
+
+        with pytest.raises(requests.HTTPError):
+            _with_retry(fn)
+
+        assert fn.call_count == 3
+
+
+class TestSearchArtists:
+    @patch("collectors.musicbrainz.time.sleep")
+    @patch("collectors.musicbrainz._get")
+    def test_uses_quoted_query_for_phrase_search(self, mock_get, mock_sleep):
+        """1차 시도는 큰따옴표로 감싼 구문검색 쿼리를 사용해야 한다."""
+        mock_get.return_value = {
+            "artists": [{"id": "m1", "name": "IU", "country": "KR", "type": "Person"}]
+        }
+
+        search_artists("IU")
+
+        params = mock_get.call_args.args[1]
+        assert params["query"] == 'artist:"IU"'
+
+    @patch("collectors.musicbrainz.time.sleep")
+    @patch("collectors.musicbrainz._get")
+    def test_returns_first_result_without_fallback_when_found(self, mock_get, mock_sleep):
+        """1차 구문검색에서 결과가 있으면 폴백 쿼리를 호출하지 않아야 한다."""
+        mock_get.return_value = {
+            "artists": [{"id": "m1", "name": "IU", "country": "KR", "type": "Person"}]
+        }
+
+        result = search_artists("IU")
+
+        assert mock_get.call_count == 1
+        assert result == [
+            {
+                "mbid": "m1",
+                "name": "IU",
+                "country": "KR",
+                "type": "Person",
+                "url": "https://musicbrainz.org/artist/m1",
+            }
+        ]
+
+    @patch("collectors.musicbrainz.time.sleep")
+    @patch("collectors.musicbrainz._get")
+    def test_falls_back_to_unquoted_query_when_phrase_search_empty(self, mock_get, mock_sleep):
+        """1차 구문검색 결과가 비어 있으면 unquoted 쿼리로 폴백해야 한다."""
+        mock_get.side_effect = [
+            {"artists": []},
+            {"artists": [{"id": "m2", "name": "Found", "country": None, "type": "Group"}]},
+        ]
+
+        result = search_artists("Found")
+
+        assert mock_get.call_count == 2
+        second_params = mock_get.call_args_list[1].args[1]
+        assert second_params["query"] == "artist:Found"
+        assert result[0]["mbid"] == "m2"
+
+    @patch("collectors.musicbrainz.time.sleep")
+    @patch("collectors.musicbrainz._get")
+    def test_escapes_quotes_and_backslashes_in_query(self, mock_get, mock_sleep):
+        """이름에 큰따옴표·백슬래시가 있으면 이스케이프되어 쿼리에 들어가야 한다."""
+        mock_get.side_effect = [{"artists": []}, {"artists": []}]
+        name = 'Weird\\Name "Quote"'
+
+        search_artists(name)
+
+        first_params = mock_get.call_args_list[0].args[1]
+        expected_escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+        assert first_params["query"] == f'artist:"{expected_escaped}"'
+
+    @patch("collectors.musicbrainz.time.sleep")
+    @patch("collectors.musicbrainz._get")
+    def test_returns_empty_list_when_phrase_search_fails_after_retries(self, mock_get, mock_sleep):
+        """1차 구문검색이 재시도 소진 후에도 실패하면 빈 리스트를 반환해야 한다."""
+        mock_get.side_effect = requests.ConnectionError("network down")
+
+        result = search_artists("X")
+
+        assert result == []
+        assert mock_get.call_count == 3
+
+    @patch("collectors.musicbrainz.time.sleep")
+    @patch("collectors.musicbrainz._get")
+    def test_returns_empty_list_when_fallback_fails_after_retries(self, mock_get, mock_sleep):
+        """폴백 쿼리가 재시도 소진 후에도 실패하면 빈 리스트를 반환해야 한다."""
+        mock_get.side_effect = [{"artists": []}] + [requests.ConnectionError("down")] * 3
+
+        result = search_artists("X")
+
+        assert result == []
+        assert mock_get.call_count == 4
