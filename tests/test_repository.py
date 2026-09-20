@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 from sqlalchemy.exc import SQLAlchemyError
 
 from db.repository import (
+    end_expired_concerts,
     get_active_concerts,
     get_artist_names_by_ids,
     get_concert_ids_by_kopis_ids,
@@ -594,3 +595,42 @@ class TestUpdateArtistIsComing:
         result = self._run(mock_session)
 
         assert result == 3
+
+
+class TestEndExpiredConcerts:
+    def _run(self, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            return end_expired_concerts()
+
+    def _make_session_mock(self, rowcount=0):
+        mock_session = MagicMock()
+        mock_session.execute.return_value.rowcount = rowcount
+        return mock_session
+
+    def test_filters_end_date_and_active_status(self):
+        """종료일 경과(end_date < CURRENT_DATE) + UPCOMING/ONGOING 상태 필터가 포함되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(mock_session)
+
+        sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "end_date < CURRENT_DATE" in sql
+        assert "status IN" in sql
+        assert "UPCOMING" in sql
+        assert "ONGOING" in sql
+
+    def test_returns_rowcount(self):
+        """result.rowcount를 그대로 반환해야 한다."""
+        mock_session = self._make_session_mock(rowcount=5)
+        result = self._run(mock_session)
+
+        assert result == 5
+
+    def test_returns_zero_without_error(self):
+        """rowcount=0이어도 예외 없이 0을 반환해야 한다."""
+        mock_session = self._make_session_mock(rowcount=0)
+        result = self._run(mock_session)
+
+        assert result == 0
+

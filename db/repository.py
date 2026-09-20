@@ -721,6 +721,22 @@ def update_artist_is_coming() -> int:
     return updated
 
 
+def end_expired_concerts() -> int:
+    """KOPIS 연동 여부와 무관하게 종료일이 지난 UPCOMING/ONGOING 공연을 ENDED로 전환한다."""
+    with get_session() as session:
+        result = session.execute(
+            text("""
+                UPDATE concert
+                SET status = 'ENDED'
+                WHERE status IN ('UPCOMING', 'ONGOING')
+                  AND end_date < CURRENT_DATE
+            """)
+        )
+        updated = result.rowcount
+    logger.info("종료일 경과 공연 강제 종료 처리: %d건", updated)
+    return updated
+
+
 def get_active_concerts() -> list[dict]:
     """status가 UPCOMING 또는 ONGOING인 공연의 kopis_id·kopis_update_date를 반환한다."""
     with get_session() as session:
