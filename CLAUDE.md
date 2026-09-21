@@ -79,8 +79,8 @@ python scheduler.py collect-setlist                   # 단건 setlist 수집
 | 단계 | 수집 주기 | 진입점 |
 |------|---------|--------|
 | ① MusicBrainz 아티스트 | 초기 1회 | `run_initial_collect()` |
-| ② 공연 상태 갱신 | 매일 04:00 | `run_concert_status_update()` |
-| ③ 신규 공연 수집·매칭 | 매일 04:30 | `run_new_concert_collect()` |
+| ② 공연 상태 갱신 | 매일 00:00 | `run_concert_status_update()` |
+| ③ 신규 공연 수집·매칭 | 매일 00:30 | `run_new_concert_collect()` |
 | ④ 릴리즈 (앨범·트랙·커버) | 초기 + 매일 05:00 | `run_release_update()` |
 | ⑤ 아티스트 이미지 | 매주 목 02:00 | `run_artist_image_update()` |
 | ⑥ 로마자→한글 alias 변환 | 매주 목 03:00 | `run_ja_romanize_collect()` |

@@ -783,8 +783,8 @@ def collect_and_save_setlist(concert_id: int) -> dict:
 
 def _build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-    scheduler.add_job(run_concert_status_update, "cron", hour=4, minute=0)
-    scheduler.add_job(run_new_concert_collect, "cron", hour=4, minute=30)
+    scheduler.add_job(run_concert_status_update, "cron", hour=0, minute=0)
+    scheduler.add_job(run_new_concert_collect, "cron", hour=0, minute=30)
     scheduler.add_job(run_release_update, "cron", hour=5)
     scheduler.add_job(run_ja_romanize_collect, "cron", day_of_week="thu", hour=3)
     scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=2)
