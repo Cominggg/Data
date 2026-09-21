@@ -1,4 +1,4 @@
-from matchers.artist_matcher import has_match, match_concert
+from matchers.artist_matcher import has_match, match_concert, matched_artist_ids
 
 _ALIASES = [
     {"artist_id": 1, "name": "아이유"},
@@ -187,3 +187,28 @@ class TestMatchFailure:
 
         assert matches == []
         assert failures == [{"concert_id": 41}]
+
+
+class TestMatchedArtistIds:
+    def test_returns_matched_artist_ids(self):
+        """매칭되는 alias가 있으면 해당 artist_id 리스트를 반환해야 한다."""
+        result = matched_artist_ids("BTS World Tour 콘서트", _ALIASES)
+
+        assert result == [2]
+
+    def test_returns_empty_list_when_no_match(self):
+        """매칭 없으면 빈 리스트를 반환해야 한다."""
+        result = matched_artist_ids("전혀 관계없는 공연 제목 xyzxyz", _ALIASES)
+
+        assert result == []
+
+    def test_returns_all_matched_ids_for_joint_concert(self):
+        """합동 공연처럼 복수 아티스트가 매칭되는 경우 전부 반환해야 한다."""
+        aliases = [
+            {"artist_id": 30, "name": "Perfume"},
+            {"artist_id": 31, "name": "BABYMETAL"},
+        ]
+        result = matched_artist_ids("Perfume × BABYMETAL LIVE IN SEOUL", aliases)
+
+        assert set(result) == {30, 31}
+        assert len(result) == 2

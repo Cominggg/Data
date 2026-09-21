@@ -47,6 +47,11 @@ def has_match(concert_raw: dict, aliases: list[dict]) -> bool:
     return bool(_phrase_match_title(title, aliases))
 
 
+def matched_artist_ids(title: str, aliases: list[dict]) -> list[int]:
+    """제목에서 매칭되는 artist_id 목록을 반환한다."""
+    return [a["artist_id"] for a in _phrase_match_title(title, aliases)]
+
+
 def match_concert(concert: dict, aliases: list[dict]) -> tuple[list[dict], list[dict]]:
     """공연-아티스트 매칭 실행.
 

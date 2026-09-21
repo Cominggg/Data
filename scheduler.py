@@ -15,6 +15,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from collectors import artist_image, ja_romanize, kopis, musicbrainz, release, setlist
 from collectors.spotify_client import SpotifyRateLimitError
 from db.repository import (
+    end_expired_concerts,
     get_active_concerts,
     get_all_aliases,
     get_all_artist_mbids,
@@ -45,7 +46,7 @@ from db.repository import (
     update_spotify_album_total,
     upsert_artist_url,
 )
-from matchers.artist_matcher import has_match, match_concert
+from matchers.artist_matcher import has_match, match_concert, matched_artist_ids
 from notifier.discord import notify_new_concert
 
 logging.basicConfig(
@@ -386,6 +387,8 @@ def run_concert_status_update() -> None:
     with _job_timer("공연 상태 갱신 잡"):
         logger.info("=== 공연 상태 갱신 잡 시작 ===")
 
+        end_expired_concerts()
+
         active = get_active_concerts()
         if active:
             logger.info("활성 공연 %d건 상태 갱신 시작", len(active))
@@ -434,6 +437,8 @@ def run_new_concert_collect(stdate: Optional[str] = None, use_prfstate: bool = F
             c for c in concerts
             if c["kopis_id"] not in existing_ids and has_match(c, aliases)
         ]
+        for c in new_concerts:
+            c["_matched_artist_ids"] = matched_artist_ids(c["prfnm"], aliases)
         if new_concerts:
             logger.info("신규 공연 %d건 저장 시작", len(new_concerts))
             save_concerts(new_concerts, use_prfstate=use_prfstate)
@@ -778,8 +783,8 @@ def collect_and_save_setlist(concert_id: int) -> dict:
 
 def _build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-    scheduler.add_job(run_concert_status_update, "cron", hour=4, minute=0)
-    scheduler.add_job(run_new_concert_collect, "cron", hour=4, minute=30)
+    scheduler.add_job(run_concert_status_update, "cron", hour=0, minute=0)
+    scheduler.add_job(run_new_concert_collect, "cron", hour=0, minute=30)
     scheduler.add_job(run_release_update, "cron", hour=5)
     scheduler.add_job(run_ja_romanize_collect, "cron", day_of_week="thu", hour=3)
     scheduler.add_job(run_artist_image_update, "cron", day_of_week="thu", hour=2)

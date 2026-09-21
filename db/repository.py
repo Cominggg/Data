@@ -163,7 +163,9 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
     """수집된 공연 목록을 concert 테이블에 저장한다. kopis_id 중복 시 무시.
 
     title·start_date·end_date가 모두 일치하는 공연이 이미 존재하면(예: 어드민이
-    kopis_id 없이 수동 등록한 공연과 동일 공연) 신규 저장을 건너뛴다.
+    kopis_id 없이 수동 등록한 공연과 동일 공연) 신규 저장을 건너뛰고, 기존 행의
+    kopis_id·kopis_update_date만 채워 KOPIS 연동 상태로 전환한다(다른 필드는
+    어드민 입력값을 유지하기 위해 건드리지 않음).
 
     use_prfstate=True이면 prfstate → _KOPIS_STATUS_MAP으로 status를 결정한다.
     기본값(False)은 배치 수집용 PENDING을 사용한다.
@@ -179,7 +181,7 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
                     text("""
                         SELECT id FROM concert
                         WHERE title = :title AND start_date = :start_date
-                          AND end_date = :end_date
+                          AND end_date = :end_date AND kopis_id IS NULL
                     """),
                     {
                         "title": concert["prfnm"],
@@ -187,10 +189,42 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
                         "end_date": concert["prfpdto"],
                     },
                 ).fetchone()
-                if title_match is not None:
+                artist_match = None
+                if title_match is None and concert.get("_matched_artist_ids"):
+                    artist_match = session.execute(
+                        text("""
+                            SELECT c.id FROM concert c
+                            JOIN concert_artist ca ON ca.concert_id = c.id
+                            WHERE ca.artist_id = ANY(:artist_ids)
+                              AND c.start_date = :start_date AND c.end_date = :end_date
+                              AND c.kopis_id IS NULL
+                            LIMIT 1
+                        """),
+                        {
+                            "artist_ids": concert["_matched_artist_ids"],
+                            "start_date": concert["prfpdfrom"],
+                            "end_date": concert["prfpdto"],
+                        },
+                    ).fetchone()
+
+                if title_match is not None or artist_match is not None:
+                    matched_id = title_match[0] if title_match is not None else artist_match[0]
+                    session.execute(
+                        text("""
+                            UPDATE concert
+                            SET kopis_id = :kopis_id, kopis_update_date = :kopis_update_date
+                            WHERE id = :id AND kopis_id IS NULL
+                        """),
+                        {
+                            "kopis_id": concert["kopis_id"],
+                            "kopis_update_date": concert["updatedate"],
+                            "id": matched_id,
+                        },
+                    )
                     logger.info(
-                        "동일 공연명·기간 이미 존재 — 저장 건너뜀: title=%s, kopis_id=%s",
-                        concert["prfnm"], concert["kopis_id"],
+                        "동일 공연명·기간 또는 동일 아티스트·기간 이미 존재 — 저장 대신 "
+                        "kopis_id 연동: title=%s, kopis_id=%s, concert_id=%s",
+                        concert["prfnm"], concert["kopis_id"], matched_id,
                     )
                     duplicate_kopis_ids.add(concert["kopis_id"])
                     continue
@@ -721,14 +755,32 @@ def update_artist_is_coming() -> int:
     return updated
 
 
+def end_expired_concerts() -> int:
+    """KOPIS 연동 여부와 무관하게 종료일이 지난 UPCOMING/ONGOING 공연을 ENDED로 전환한다."""
+    with get_session() as session:
+        result = session.execute(
+            text("""
+                UPDATE concert
+                SET status = 'ENDED'
+                WHERE status IN ('UPCOMING', 'ONGOING')
+                  AND end_date < CURRENT_DATE
+            """)
+        )
+        updated = result.rowcount
+    logger.info("종료일 경과 공연 강제 종료 처리: %d건", updated)
+    return updated
+
+
 def get_active_concerts() -> list[dict]:
-    """status가 UPCOMING 또는 ONGOING인 공연의 kopis_id·kopis_update_date를 반환한다."""
+    """status가 UPCOMING 또는 ONGOING이고 kopis_id가 있는 공연의 kopis_id·kopis_update_date를
+    반환한다."""
     with get_session() as session:
         rows = session.execute(
             text("""
                 SELECT kopis_id, kopis_update_date
                 FROM concert
                 WHERE status IN ('UPCOMING', 'ONGOING')
+                  AND kopis_id IS NOT NULL
             """)
         ).fetchall()
     return [
