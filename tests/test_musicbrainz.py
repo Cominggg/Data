@@ -570,8 +570,21 @@ class TestSearchArtists:
         search_artists(name)
 
         first_params = mock_get.call_args_list[0].args[1]
-        expected_escaped = name.replace("\\", "\\\\").replace('"', '\\"')
-        assert first_params["query"] == f'artist:"{expected_escaped}"'
+        assert first_params["query"] == 'artist:"Weird\\\\Name \\"Quote\\""'
+
+    @patch("collectors.musicbrainz.time.sleep")
+    @patch("collectors.musicbrainz._get")
+    def test_escapes_lucene_reserved_characters_in_query(self, mock_get, mock_sleep):
+        """이름에 하이픈·괄호 등 Lucene 예약문자가 있으면 이스케이프되어야 한다."""
+        mock_get.side_effect = [{"artists": []}, {"artists": []}]
+        name = "w-inds."
+
+        search_artists(name)
+
+        first_params = mock_get.call_args_list[0].args[1]
+        second_params = mock_get.call_args_list[1].args[1]
+        assert first_params["query"] == 'artist:"w\\-inds."'
+        assert second_params["query"] == "artist:w\\-inds."
 
     @patch("collectors.musicbrainz.time.sleep")
     @patch("collectors.musicbrainz._get")

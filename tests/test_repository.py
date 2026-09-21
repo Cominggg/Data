@@ -719,6 +719,40 @@ class TestSaveConcerts:
         assert params["start_date"] == "20240101"
         assert params["end_date"] == "20240102"
 
+    def test_title_match_query_excludes_already_linked_rows(self):
+        """title_match 쿼리는 kopis_id가 이미 채워진 행을 후보에서 제외해야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (5,)
+        concert = {
+            "kopis_id": "PF300",
+            "prfnm": "Existing Title",
+            "prfcast": "Cast",
+            "prfpdfrom": "20240401",
+            "prfpdto": "20240402",
+            "fcltynm": "Venue",
+            "updatedate": "20240401120000",
+        }
+
+        self._run([concert], mock_session)
+
+        sql, _ = mock_session.execute.call_args_list[0].args
+        assert "kopis_id IS NULL" in str(sql)
+
+    def test_artist_match_query_excludes_already_linked_rows(self):
+        """artist_match 쿼리는 kopis_id가 이미 채워진 행을 후보에서 제외해야 한다.
+
+        LIMIT 1로 임의의 행을 뽑는 특성상, 이 조건이 없으면 이미 다른 kopis_id로
+        연동된 행을 잘못 골라 UPDATE가 0건 처리되고 신규 공연이 유실될 수 있다.
+        """
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.side_effect = [None, (1,)]
+        concert = dict(self._CONCERT_WITH_MATCH)
+
+        self._run([concert], mock_session)
+
+        sql, _ = mock_session.execute.call_args_list[1].args
+        assert "kopis_id IS NULL" in str(sql)
+
     def test_update_query_only_touches_kopis_id_and_update_date(self):
         """매치 시 UPDATE는 kopis_id·kopis_update_date만 채우고 kopis_id IS NULL 조건을
         가져야 한다."""

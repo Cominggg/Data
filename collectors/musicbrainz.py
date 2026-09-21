@@ -146,12 +146,19 @@ def _parse_artist(detail: dict) -> dict:
     }
 
 
+_LUCENE_SPECIAL_CHARS = re.compile(r'([+\-&|!(){}\[\]^"~*?:\\/])')
+
+
+def _escape_lucene(name: str) -> str:
+    return _LUCENE_SPECIAL_CHARS.sub(r"\\\1", name)
+
+
 def search_artists(name: str) -> list[dict]:
     """아티스트명으로 MusicBrainz 검색. 최대 10건 반환.
 
     1차로 구문(phrase) 검색을 시도하고, 결과가 없으면 unquoted 쿼리로 폴백한다.
     """
-    escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = _escape_lucene(name)
     try:
         data = _with_retry(
             lambda: _get(

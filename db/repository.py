@@ -181,7 +181,7 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
                     text("""
                         SELECT id FROM concert
                         WHERE title = :title AND start_date = :start_date
-                          AND end_date = :end_date
+                          AND end_date = :end_date AND kopis_id IS NULL
                     """),
                     {
                         "title": concert["prfnm"],
@@ -197,6 +197,7 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
                             JOIN concert_artist ca ON ca.concert_id = c.id
                             WHERE ca.artist_id = ANY(:artist_ids)
                               AND c.start_date = :start_date AND c.end_date = :end_date
+                              AND c.kopis_id IS NULL
                             LIMIT 1
                         """),
                         {
