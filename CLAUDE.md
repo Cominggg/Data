@@ -103,5 +103,28 @@ python scheduler.py collect-setlist                   # 단건 setlist 수집
 
 ### 서브에이전트 패턴
 
-새 기능 구현 시 두 에이전트를 병렬로 사용한다: **Agent A**(구현: `collectors/`, `matchers/`, `db/`) + **Agent B**(테스트: `tests/`). 이후 `/test` → `/commit` → `/pr` 순으로 마무리.
+로컬 에이전트(`.claude/agents/`) 두 개로 구현과 테스트를 나눈다. 담당 범위가 겹치지 않아 병렬 실행해도 충돌하지 않는다.
+
+| 에이전트 | 담당 | 수정 금지 |
+|---------|------|----------|
+| `data-implementer` | `collectors/`, `matchers/`, `db/`, `notifier/` (+ 패키지 등록 시 `pyproject.toml`) | `tests/`, 지시 없는 `scheduler.py`·`api.py` |
+| `write-tests` | `tests/` | 구현 코드 전체 |
+
+**병렬 실행 임계치** — 아래 중 하나라도 해당하면 두 에이전트를 병렬로 띄운다:
+- 새 public 함수(수집기·매처·DML)를 추가한다
+- 구현 파일 2개 이상을 수정한다
+- 새 테스트 파일이 필요하다
+
+병렬로 띄울 때는 두 프롬프트에 **같은 함수 시그니처·동작 명세**를 넣는다 (write-tests는 구현 완료 전에 작성을 시작하므로).
+
+그 외(구현 파일 1개의 버그 수정·소규모 변경, 기존 테스트 파일에 케이스 1~2개 추가)는 에이전트 없이 직접 처리하거나 `data-implementer` → `write-tests` 순차 실행한다.
+
+### 커밋 전 체크리스트
+
+`/test` → `/data-review` → `/commit` → `/pr` 순으로 마무리한다.
+
+- `/test`: 변경 파일 관련 테스트 통과
+- `/data-review`: 🔴 critical 0건 (DML-only, `print` 금지, Python 3.9 문법, rate limit, 패키지 등록 등)
+- `ruff check .` 통과 — `target-version`이 py311이라 `X | Y`·`match`는 ruff가 못 잡는다. `/data-review`에서 확인한다
+- `.env`·시크릿 파일은 Write/Edit PreToolUse 훅이 차단한다 (`.claude/settings.json`)
 
