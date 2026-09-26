@@ -15,10 +15,13 @@ description: Coming Data 코드 작성 후 커밋·PR 전 필수 실행하는 Da
 
 1. 검토 대상 파일을 확정한다 — 커밋 전 변경과 브랜치에 이미 커밋된 변경을 모두 포함한다
    ```bash
+   git fetch -q origin main
    BASE=$(git merge-base HEAD origin/main)
    { git diff --name-only "$BASE"; git ls-files --others --exclude-standard; } | grep '\.py$' | sort -u
    git diff "$BASE" -- '*.py'
+   git ls-files --others --exclude-standard -- '*.py'   # untracked 대상
    ```
+   - untracked 파일은 `git diff`에 내용이 나오지 않으므로 파일 전체를 읽어 검토한다
    - 대상 파일이 없으면 "검토할 Python 변경 없음"을 보고하고 종료한다
 
 2. 프로젝트 규칙을 로드한다 — 레포 루트 `CLAUDE.md`의 "파이썬 버전", "코딩 규칙", "외부 API 정보" 섹션
