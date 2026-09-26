@@ -1,4 +1,5 @@
 """collectors/release.py (Spotify) + db/repository.save_releases 단위 테스트."""
+
 from unittest.mock import MagicMock, patch
 
 import requests
@@ -220,8 +221,12 @@ class TestCollectReleases:
     @patch("collectors.release._fetch_album_ids")
     def test_returns_correct_structure(self, mock_ids, mock_individual):
         track_item = {
-            "id": "t1", "name": "Song A", "track_number": 1,
-            "disc_number": 1, "duration_ms": 200000, "explicit": False,
+            "id": "t1",
+            "name": "Song A",
+            "track_number": 1,
+            "disc_number": 1,
+            "duration_ms": 200000,
+            "explicit": False,
         }
         mock_ids.return_value = (["alb1"], 1)
         mock_individual.return_value = [self._make_album("alb1", tracks=[track_item])]
@@ -302,6 +307,7 @@ class TestCollectReleases:
         mock_individual.return_value = [album]
 
         import logging
+
         with patch.object(logging.getLogger("collectors.release"), "warning") as mock_warn:
             collect_releases("artist-spotify-id")
             mock_warn.assert_called_once()
@@ -370,7 +376,8 @@ class TestSaveReleases:
             save_releases(99, [self._make_release()])
 
         rg_call = next(
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO release_group" in str(c.args[0])
         )
         assert rg_call.args[1]["artist_id"] == 99
@@ -391,8 +398,7 @@ class TestSaveReleases:
             save_releases(1, [self._make_release(tracks=[track])])
 
         track_call = next(
-            c for c in mock_session.execute.call_args_list
-            if "INSERT INTO track" in str(c.args[0])
+            c for c in mock_session.execute.call_args_list if "INSERT INTO track" in str(c.args[0])
         )
         params = track_call.args[1]
         assert params["spotify_id"] == "t1"
@@ -404,8 +410,12 @@ class TestSaveReleases:
         mock_session.execute.return_value.fetchone.return_value = (1,)
 
         track = {
-            "spotify_id": "t1", "title": "T", "position": 1,
-            "disc_number": 1, "length_ms": None, "explicit": False,
+            "spotify_id": "t1",
+            "title": "T",
+            "position": 1,
+            "disc_number": 1,
+            "length_ms": None,
+            "explicit": False,
         }
         with patch("db.repository.get_session", return_value=self._patch_session(mock_session)):
             save_releases(1, [self._make_release(tracks=[track])])
@@ -443,7 +453,8 @@ class TestSaveReleases:
             save_releases(1, releases)
 
         ok_inserts = [
-            c for c in ok_session.execute.call_args_list
+            c
+            for c in ok_session.execute.call_args_list
             if "INSERT INTO release_group" in str(c.args[0])
         ]
         assert len(ok_inserts) >= 1
@@ -459,7 +470,8 @@ class TestSaveReleases:
             save_releases(1, [release])
 
         rg_call = next(
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO release_group" in str(c.args[0])
         )
         assert rg_call.args[1]["total_tracks"] == 12

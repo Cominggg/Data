@@ -52,11 +52,13 @@ def _parse_tracks(sets_data: dict) -> list[dict]:
     position = 1
     for s in sets_data.get("set", []):
         for song in s.get("song", []):
-            tracks.append({
-                "position": position,
-                "song_name": song.get("name", ""),
-                "info": song.get("info"),
-            })
+            tracks.append(
+                {
+                    "position": position,
+                    "song_name": song.get("name", ""),
+                    "info": song.get("info"),
+                }
+            )
             position += 1
     return tracks
 
@@ -75,7 +77,10 @@ def _event_date_in_range(
     except (ValueError, TypeError) as e:
         logger.warning(
             "날짜 파싱 실패: event_date=%s, from=%s, to=%s, %s",
-            event_date_str, prfpdfrom, prfpdto, e,
+            event_date_str,
+            prfpdfrom,
+            prfpdto,
+            e,
         )
         return False
 
@@ -111,8 +116,12 @@ def collect_for_concert(concert: dict) -> Optional[dict]:
             if not _event_date_in_range(event_date, concert["start_date"], concert["end_date"]):
                 continue
             tracks = _parse_tracks(item.get("sets", {}))
-            logger.info("셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
-                        concert_id, item.get("id"), len(tracks))
+            logger.info(
+                "셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
+                concert_id,
+                item.get("id"),
+                len(tracks),
+            )
             return {
                 "concert_id": concert_id,
                 "setlist_fm_id": item.get("id"),
@@ -161,7 +170,9 @@ def collect() -> list[dict]:
                 else:
                     logger.warning(
                         "setlist.fm API 오류 (3회 실패): concert_id=%d, page=%d, %s",
-                        concert_id, page, e,
+                        concert_id,
+                        page,
+                        e,
                     )
                 update_concert_fetch_attempted(concert_id)
                 break
@@ -178,16 +189,20 @@ def collect() -> list[dict]:
                     continue
 
                 tracks = _parse_tracks(item.get("sets", {}))
-                results.append({
-                    "concert_id": concert_id,
-                    "setlist_fm_id": item.get("id"),
-                    "attribution_url": item.get("url"),
-                    "tracks": tracks,
-                })
+                results.append(
+                    {
+                        "concert_id": concert_id,
+                        "setlist_fm_id": item.get("id"),
+                        "attribution_url": item.get("url"),
+                        "tracks": tracks,
+                    }
+                )
                 seen_concert_ids.add(concert_id)
                 logger.info(
                     "셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
-                    concert_id, item.get("id"), len(tracks),
+                    concert_id,
+                    item.get("id"),
+                    len(tracks),
                 )
                 update_concert_fetch_attempted(concert_id)
                 matched = True

@@ -1,4 +1,5 @@
 """scheduler.py 단위 테스트."""
+
 import json
 import logging
 import os
@@ -44,6 +45,7 @@ class TestJobTimer:
 
     def test_logs_duration_on_early_return(self, caplog):
         """with 블록 중간에 return으로 빠져나가도 소요시간이 로깅되어야 한다."""
+
         def _early_return():
             with _job_timer("테스트 잡"):
                 return
@@ -674,7 +676,11 @@ class TestRegisterArtistByMbid:
         "aliases": [],
         "url_rels": [{"type": "Spotify", "url": "https://open.spotify.com/artist/sp999"}],
     }
-    _SAVED = {"id": 42, "name": "TestArtist", "spotify_url": "https://open.spotify.com/artist/sp999"}
+    _SAVED = {
+        "id": 42,
+        "name": "TestArtist",
+        "spotify_url": "https://open.spotify.com/artist/sp999",
+    }
 
     def test_returns_ok_status_on_success(self):
         """모든 단계 성공 시 status:ok와 아티스트 정보를 반환해야 한다."""
@@ -718,15 +724,12 @@ class TestRegisterArtistByMbid:
         """save_artists가 이미지 수집보다 먼저 호출되어야 한다."""
         call_order = []
         with (
-            patch(
-                "scheduler.musicbrainz.collect_single_artist", return_value=self._ARTIST
-            ),
+            patch("scheduler.musicbrainz.collect_single_artist", return_value=self._ARTIST),
             patch("scheduler.save_artists", side_effect=lambda _: call_order.append("save")),
             patch("scheduler.get_artist_by_mbid", return_value=self._SAVED),
             patch(
                 "scheduler.artist_image.collect_artist_image",
-                side_effect=lambda *a, **kw: call_order.append("image")
-                or ("http://img", "sp999"),
+                side_effect=lambda *a, **kw: call_order.append("image") or ("http://img", "sp999"),
             ),
             patch("scheduler.update_artist_image"),
         ):
@@ -930,6 +933,7 @@ class TestIsBanned:
 
     def test_returns_true_within_ban_period(self, tmp_path, monkeypatch):
         from datetime import datetime, timedelta
+
         ban_path = str(tmp_path / "spotify_ban.json")
         monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
         future = (datetime.now() + timedelta(hours=20)).isoformat(timespec="seconds")
@@ -939,6 +943,7 @@ class TestIsBanned:
 
     def test_returns_false_after_ban_expired(self, tmp_path, monkeypatch):
         from datetime import datetime, timedelta
+
         ban_path = str(tmp_path / "spotify_ban.json")
         monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
         past = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
@@ -1113,6 +1118,7 @@ class TestRunReleaseUpdateCheckpoint:
     def test_skips_all_when_banned(self, tmp_path, monkeypatch):
         """banned_until이 유효하면 collect_releases를 호출하지 않아야 한다."""
         from datetime import datetime, timedelta
+
         ban_path = str(tmp_path / "spotify_ban.json")
         monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
         future = (datetime.now() + timedelta(hours=20)).isoformat(timespec="seconds")
@@ -1130,6 +1136,7 @@ class TestRunArtistImageUpdateBanGuard:
     def test_skips_when_banned(self, tmp_path, monkeypatch):
         """banned_until이 유효하면 이미지 수집을 실행하지 않아야 한다."""
         from datetime import datetime, timedelta
+
         ban_path = str(tmp_path / "spotify_ban.json")
         monkeypatch.setattr("scheduler._BAN_PATH", ban_path)
         future = (datetime.now() + timedelta(hours=20)).isoformat(timespec="seconds")
@@ -1229,9 +1236,7 @@ class TestRunArtistImageUpdate:
     def test_does_not_upsert_when_spotify_url_already_present(self):
         """이미 spotify_url이 있던 아티스트는 artist_url을 다시 저장하지 않아야 한다."""
         with (
-            patch(
-                "scheduler.get_artists_without_image", return_value=[self._ARTIST_WITH_SPOTIFY]
-            ),
+            patch("scheduler.get_artists_without_image", return_value=[self._ARTIST_WITH_SPOTIFY]),
             patch(
                 "scheduler.artist_image.collect_artist_image",
                 return_value=("http://img.url", "existing"),

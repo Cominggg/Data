@@ -1,4 +1,5 @@
 """collectors/kopis.py 단위 테스트."""
+
 import xml.etree.ElementTree as ET
 from typing import Optional
 from unittest.mock import MagicMock, patch
@@ -21,6 +22,7 @@ _LIST_URL = "http://kopis.or.kr/openApi/restful/pblprfr"
 
 
 # ─── XML 헬퍼 ────────────────────────────────────────────────────────────────
+
 
 def _make_list_content(*items: dict) -> bytes:
     """목록 API XML 응답 bytes 생성. 각 item은 <db> 필드 dict."""
@@ -106,14 +108,18 @@ def _make_db_elem(**fields) -> ET.Element:
 
 # ─── TestFetchAndMerge ────────────────────────────────────────────────────────
 
+
 class TestFetchAndMerge:
     def test_returns_merged_concert_when_visit_y(self):
         """detail 병합 후 visit=Y이면 concert dict를 반환해야 한다."""
         concert = {"kopis_id": "PF123456", "prfnm": "공연명"}
         detail = {
-            "visit": "Y", "poster_url": "http://poster.jpg",
-            "price": None, "relates": [],
-            "updatedate": "2024-01-15", "prfcast": "아티스트",
+            "visit": "Y",
+            "poster_url": "http://poster.jpg",
+            "price": None,
+            "relates": [],
+            "updatedate": "2024-01-15",
+            "prfcast": "아티스트",
         }
         with patch("collectors.kopis._fetch_detail", return_value=detail):
             result = _fetch_and_merge(concert)
@@ -126,8 +132,12 @@ class TestFetchAndMerge:
         """visit!=Y이면 None을 반환해야 한다."""
         concert = {"kopis_id": "PF123456", "prfnm": "공연명"}
         detail = {
-            "visit": "N", "poster_url": None,
-            "price": None, "relates": [], "updatedate": None, "prfcast": None,
+            "visit": "N",
+            "poster_url": None,
+            "price": None,
+            "relates": [],
+            "updatedate": None,
+            "prfcast": None,
         }
         with patch("collectors.kopis._fetch_detail", return_value=detail):
             result = _fetch_and_merge(concert)
@@ -144,9 +154,12 @@ class TestFetchAndMerge:
             if call_count["n"] < 3:
                 raise requests.ConnectionError("timeout")
             return {
-                "visit": "Y", "poster_url": "http://poster.jpg",
-                "price": None, "relates": [],
-                "updatedate": None, "prfcast": None,
+                "visit": "Y",
+                "poster_url": "http://poster.jpg",
+                "price": None,
+                "relates": [],
+                "updatedate": None,
+                "prfcast": None,
             }
 
         with patch("collectors.kopis._fetch_detail", side_effect=flaky_fetch):
@@ -196,6 +209,7 @@ class TestFetchAndMerge:
 
 # ─── TestKopisCollect ─────────────────────────────────────────────────────────
 
+
 class TestKopisCollect:
     def test_collect_returns_list(self):
         """collect() 호출 결과가 리스트여야 한다."""
@@ -204,8 +218,10 @@ class TestKopisCollect:
             "PF123456", poster="http://poster.jpg", adres="서울", visit="Y"
         )
 
-        with patch("collectors.kopis.requests.get",
-                   side_effect=_mock_get_factory(list_content, {"PF123456": detail_content})):
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_mock_get_factory(list_content, {"PF123456": detail_content}),
+        ):
             result = collect()
 
         assert isinstance(result, list)
@@ -215,12 +231,12 @@ class TestKopisCollect:
     def test_collect_merges_detail_fields(self):
         """collect() 결과에 poster_url이 포함되어야 한다."""
         list_content = _make_list_content(_sample_item())
-        detail_content = _make_detail_content(
-            "PF123456", poster="http://poster.jpg", visit="Y"
-        )
+        detail_content = _make_detail_content("PF123456", poster="http://poster.jpg", visit="Y")
 
-        with patch("collectors.kopis.requests.get",
-                   side_effect=_mock_get_factory(list_content, {"PF123456": detail_content})):
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_mock_get_factory(list_content, {"PF123456": detail_content}),
+        ):
             result = collect()
 
         assert result[0]["poster_url"] == "http://poster.jpg"
@@ -268,9 +284,8 @@ class TestKopisCollect:
     def test_includes_eddate_param(self):
         """eddate 미전달 시 오늘 기준 365일 후 날짜가 파라미터로 전달되어야 한다."""
         import datetime
-        expected = (
-            datetime.date.today() + datetime.timedelta(days=365)
-        ).strftime("%Y%m%d")
+
+        expected = (datetime.date.today() + datetime.timedelta(days=365)).strftime("%Y%m%d")
 
         with patch("collectors.kopis.requests.get") as mock_get:
             mock_get.return_value.content = b"<dbs></dbs>"
@@ -289,8 +304,10 @@ class TestKopisCollect:
             styurls=["http://still1.jpg", "http://still2.jpg"],
         )
 
-        with patch("collectors.kopis.requests.get",
-                   side_effect=_mock_get_factory(list_content, {"PF123456": detail_content})):
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_mock_get_factory(list_content, {"PF123456": detail_content}),
+        ):
             result = collect()
 
         assert result[0]["still_urls"] == ["http://still1.jpg", "http://still2.jpg"]
@@ -300,8 +317,10 @@ class TestKopisCollect:
         list_content = _make_list_content(_sample_item())
         detail_content = _make_detail_content("PF123456", visit="Y")
 
-        with patch("collectors.kopis.requests.get",
-                   side_effect=_mock_get_factory(list_content, {"PF123456": detail_content})):
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_mock_get_factory(list_content, {"PF123456": detail_content}),
+        ):
             result = collect()
 
         assert result[0]["still_urls"] == []
@@ -313,14 +332,18 @@ class TestKopisCollect:
             _sample_item(mt20id="PF002"),
         )
         detail_with = _make_detail_content(
-            "PF001", visit="Y",
+            "PF001",
+            visit="Y",
             relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}],
         )
         detail_without = _make_detail_content("PF002", visit="Y")
 
-        with patch("collectors.kopis.requests.get", side_effect=_mock_get_factory(
-            list_content, {"PF001": detail_with, "PF002": detail_without}
-        )):
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_mock_get_factory(
+                list_content, {"PF001": detail_with, "PF002": detail_without}
+            ),
+        ):
             result = collect()
 
         result_by_id = {r["kopis_id"]: r for r in result}
@@ -357,9 +380,10 @@ class TestKopisCollect:
         detail_y = _make_detail_content("PF001", visit="Y")
         detail_n = _make_detail_content("PF002", visit="N")
 
-        with patch("collectors.kopis.requests.get", side_effect=_mock_get_factory(
-            list_content, {"PF001": detail_y, "PF002": detail_n}
-        )):
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_mock_get_factory(list_content, {"PF001": detail_y, "PF002": detail_n}),
+        ):
             result = collect()
 
         assert len(result) == 1
@@ -374,9 +398,10 @@ class TestKopisCollect:
         detail1 = _make_detail_content("PF001", visit="Y", poster="http://p1.jpg")
         detail2 = _make_detail_content("PF002", visit="Y", poster="http://p2.jpg")
 
-        with patch("collectors.kopis.requests.get", side_effect=_mock_get_factory(
-            list_content, {"PF001": detail1, "PF002": detail2}
-        )):
+        with patch(
+            "collectors.kopis.requests.get",
+            side_effect=_mock_get_factory(list_content, {"PF001": detail1, "PF002": detail2}),
+        ):
             result = collect()
 
         assert len(result) == 2
@@ -402,6 +427,7 @@ class TestKopisCollect:
 
 
 # ─── TestKopisDetailRetry ─────────────────────────────────────────────────────
+
 
 class TestKopisDetailRetry:
     def test_retries_on_network_error_then_succeeds(self):
@@ -433,6 +459,7 @@ class TestKopisDetailRetry:
 
 # ─── TestFetchDetail ──────────────────────────────────────────────────────────
 
+
 class TestFetchDetail:
     def _mock_resp(self, content: bytes) -> MagicMock:
         resp = MagicMock()
@@ -451,7 +478,8 @@ class TestFetchDetail:
     def test_returns_relates(self):
         """상세 API 응답에서 relates를 파싱해야 한다."""
         content = _make_detail_content(
-            "PF123456", visit="Y",
+            "PF123456",
+            visit="Y",
             relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}],
         )
         with patch("collectors.kopis.requests.get", return_value=self._mock_resp(content)):
@@ -534,6 +562,7 @@ class TestFetchDetail:
 
 # ─── TestParseKopisDate ───────────────────────────────────────────────────────
 
+
 class TestParseKopisDate:
     def test_dot_date_normalized(self):
         assert _parse_kopis_date("2024.01.15") == "2024-01-15"
@@ -567,6 +596,7 @@ class TestParseKopisDate:
 
 # ─── TestParseRelates ─────────────────────────────────────────────────────────
 
+
 class TestParseRelates:
     def _make_relates_elem(self, relates: list) -> ET.Element:
         elem = ET.Element("relates")
@@ -577,10 +607,12 @@ class TestParseRelates:
         return elem
 
     def test_parses_relate_list(self):
-        elem = self._make_relates_elem([
-            {"relatenm": "예스24", "relateurl": "https://yes24.com"},
-            {"relatenm": "멜론티켓", "relateurl": "https://ticket.melon.com"},
-        ])
+        elem = self._make_relates_elem(
+            [
+                {"relatenm": "예스24", "relateurl": "https://yes24.com"},
+                {"relatenm": "멜론티켓", "relateurl": "https://ticket.melon.com"},
+            ]
+        )
         result = _parse_relates(elem)
         assert len(result) == 2
         assert result[0] == {"relatenm": "예스24", "relateurl": "https://yes24.com"}
@@ -601,6 +633,7 @@ class TestParseRelates:
 
 
 # ─── TestSaveConcerts ─────────────────────────────────────────────────────────
+
 
 class TestSaveConcerts:
     def _make_concert(self, **kwargs) -> dict:
@@ -630,7 +663,8 @@ class TestSaveConcerts:
             save_concerts([self._make_concert()])
 
         insert_sqls = [
-            str(c.args[0]) for c in mock_session.execute.call_args_list
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
             if "INSERT" in str(c.args[0])
         ]
         assert len(insert_sqls) == 1
@@ -646,7 +680,8 @@ class TestSaveConcerts:
             save_concerts([self._make_concert(poster_url="http://poster.jpg")])
 
         insert_sqls = [
-            str(c.args[0]) for c in mock_session.execute.call_args_list
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO concert" in str(c.args[0])
         ]
         assert "poster_url" in insert_sqls[0]
@@ -661,7 +696,8 @@ class TestSaveConcerts:
             save_concerts([self._make_concert(poster_url="http://poster.jpg")])
 
         insert_call = [
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO concert" in str(c.args[0])
         ][0]
         assert insert_call.args[1]["poster_url"] == "http://poster.jpg"
@@ -676,7 +712,8 @@ class TestSaveConcerts:
             save_concerts([self._make_concert(price="전석 110,000원")])
 
         insert_sqls = [
-            str(c.args[0]) for c in mock_session.execute.call_args_list
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO concert" in str(c.args[0])
         ]
         assert "price" in insert_sqls[0]
@@ -691,7 +728,8 @@ class TestSaveConcerts:
             save_concerts([self._make_concert(price="전석 110,000원")])
 
         insert_call = [
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO concert" in str(c.args[0])
         ][0]
         assert insert_call.args[1]["price"] == "전석 110,000원"
@@ -703,12 +741,17 @@ class TestSaveConcerts:
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(
-                relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
-            )])
+            save_concerts(
+                [
+                    self._make_concert(
+                        relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
+                    )
+                ]
+            )
 
         booking_link_inserts = [
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "concert_booking_link" in str(c.args[0])
         ]
         assert len(booking_link_inserts) == 1
@@ -723,12 +766,17 @@ class TestSaveConcerts:
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(
-                relates=[{"relatenm": "인터파크", "relateurl": "https://interpark.com"}]
-            )])
+            save_concerts(
+                [
+                    self._make_concert(
+                        relates=[{"relatenm": "인터파크", "relateurl": "https://interpark.com"}]
+                    )
+                ]
+            )
 
         booking_link_inserts = [
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "concert_booking_link" in str(c.args[0])
         ]
         assert len(booking_link_inserts) == 1
@@ -741,12 +789,17 @@ class TestSaveConcerts:
         with patch("db.repository.get_session") as mock_get_session:
             mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            save_concerts([self._make_concert(
-                relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
-            )])
+            save_concerts(
+                [
+                    self._make_concert(
+                        relates=[{"relatenm": "예스24", "relateurl": "https://yes24.com"}]
+                    )
+                ]
+            )
 
         booking_link_sqls = [
-            str(c.args[0]) for c in mock_session.execute.call_args_list
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
             if "concert_booking_link" in str(c.args[0])
         ]
         assert len(booking_link_sqls) == 1
@@ -796,7 +849,8 @@ class TestSaveConcerts:
             duplicates = save_concerts([self._make_concert()])
 
         insert_sqls = [
-            str(c.args[0]) for c in mock_session.execute.call_args_list
+            str(c.args[0])
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO concert" in str(c.args[0])
         ]
         assert insert_sqls == []
@@ -813,7 +867,9 @@ class TestSaveConcerts:
 
         check_call = mock_session.execute.call_args_list[0]
         assert check_call.args[1] == {
-            "title": "공연명", "start_date": "2024-01-01", "end_date": "2024-01-31",
+            "title": "공연명",
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-31",
         }
 
     def test_concert_image_not_inserted_when_still_urls_empty(self):
@@ -833,6 +889,7 @@ class TestSaveConcerts:
 
 
 # ─── TestUpdateConcertStatus ──────────────────────────────────────────────────
+
 
 class TestUpdateConcertStatus:
     def test_no_update_when_updatedate_unchanged(self):
@@ -893,6 +950,7 @@ class TestUpdateConcertStatus:
 
 
 # ─── TestKopisHttpErrors ──────────────────────────────────────────────────────
+
 
 class TestKopisHttpErrors:
     def test_propagates_http_error_on_4xx(self):

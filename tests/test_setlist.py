@@ -75,9 +75,7 @@ class TestSetlistCollect:
         """API 응답에 url 필드가 없으면 attribution_url은 None이어야 한다."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = _make_api_response(
-            [_sample_setlist(url=None)]
-        )
+        mock_response.json.return_value = _make_api_response([_sample_setlist(url=None)])
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", return_value=mock_response):
@@ -364,9 +362,7 @@ class TestSetlistFetchAttempted:
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", return_value=mock_response):
-                with patch(
-                    "collectors.setlist.update_concert_fetch_attempted"
-                ) as mock_attempted:
+                with patch("collectors.setlist.update_concert_fetch_attempted") as mock_attempted:
                     collect()
 
         mock_attempted.assert_called_once_with(1)
@@ -379,9 +375,7 @@ class TestSetlistFetchAttempted:
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", return_value=mock_response):
-                with patch(
-                    "collectors.setlist.update_concert_fetch_attempted"
-                ) as mock_attempted:
+                with patch("collectors.setlist.update_concert_fetch_attempted") as mock_attempted:
                     collect()
 
         mock_attempted.assert_called_once_with(1)
@@ -395,9 +389,7 @@ class TestSetlistFetchAttempted:
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", return_value=mock_response):
-                with patch(
-                    "collectors.setlist.update_concert_fetch_attempted"
-                ) as mock_attempted:
+                with patch("collectors.setlist.update_concert_fetch_attempted") as mock_attempted:
                     collect()
 
         mock_attempted.assert_called_once_with(1)
@@ -411,9 +403,7 @@ class TestSetlistFetchAttempted:
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", return_value=fail_response):
-                with patch(
-                    "collectors.setlist.update_concert_fetch_attempted"
-                ) as mock_attempted:
+                with patch("collectors.setlist.update_concert_fetch_attempted") as mock_attempted:
                     collect()
 
         mock_attempted.assert_called_once_with(1)
@@ -430,9 +420,7 @@ class TestSetlistFetchAttempted:
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", return_value=mock_response):
-                with patch(
-                    "collectors.setlist.update_concert_fetch_attempted"
-                ) as mock_attempted:
+                with patch("collectors.setlist.update_concert_fetch_attempted") as mock_attempted:
                     collect()
 
         mock_attempted.assert_called_once_with(1)
