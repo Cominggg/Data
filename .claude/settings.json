@@ -25,11 +25,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"import json,sys; data=json.load(sys.stdin); fp=data.get('tool_input',{}).get('file_path',''); blocked=['.env','.secret','credentials']; blocked_match=next((b for b in blocked if b in fp),None); print(json.dumps({'hookSpecificOutput':{'hookEventName':'PreToolUse','permissionDecision':'deny','permissionDecisionReason':'시크릿 파일 수정 차단: '+fp}}, ensure_ascii=False)) if blocked_match else None\"",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_secrets.py\"",
             "statusMessage": "시크릿 파일 검사 중..."
           }
         ]
