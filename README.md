@@ -90,6 +90,10 @@ coming-data/
 ├── tests/                 # pytest 단위 테스트
 ├── docs/
 │   └── pipeline.md        # 파이프라인 상세 로직·매칭 알고리즘
+├── .claude/               # Claude Code 설정 (아래 "AI 협업 워크플로우" 참고)
+│   ├── agents/            # data-implementer, write-tests 로컬 에이전트
+│   ├── skills/            # data-review, test 로컬 스킬
+│   └── settings.json      # 권한·훅 설정
 ├── scheduler.py           # APScheduler 진입점 (내부 API 서버도 함께 기동)
 ├── api.py                 # 내부 FastAPI 서버 — BE→Data 수집 트리거 (X-Internal-Secret 인증)
 ├── Dockerfile
@@ -161,6 +165,62 @@ ruff check .    # 린트
 
 - **CI** ([`ci.yml`](.github/workflows/ci.yml)): 모든 브랜치 push 및 main 대상 PR에서 `ruff check .` + `pytest` 실행
 - **CD** ([`cd.yml`](.github/workflows/cd.yml)): main 브랜치 push 시 Docker 이미지를 빌드해 GHCR에 푸시하고, SSH로 운영 서버에 접속해 `docker compose`로 배포
+
+## AI 협업 워크플로우
+
+Claude Code 에이전트·스킬·훅으로 이슈부터 PR까지 진행합니다. 프로젝트 규칙은 [`CLAUDE.md`](CLAUDE.md)에 모여 있고, 아래 도구들이 그 규칙을 역할별로 나눠 강제합니다.
+
+### 흐름
+
+```
+/issue → /plan-issue → data-implementer ∥ write-tests → /test → /data-review → /commit → /pr
+```
+
+| 단계 | 도구 | 하는 일 |
+|------|------|--------|
+| 이슈·브랜치 | `/issue` | GitHub 이슈 생성 + `{type}/#{번호}-...` 브랜치 체크아웃 |
+| 계획 | `/plan-issue` | 이슈 체크리스트를 코드 현황과 대조하고, 남은 작업을 커밋 단위로 순서화 |
+| 구현 | `data-implementer` 에이전트 | `collectors/`, `matchers/`, `db/`, `notifier/` 구현 |
+| 테스트 작성 | `write-tests` 에이전트 | `tests/` 단위 테스트 작성 |
+| 테스트 실행 | `/test` | 변경 파일과 매핑되는 테스트만 선별 실행, 실패 시 원인 분석 |
+| 리뷰 | `/data-review` | 프로젝트 규칙 위반 검토 — 🔴 critical 0건이어야 커밋 |
+| 커밋·PR | `/commit`, `/pr` | 컨벤션(`[{type}] 요약`)에 맞춘 커밋·PR 작성 |
+
+`data-review`, `test` 스킬과 두 에이전트는 이 레포의 [`.claude/`](.claude/)에 포함돼 있습니다. `/issue`, `/plan-issue`, `/commit`, `/pr`은 작성자의 전역 Claude Code 스킬이라 레포에는 없습니다.
+
+### 에이전트 역할 분리와 병렬 실행
+
+두 에이전트는 수정 가능한 디렉터리가 겹치지 않아 동시에 실행해도 충돌하지 않습니다.
+
+| 에이전트 | 수정 가능 | 수정 금지 |
+|---------|----------|----------|
+| [`data-implementer`](.claude/agents/data-implementer.md) | `collectors/`, `matchers/`, `db/`, `notifier/`, (패키지 등록 시) `pyproject.toml` | `tests/`, 지시 없는 `scheduler.py`·`api.py` |
+| [`write-tests`](.claude/agents/write-tests.md) | `tests/` | 구현 코드 전체 |
+
+다음 중 하나라도 해당하면 병렬로 실행하고, 두 에이전트에 같은 함수 시그니처·동작 명세를 전달합니다.
+
+- 새 public 함수(수집기·매처·DML)를 추가한다
+- 구현 파일 2개 이상을 수정한다
+- 새 테스트 파일이 필요하다
+
+구현 파일 1개의 소규모 수정은 에이전트 없이 처리하거나 구현 → 테스트 순으로 순차 실행합니다.
+
+### 코드 리뷰 (`/data-review`)
+
+[체크리스트](.claude/skills/data-review/references/data-checklist.md)는 grep 자동 검사와 diff 기반 수동 검토로 나뉩니다.
+
+- **DB**: DML만 허용, DDL 금지 (스키마는 백엔드 Flyway가 관리)
+- **로깅**: `print` 금지, `logging.getLogger(__name__)` 사용
+- **Python 3.9 문법**: `X | Y` 유니온·`match` 문 금지 — ruff `target-version`이 py311이라 린트로는 잡히지 않아 별도로 검사
+- **외부 API**: MusicBrainz 1.1초 대기, setlist.fm 필수 헤더, Spotify 토큰은 공통 클라이언트로만 발급
+- **환경변수·패키지**: 필수 키 미설정 시 모듈 로드 단계에서 `ValueError`, 선택 기능은 no-op, 신규 최상위 패키지의 `pyproject.toml` 등록
+
+### 훅 ([`.claude/settings.json`](.claude/settings.json))
+
+| 시점 | 대상 | 동작 |
+|------|------|------|
+| PreToolUse | Write·Edit | 경로에 `.env`·`.secret`·`credentials`가 포함되면 수정 차단 |
+| PostToolUse | `.py` 파일 Write·Edit | `ruff check --fix` + `ruff format` 후 대응하는 `tests/test_{모듈}.py` 자동 실행 |
 
 ## 관련 레포지토리
 
