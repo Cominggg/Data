@@ -17,7 +17,6 @@
       "WebSearch",
       "WebFetch(domain:musicbrainz.org)",
       "WebFetch(domain:api.setlist.fm)",
-      "WebFetch(domain:coverartarchive.org)",
       "WebFetch(domain:kopis.or.kr)",
       "WebFetch(domain:openapi.kopis.or.kr)",
       "WebFetch(domain:wiki.musicbrainz.org)"
