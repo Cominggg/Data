@@ -220,10 +220,12 @@ Claude Code 에이전트·스킬·훅으로 이슈부터 PR까지 진행합니�
 
 | 시점 | 대상 | 동작 |
 |------|------|------|
-| PreToolUse ([`block_secrets.py`](.claude/hooks/block_secrets.py)) | Write·Edit·Bash | 파일명이 `.env`·`.env.*`·`.envrc`이거나 `.secret`·`credentials`를 포함하면 차단. Bash는 명령의 각 토큰을 검사하고, 따옴표·heredoc 안 문장은 제외 |
+| PreToolUse ([`block_secrets.py`](.claude/hooks/block_secrets.py)) | Read·Write·Edit·Grep·Bash | 파일명이 `.env`·`.env.*`·`.envrc`이거나 `.secret`·`credentials`를 포함하면 읽기·쓰기 모두 차단. Grep은 검색 경로와 glob, Bash는 명령의 각 토큰을 검사하고 따옴표·heredoc 안 문장은 제외 |
 | PostToolUse ([`post_edit.py`](.claude/hooks/post_edit.py)) | `.py` 파일 Write·Edit | `ruff check --fix`(F401 미사용 import는 자동 삭제 안 함) + `ruff format` 후 관련 테스트 실행 — `tests/test_*.py` 수정 시 그 파일, 그 외엔 `tests/test_{모듈}*.py`. 실패하면 결과를 Claude에게 전달 |
 
 Bash 훅은 실수 방지용입니다. 문자열 조립처럼 의도적으로 우회하는 명령까지 막지는 않습니다.
+
+시크릿이 대화 기록에 남지 않도록 읽기도 막습니다. 따라서 Claude는 `.env` 내용을 직접 볼 수 없으므로, 환경변수 문제는 변수 이름을 알려주면 사용자가 값을 확인하는 방식으로 디버깅합니다.
 
 ## 관련 레포지토리
 
