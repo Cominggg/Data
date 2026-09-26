@@ -219,8 +219,8 @@ Claude Code 에이전트·스킬·훅으로 이슈부터 PR까지 진행합니�
 
 | 시점 | 대상 | 동작 |
 |------|------|------|
-| PreToolUse | Write·Edit | 경로에 `.env`·`.secret`·`credentials`가 포함되면 수정 차단 |
-| PostToolUse | `.py` 파일 Write·Edit | `ruff check --fix` + `ruff format` 후 대응하는 `tests/test_{모듈}.py` 자동 실행 |
+| PreToolUse | Write·Edit | 경로에 `.env`·`.secret`·`credentials`가 포함되면 수정 차단 (Bash 경유 쓰기는 검사 대상 아님) |
+| PostToolUse | `.py` 파일 Write·Edit | `ruff check --fix` + `ruff format` 후 같은 이름의 `tests/test_{모듈}.py`가 있을 때만 자동 실행 (테스트 파일 자체를 수정하면 실행되지 않음) |
 
 ## 관련 레포지토리
 
