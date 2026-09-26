@@ -1,6 +1,6 @@
 # coming-data (jpop-data-collector)
 
-Jpop 아티스트 및 내한공연 수집 파이프라인 (KOPIS / MusicBrainz / setlist.fm → DB)
+Jpop 아티스트 및 내한공연 수집 파이프라인 (KOPIS / MusicBrainz / Spotify / setlist.fm → DB)
 
 ## 레포지토리 구조
 
@@ -11,7 +11,7 @@ coming-data/
 │   ├── kopis.py           # KOPIS API 수집
 │   ├── ja_romanize.py     # sort_name 로마자 표기 → 한글 alias 규칙 변환
 │   ├── musicbrainz.py     # MusicBrainz 아티스트·멤버 수집
-│   ├── release.py         # MusicBrainz 릴리즈(앨범·싱글·EP) + 트랙·커버 수집
+│   ├── release.py         # Spotify 릴리즈(앨범·싱글) + 트랙·커버 수집
 │   ├── setlist.py         # setlist.fm 셋리스트 수집
 │   └── spotify_client.py  # Spotify Client Credentials 토큰 발급·공통 요청
 ├── matchers/
@@ -36,11 +36,12 @@ ruff check .    # 린트
 python scheduler.py    # 상시 데몬 (APScheduler 크론 + 내부 API 서버, 기본 포트 8000)
 
 # 초기 1회 수집 (아티스트 → KOPIS 매칭 → 릴리즈). 플래그는 init 전용:
-# --skip-artists / --skip-kopis / --skip-ja-romanize / --force-artists
+# --skip-artists / --force-artists / --skip-kopis / --skip-ja-romanize
+# --skip-releases / --skip-artist-image / --skip-setlist / --log-file {경로}
 python scheduler.py init [플래그...]
 
 python scheduler.py run-job --job {concert-status-update|new-concert-collect|release-update|ja-romanize|artist-image|setlist}  # 단일 잡 즉시 실행
-python scheduler.py recover                          # 누락 이미지·릴리즈 재수집
+python scheduler.py recover                          # 누락 이미지·릴리즈 재수집 (--skip-releases / --skip-artist-image)
 python scheduler.py collect-release --artist-id {id}  # 단건 릴리즈 수집
 python scheduler.py collect-setlist                   # 단건 setlist 수집
 ```
@@ -66,10 +67,9 @@ python scheduler.py collect-setlist                   # 단건 setlist 수집
 | API | 엔드포인트 | Rate Limit | 비고 |
 |-----|-----------|------------|------|
 | KOPIS | `GET /openApi/restful/pblprfr` | 없음 | 주 1회 이상 권장 |
-| MusicBrainz | `GET /ws/2/artist/`, `/ws/2/release-group/`, `/ws/2/release/` | **1 req/sec** | `time.sleep(1.1)` 필수 |
-| Cover Art Archive | `GET https://coverartarchive.org/release-group/{mbid}/front` | 1 req/sec | 404 시 null 허용 |
+| MusicBrainz | `GET /ws/2/artist/` | **1 req/sec** | `time.sleep(1.1)` 필수 |
 | setlist.fm | `GET https://api.setlist.fm/rest/1.0/search/setlists` | - | Header: `x-api-key`, `Accept: application/json` 필수 |
-| Spotify Web API | `POST https://accounts.spotify.com/api/token`, `GET https://api.spotify.com/v1/artists/{id}`, `GET /v1/search` | rolling 30초 윈도우 (관대함) | Client Credentials Flow; `Authorization: Bearer {token}`; access_token 1h 캐시 |
+| Spotify Web API | `POST https://accounts.spotify.com/api/token`, `GET https://api.spotify.com/v1/artists/{id}`, `GET /v1/artists/{id}/albums`, `GET /v1/albums/{id}`, `GET /v1/search` | rolling 30초 윈도우 (관대함) | Client Credentials Flow; `Authorization: Bearer {token}`; access_token 1h 캐시 |
 | Discord Webhook | `POST {webhook_url}` | 웹훅당 분당 약 30건 | 신규 공연 수집 결과 알림; `DISCORD_WEBHOOK_URL` 미설정 시 알림 생략 |
 
 ## 수집 파이프라인 단계

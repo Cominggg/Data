@@ -28,9 +28,9 @@
 `coming-data`는 Coming의 데이터 파트로, 다음 역할을 담당합니다.
 
 - KOPIS(공연예술통합전산망)에서 국내 공연 정보를 수집하고, MusicBrainz 아티스트 데이터와 매칭
-- MusicBrainz에서 아티스트·멤버·릴리즈(앨범/싱글/EP) 정보를 수집
+- MusicBrainz에서 아티스트·멤버 정보를 수집
 - setlist.fm에서 공연 완료 후 셋리스트를 수집
-- Spotify에서 아티스트 프로필 이미지를 수집
+- Spotify에서 릴리즈(앨범/싱글)·트랙·커버와 아티스트 프로필 이미지를 수집
 - 위 파이프라인을 APScheduler로 정기 실행하고, 백엔드(Spring)의 트리거 요청을 내부 API로 수신
 
 ## 기술 스택
@@ -49,8 +49,8 @@
 | 단계 | 수집 주기 | 진입점 |
 |------|---------|--------|
 | ① MusicBrainz 아티스트 | 초기 1회 | `run_initial_collect()` |
-| ② 공연 상태 갱신 | 매일 04:00 | `run_concert_status_update()` |
-| ③ 신규 공연 수집·매칭 | 매일 04:30 | `run_new_concert_collect()` |
+| ② 공연 상태 갱신 | 매일 00:00 | `run_concert_status_update()` |
+| ③ 신규 공연 수집·매칭 | 매일 00:30 | `run_new_concert_collect()` |
 | ④ 릴리즈 (앨범·트랙·커버) | 초기 + 매일 05:00 | `run_release_update()` |
 | ⑤ 아티스트 이미지 | 매주 목 02:00 | `run_artist_image_update()` |
 | ⑥ 로마자→한글 alias 변환 | 매주 목 03:00 | `run_ja_romanize_collect()` |
@@ -63,10 +63,9 @@
 | API | 엔드포인트 | Rate Limit | 비고 |
 |-----|-----------|------------|------|
 | KOPIS | `GET /openApi/restful/pblprfr` | 없음 | 주 1회 이상 권장 |
-| MusicBrainz | `GET /ws/2/artist/`, `/ws/2/release-group/`, `/ws/2/release/` | 1 req/sec | |
-| Cover Art Archive | `GET /release-group/{mbid}/front` | 1 req/sec | 404 시 null 허용 |
-| setlist.fm | `GET /rest/1.0/search/setlists` | - | `x-api-key` 헤더 필요 |
-| Spotify Web API | `POST /api/token`, `GET /v1/artists/{id}`, `GET /v1/search` | rolling 30초 윈도우 | Client Credentials Flow |
+| MusicBrainz | `GET /ws/2/artist/` | 1 req/sec | 요청마다 1.1초 대기 |
+| setlist.fm | `GET /rest/1.0/search/setlists` | - | `x-api-key`, `Accept: application/json` 헤더 필요 |
+| Spotify Web API | `POST /api/token`, `GET /v1/artists/{id}`, `GET /v1/artists/{id}/albums`, `GET /v1/albums/{id}`, `GET /v1/search` | rolling 30초 윈도우 | Client Credentials Flow, 릴리즈·이미지 수집 |
 | Discord Webhook | `POST {webhook_url}` | 웹훅당 분당 약 30건 | 신규 공연 알림, 미설정 시 생략 |
 
 ## 레포지토리 구조
@@ -78,7 +77,7 @@ coming-data/
 │   ├── kopis.py           # KOPIS API 수집
 │   ├── ja_romanize.py     # sort_name 로마자 표기 → 한글 alias 규칙 변환
 │   ├── musicbrainz.py     # MusicBrainz 아티스트·멤버 수집
-│   ├── release.py         # MusicBrainz 릴리즈(앨범·싱글·EP) + 트랙·커버 수집
+│   ├── release.py         # Spotify 릴리즈(앨범·싱글) + 트랙·커버 수집
 │   ├── setlist.py         # setlist.fm 셋리스트 수집
 │   └── spotify_client.py  # Spotify Client Credentials 토큰 발급·공통 요청
 ├── matchers/
@@ -89,8 +88,11 @@ coming-data/
 │   ├── connection.py      # SQLAlchemy 엔진·세션 설정
 │   └── repository.py      # DB 저장 함수 (DML)
 ├── tests/                 # pytest 단위 테스트
+├── docs/
+│   └── pipeline.md        # 파이프라인 상세 로직·매칭 알고리즘
 ├── scheduler.py           # APScheduler 진입점 (내부 API 서버도 함께 기동)
 ├── api.py                 # 내부 FastAPI 서버 — BE→Data 수집 트리거 (X-Internal-Secret 인증)
+├── Dockerfile
 └── pyproject.toml
 ```
 
@@ -120,8 +122,10 @@ MUSICBRAINZ_USER_AGENT=
 SETLISTFM_API_KEY=
 SPOTIFY_CLIENT_ID=
 SPOTIFY_CLIENT_SECRET=
-INTERNAL_SECRET=
+INTERNAL_SECRET=       # 미설정 시 내부 API 요청이 모두 401
 DISCORD_WEBHOOK_URL=   # 선택 — 미설정 시 알림 생략
+API_HOST=              # 선택 — 내부 API 바인딩 호스트 (기본 0.0.0.0)
+API_PORT=              # 선택 — 내부 API 포트 (기본 8000)
 ```
 
 ### 실행
@@ -129,6 +133,8 @@ DISCORD_WEBHOOK_URL=   # 선택 — 미설정 시 알림 생략
 ```bash
 # 초기 1회 수집 (아티스트 → KOPIS 매칭 → 릴리즈)
 python scheduler.py init
+# init 전용 플래그: --skip-artists / --force-artists / --skip-kopis / --skip-ja-romanize
+#                  --skip-releases / --skip-artist-image / --skip-setlist / --log-file {경로}
 
 # 상시 데몬 (APScheduler 크론 + 내부 API 서버, 기본 포트 8000)
 python scheduler.py
@@ -136,8 +142,12 @@ python scheduler.py
 # 단일 잡 즉시 실행
 python scheduler.py run-job --job {concert-status-update|new-concert-collect|release-update|ja-romanize|artist-image|setlist}
 
-# 누락 이미지·릴리즈 재수집
+# 누락 이미지·릴리즈 재수집 (--skip-releases / --skip-artist-image 사용 가능)
 python scheduler.py recover
+
+# 단건 수집
+python scheduler.py collect-release --artist-id {id}   # 아티스트 1명의 릴리즈
+python scheduler.py collect-setlist                    # 공연완료 공연 셋리스트
 ```
 
 ## 테스트 & 린트
