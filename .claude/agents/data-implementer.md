@@ -37,7 +37,7 @@ Coming Data(Python 3.9 + APScheduler + SQLAlchemy) 파이프라인의 구현 코
 - `print` 금지. 모듈 상단에 `logger = logging.getLogger(__name__)`를 두고 사용한다.
 
 ### 외부 API
-- MusicBrainz / Cover Art Archive: **1 req/sec** — 요청마다 기존 상수(`_RATE_LIMIT_SLEEP` 등)로 `time.sleep(1.1)` 이상 대기. 새 호출부도 기존 요청 헬퍼를 재사용한다.
+- MusicBrainz: **1 req/sec** — 요청마다 기존 상수(`_RATE_LIMIT_SLEEP` 등)로 `time.sleep(1.1)` 이상 대기. 새 호출부도 기존 요청 헬퍼를 재사용한다.
 - setlist.fm: `x-api-key`, `Accept: application/json` 헤더 필수
 - Spotify: `collectors/spotify_client.py`의 공통 요청 함수를 사용한다 (토큰 직접 발급 금지)
 

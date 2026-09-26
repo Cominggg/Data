@@ -73,7 +73,7 @@ ruff check {FILES}
 ## 4. 외부 API
 
 ### 🔴 critical
-- MusicBrainz / Cover Art Archive 요청 경로에 `time.sleep(1.1)` 이상 대기가 없음 — 기존 요청 헬퍼·`_RATE_LIMIT_SLEEP` 상수를 거치지 않는 새 호출부 포함
+- MusicBrainz 요청 경로에 `time.sleep(1.1)` 이상 대기가 없음 — 기존 요청 헬퍼·`_RATE_LIMIT_SLEEP` 상수를 거치지 않는 새 호출부 포함
 - setlist.fm 요청에 `x-api-key` 또는 `Accept: application/json` 헤더 누락
 - Spotify 토큰을 `spotify_client.py` 밖에서 직접 발급
 
