@@ -93,7 +93,8 @@ coming-data/
 ├── .claude/               # Claude Code 설정 (아래 "AI 협업 워크플로우" 참고)
 │   ├── agents/            # data-implementer, write-tests 로컬 에이전트
 │   ├── skills/            # data-review, test 로컬 스킬
-│   └── settings.json      # 권한·훅 설정
+│   ├── hooks/             # 훅 스크립트 (시크릿 차단, 편집 후 ruff·테스트)
+│   └── settings.json      # 권한·훅 등록
 ├── scheduler.py           # APScheduler 진입점 (내부 API 서버도 함께 기동)
 ├── api.py                 # 내부 FastAPI 서버 — BE→Data 수집 트리거 (X-Internal-Secret 인증)
 ├── Dockerfile
@@ -215,12 +216,14 @@ Claude Code 에이전트·스킬·훅으로 이슈부터 PR까지 진행합니�
 - **외부 API**: MusicBrainz 1.1초 대기, setlist.fm 필수 헤더, Spotify 토큰은 공통 클라이언트로만 발급
 - **환경변수·패키지**: 필수 키 미설정 시 모듈 로드 단계에서 `ValueError`, 선택 기능은 no-op, 신규 최상위 패키지의 `pyproject.toml` 등록
 
-### 훅 ([`.claude/settings.json`](.claude/settings.json))
+### 훅 ([`.claude/hooks/`](.claude/hooks/), 등록은 [`.claude/settings.json`](.claude/settings.json))
 
 | 시점 | 대상 | 동작 |
 |------|------|------|
-| PreToolUse | Write·Edit | 경로에 `.env`·`.secret`·`credentials`가 포함되면 수정 차단 (Bash 경유 쓰기는 검사 대상 아님) |
-| PostToolUse | `.py` 파일 Write·Edit | `ruff check --fix` + `ruff format` 후 같은 이름의 `tests/test_{모듈}.py`가 있을 때만 자동 실행 (테스트 파일 자체를 수정하면 실행되지 않음) |
+| PreToolUse ([`block_secrets.py`](.claude/hooks/block_secrets.py)) | Write·Edit·Bash | 파일명이 `.env`·`.env.*`·`.envrc`이거나 `.secret`·`credentials`를 포함하면 차단. Bash는 명령의 각 토큰을 검사하고, 따옴표·heredoc 안 문장은 제외 |
+| PostToolUse ([`post_edit.py`](.claude/hooks/post_edit.py)) | `.py` 파일 Write·Edit | `ruff check --fix`(F401 미사용 import는 자동 삭제 안 함) + `ruff format` 후 관련 테스트 실행 — `tests/test_*.py` 수정 시 그 파일, 그 외엔 `tests/test_{모듈}*.py`. 실패하면 결과를 Claude에게 전달 |
+
+Bash 훅은 실수 방지용입니다. 문자열 조립처럼 의도적으로 우회하는 명령까지 막지는 않습니다.
 
 ## 관련 레포지토리
 

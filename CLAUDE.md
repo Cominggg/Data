@@ -126,5 +126,6 @@ python scheduler.py collect-setlist                   # 단건 setlist 수집
 - `/test`: 변경 파일 관련 테스트 통과
 - `/data-review`: 🔴 critical 0건 (DML-only, `print` 금지, Python 3.9 문법, rate limit, 패키지 등록 등)
 - `ruff check .` 통과 — `target-version`이 py311이라 `X | Y`·`match`는 ruff가 못 잡는다. `/data-review`에서 확인한다
-- `.env`·시크릿 파일은 Write/Edit PreToolUse 훅이 차단한다 (`.claude/settings.json`)
+- `.env`·시크릿 파일은 Write/Edit/Bash PreToolUse 훅이 차단한다 (`.claude/hooks/block_secrets.py`)
+- `.py` 편집 후 PostToolUse 훅이 ruff 정리 + 관련 테스트를 실행하고, 실패하면 결과를 돌려준다 (`.claude/hooks/post_edit.py`)
 
