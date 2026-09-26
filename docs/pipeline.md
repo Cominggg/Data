@@ -11,11 +11,15 @@
 
 ## ② 릴리즈 수집 (초기 + 매일 05:00 갱신)
 
-- release-group별 대표 release MBID 취득 후 트랙·커버 연속 수집
-- `first-release-date` 기준 DB에 없는 항목만 INSERT
-- 앨범 커버: Cover Art Archive 404 시 null 허용
+- 소스: Spotify Web API (`collectors/release.py`) — MusicBrainz release-group·Cover Art Archive는 사용하지 않는다
+- 대상: 공연 매칭(`concert_artist`)이 있고 `artist_url`에 Spotify 아티스트 URL을 보유한 아티스트
+- `GET /v1/artists/{id}/albums`(`include_groups=album,single`, `market=JP`)로 앨범 ID 목록 조회 → `GET /v1/albums/{id}`로 상세·트랙 수집 (compilation 제외)
+- 증분 수집: DB에 캐시된 Spotify album total과 같으면 1콜로 종료, 이미 저장된 `spotify_id`는 상세 조회 생략
+- 저장: `release_group`에 `spotify_id` 기준 `ON CONFLICT DO UPDATE`
+- 앨범 커버: Spotify `images[0].url`, 이미지 없으면 null 허용
+- 발매일: `YYYY-MM-DD` 형식만 저장, 부분 날짜(`YYYY`·`YYYY-MM`)는 null
 
-## ③ KOPIS 수집 (매일: 상태 갱신 04:00 / 신규 공연 탐지 04:30)
+## ③ KOPIS 수집 (매일: 상태 갱신 00:00 / 신규 공연 탐지 00:30)
 
 - 조건: `visit=Y`, `genrenm=대중음악(GGGA)`
 - 저장 전 `has_match()`로 alias 매칭 공연만 필터링하여 저장 (비매칭 공연은 DB에 저장하지 않음)

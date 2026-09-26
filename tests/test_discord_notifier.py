@@ -1,4 +1,5 @@
 """notifier/discord.py 단위 테스트."""
+
 from unittest.mock import patch
 
 from notifier.discord import notify_new_concert

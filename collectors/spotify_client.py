@@ -17,6 +17,7 @@ class SpotifyRateLimitError(requests.HTTPError):
         super().__init__(*args, **kwargs)
         self.retry_after = retry_after
 
+
 logger = logging.getLogger(__name__)
 
 _SPOTIFY_AUTH_URL = "https://accounts.spotify.com/api/token"
@@ -65,7 +66,9 @@ def spotify_get(path: str, params: Optional[dict] = None) -> dict:
     if response.status_code == 429:
         retry_after = int(response.headers.get("Retry-After", 0))
         logger.error(
-            "Spotify 429 — 수집 중단 (Retry-After=%ds): %s", retry_after, path,
+            "Spotify 429 — 수집 중단 (Retry-After=%ds): %s",
+            retry_after,
+            path,
         )
         raise SpotifyRateLimitError(
             f"Spotify 429: Retry-After={retry_after}s, path={path}",

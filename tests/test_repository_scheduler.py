@@ -1,4 +1,5 @@
 """repository.py의 스케줄러용 신규 함수 단위 테스트."""
+
 from unittest.mock import MagicMock, patch
 
 from db.repository import (
@@ -24,9 +25,9 @@ class TestSaveConcertArtists:
         """INSERT SQL에 ON CONFLICT가 포함되어야 한다."""
         mock_session = MagicMock()
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
-            save_concert_artists([
-                {"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}
-            ])
+            save_concert_artists(
+                [{"concert_id": 1, "artist_id": 10, "confidence": "HIGH", "matched_by": "prfcast"}]
+            )
 
         sql = str(mock_session.execute.call_args_list[0].args[0])
         assert "ON CONFLICT" in sql
@@ -130,9 +131,7 @@ class TestGetAllArtistMbids:
     def test_returns_mbid_list(self):
         """MBID 문자열 리스트를 반환해야 한다."""
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchall.return_value = [
-            ("mbid-1",), ("mbid-2",)
-        ]
+        mock_session.execute.return_value.fetchall.return_value = [("mbid-1",), ("mbid-2",)]
 
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
             result = get_all_artist_mbids()
@@ -155,7 +154,8 @@ class TestGetUnmatchedConcerts:
         """concert_id, title, cast 키를 가진 dict 리스트를 반환해야 한다."""
         mock_session = MagicMock()
         mock_session.execute.return_value.fetchall.return_value = [
-            (1, "공연 A", "아이유"), (2, "공연 B", None)
+            (1, "공연 A", "아이유"),
+            (2, "공연 B", None),
         ]
 
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
@@ -183,9 +183,7 @@ class TestGetExistingKopisIds:
     def test_returns_set_of_kopis_ids(self):
         """DB의 kopis_id를 집합으로 반환해야 한다."""
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchall.return_value = [
-            ("PF001",), ("PF002",)
-        ]
+        mock_session.execute.return_value.fetchall.return_value = [("PF001",), ("PF002",)]
 
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):
             result = get_existing_kopis_ids()

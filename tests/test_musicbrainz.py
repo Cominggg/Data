@@ -63,12 +63,36 @@ class TestParseUrlRels:
     def test_allows_all_target_platforms(self):
         """타입별 1개씩 총 5개 플랫폼이 수집되어야 한다."""
         relations = [
-            {"target-type": "url", "type": "social network", "url": {"resource": "https://twitter.com/artist"}},
-            {"target-type": "url", "type": "social network", "url": {"resource": "https://x.com/artist"}},
-            {"target-type": "url", "type": "social network", "url": {"resource": "https://www.instagram.com/artist"}},
-            {"target-type": "url", "type": "youtube", "url": {"resource": "https://www.youtube.com/channel/abc"}},
-            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://open.spotify.com/artist/abc"}},
-            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://music.apple.com/artist/abc"}},
+            {
+                "target-type": "url",
+                "type": "social network",
+                "url": {"resource": "https://twitter.com/artist"},
+            },
+            {
+                "target-type": "url",
+                "type": "social network",
+                "url": {"resource": "https://x.com/artist"},
+            },
+            {
+                "target-type": "url",
+                "type": "social network",
+                "url": {"resource": "https://www.instagram.com/artist"},
+            },
+            {
+                "target-type": "url",
+                "type": "youtube",
+                "url": {"resource": "https://www.youtube.com/channel/abc"},
+            },
+            {
+                "target-type": "url",
+                "type": "free streaming",
+                "url": {"resource": "https://open.spotify.com/artist/abc"},
+            },
+            {
+                "target-type": "url",
+                "type": "free streaming",
+                "url": {"resource": "https://music.apple.com/artist/abc"},
+            },
         ]
         result = _parse_url_rels(relations)
         assert len(result) == 5
@@ -76,12 +100,36 @@ class TestParseUrlRels:
     def test_maps_domains_to_site_names(self):
         """도메인 기반으로 사이트 이름이 type에 저장되고, 타입 중복 시 첫 번째만 유지된다."""
         relations = [
-            {"target-type": "url", "type": "social network", "url": {"resource": "https://twitter.com/artist"}},
-            {"target-type": "url", "type": "social network", "url": {"resource": "https://x.com/artist"}},
-            {"target-type": "url", "type": "social network", "url": {"resource": "https://www.instagram.com/artist"}},
-            {"target-type": "url", "type": "youtube", "url": {"resource": "https://www.youtube.com/channel/abc"}},
-            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://open.spotify.com/artist/abc"}},
-            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://music.apple.com/artist/abc"}},
+            {
+                "target-type": "url",
+                "type": "social network",
+                "url": {"resource": "https://twitter.com/artist"},
+            },
+            {
+                "target-type": "url",
+                "type": "social network",
+                "url": {"resource": "https://x.com/artist"},
+            },
+            {
+                "target-type": "url",
+                "type": "social network",
+                "url": {"resource": "https://www.instagram.com/artist"},
+            },
+            {
+                "target-type": "url",
+                "type": "youtube",
+                "url": {"resource": "https://www.youtube.com/channel/abc"},
+            },
+            {
+                "target-type": "url",
+                "type": "free streaming",
+                "url": {"resource": "https://open.spotify.com/artist/abc"},
+            },
+            {
+                "target-type": "url",
+                "type": "free streaming",
+                "url": {"resource": "https://music.apple.com/artist/abc"},
+            },
         ]
         result = _parse_url_rels(relations)
         types = [r["type"] for r in result]
@@ -90,8 +138,16 @@ class TestParseUrlRels:
     def test_deduplicates_same_type(self):
         """동일 type의 URL이 여러 개일 때 첫 번째만 저장된다."""
         relations = [
-            {"target-type": "url", "type": "youtube", "url": {"resource": "https://www.youtube.com/channel/first"}},
-            {"target-type": "url", "type": "youtube", "url": {"resource": "https://www.youtube.com/channel/second"}},
+            {
+                "target-type": "url",
+                "type": "youtube",
+                "url": {"resource": "https://www.youtube.com/channel/first"},
+            },
+            {
+                "target-type": "url",
+                "type": "youtube",
+                "url": {"resource": "https://www.youtube.com/channel/second"},
+            },
         ]
         result = _parse_url_rels(relations)
         assert len(result) == 1
@@ -100,8 +156,16 @@ class TestParseUrlRels:
     def test_filters_invalid_url_patterns(self):
         """패턴 불일치 URL은 필터링된다."""
         relations = [
-            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://open.spotify.com/playlist/abc"}},
-            {"target-type": "url", "type": "youtube", "url": {"resource": "https://youtu.be/videoId"}},
+            {
+                "target-type": "url",
+                "type": "free streaming",
+                "url": {"resource": "https://open.spotify.com/playlist/abc"},
+            },
+            {
+                "target-type": "url",
+                "type": "youtube",
+                "url": {"resource": "https://youtu.be/videoId"},
+            },
         ]
         result = _parse_url_rels(relations)
         assert result == []
@@ -109,16 +173,32 @@ class TestParseUrlRels:
     def test_official_homepage_stored_as_official(self):
         """official homepage type은 도메인과 무관하게 'Official'로 저장되어야 한다."""
         relations = [
-            {"target-type": "url", "type": "official homepage", "url": {"resource": "https://artist-official.com"}},
+            {
+                "target-type": "url",
+                "type": "official homepage",
+                "url": {"resource": "https://artist-official.com"},
+            },
         ]
         result = _parse_url_rels(relations)
         assert result == [{"type": "Official", "url": "https://artist-official.com"}]
 
     def test_filters_disallowed_domains(self):
         relations = [
-            {"target-type": "url", "type": "social network", "url": {"resource": "https://facebook.com/artist"}},
-            {"target-type": "url", "type": "social network", "url": {"resource": "https://weibo.com/artist"}},
-            {"target-type": "url", "type": "free streaming", "url": {"resource": "https://soundcloud.com/artist"}},
+            {
+                "target-type": "url",
+                "type": "social network",
+                "url": {"resource": "https://facebook.com/artist"},
+            },
+            {
+                "target-type": "url",
+                "type": "social network",
+                "url": {"resource": "https://weibo.com/artist"},
+            },
+            {
+                "target-type": "url",
+                "type": "free streaming",
+                "url": {"resource": "https://soundcloud.com/artist"},
+            },
         ]
         assert _parse_url_rels(relations) == []
 
@@ -205,7 +285,9 @@ class TestCollectArtists:
             "count": 10_000,
         }
         mock_detail.return_value = {
-            "id": "mbid-1", "name": "Artist1", "sort-name": "Artist1",
+            "id": "mbid-1",
+            "name": "Artist1",
+            "sort-name": "Artist1",
             "aliases": [],
             "relations": [
                 {
@@ -266,7 +348,8 @@ class TestSaveArtists:
         self._run([artist], mock_session)
 
         alias_inserts = [
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO artist_alias" in str(c.args[0])
         ]
         assert len(alias_inserts) == 2
@@ -287,7 +370,8 @@ class TestSaveArtists:
         self._run([artist], mock_session)
 
         url_inserts = [
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO artist_url" in str(c.args[0])
         ]
         assert len(url_inserts) == 2
@@ -305,13 +389,15 @@ class TestSaveArtists:
         self._run([artist], mock_session)
 
         select_calls = [
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "SELECT id FROM artist" in str(c.args[0])
         ]
         assert len(select_calls) == 1
 
         alias_inserts = [
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO artist_alias" in str(c.args[0])
         ]
         assert len(alias_inserts) == 1
@@ -331,7 +417,8 @@ class TestSaveArtists:
         self._run([artist], mock_session)
 
         child_inserts = [
-            c for c in mock_session.execute.call_args_list
+            c
+            for c in mock_session.execute.call_args_list
             if "INSERT INTO artist_alias" in str(c.args[0])
             or "INSERT INTO artist_url" in str(c.args[0])
         ]
@@ -344,8 +431,7 @@ class TestSaveArtists:
         self._run([artist], mock_session)
 
         artist_inserts = [
-            c for c in mock_session.execute.call_args_list
-            if "INSERT INTO artist" in str(c.args[0])
+            c for c in mock_session.execute.call_args_list if "INSERT INTO artist" in str(c.args[0])
         ]
         assert len(artist_inserts) == 1
 

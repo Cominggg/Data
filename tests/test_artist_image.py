@@ -1,4 +1,5 @@
 """collectors/artist_image.py 단위 테스트."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -48,10 +49,13 @@ class TestCollectArtistImage:
             images=[{"url": "https://i.scdn.co/image/large.jpg", "width": 640, "height": 640}]
         )
 
-        with self._patch_env(), patch("collectors.artist_image.requests.post",
-                                      return_value=_make_token_response()), \
-                patch("collectors.artist_image.requests.get",
-                      side_effect=[mb_response, artist_response]):
+        with (
+            self._patch_env(),
+            patch("collectors.artist_image.requests.post", return_value=_make_token_response()),
+            patch(
+                "collectors.artist_image.requests.get", side_effect=[mb_response, artist_response]
+            ),
+        ):
             image_url, spotify_id = collect_artist_image("mbid-001")
 
         assert image_url == "https://i.scdn.co/image/large.jpg"
@@ -62,17 +66,19 @@ class TestCollectArtistImage:
         mb_response = _make_mb_response(name="Mrs. GREEN APPLE")
         search_response = MagicMock()
         search_response.status_code = 200
-        search_response.json.return_value = {
-            "artists": {"items": [{"id": "spotify-xyz"}]}
-        }
+        search_response.json.return_value = {"artists": {"items": [{"id": "spotify-xyz"}]}}
         artist_response = _make_spotify_artist_response(
             images=[{"url": "https://i.scdn.co/image/fallback.jpg", "width": 640, "height": 640}]
         )
 
-        with self._patch_env(), patch("collectors.artist_image.requests.post",
-                                      return_value=_make_token_response()), \
-                patch("collectors.artist_image.requests.get",
-                      side_effect=[mb_response, search_response, artist_response]):
+        with (
+            self._patch_env(),
+            patch("collectors.artist_image.requests.post", return_value=_make_token_response()),
+            patch(
+                "collectors.artist_image.requests.get",
+                side_effect=[mb_response, search_response, artist_response],
+            ),
+        ):
             image_url, spotify_id = collect_artist_image("mbid-002")
 
         assert image_url == "https://i.scdn.co/image/fallback.jpg"
@@ -83,9 +89,11 @@ class TestCollectArtistImage:
         mb_response = MagicMock()
         mb_response.status_code = 404
 
-        with self._patch_env(), patch("collectors.artist_image.requests.post",
-                                      return_value=_make_token_response()), \
-                patch("collectors.artist_image.requests.get", return_value=mb_response):
+        with (
+            self._patch_env(),
+            patch("collectors.artist_image.requests.post", return_value=_make_token_response()),
+            patch("collectors.artist_image.requests.get", return_value=mb_response),
+        ):
             result = collect_artist_image("mbid-unknown")
 
         assert result == (None, None)
@@ -97,10 +105,13 @@ class TestCollectArtistImage:
         search_response.status_code = 200
         search_response.json.return_value = {"artists": {"items": []}}
 
-        with self._patch_env(), patch("collectors.artist_image.requests.post",
-                                      return_value=_make_token_response()), \
-                patch("collectors.artist_image.requests.get",
-                      side_effect=[mb_response, search_response]):
+        with (
+            self._patch_env(),
+            patch("collectors.artist_image.requests.post", return_value=_make_token_response()),
+            patch(
+                "collectors.artist_image.requests.get", side_effect=[mb_response, search_response]
+            ),
+        ):
             result = collect_artist_image("mbid-003")
 
         assert result == (None, None)
@@ -113,10 +124,13 @@ class TestCollectArtistImage:
         )
         artist_response = _make_spotify_artist_response(images=[])
 
-        with self._patch_env(), patch("collectors.artist_image.requests.post",
-                                      return_value=_make_token_response()), \
-                patch("collectors.artist_image.requests.get",
-                      side_effect=[mb_response, artist_response]):
+        with (
+            self._patch_env(),
+            patch("collectors.artist_image.requests.post", return_value=_make_token_response()),
+            patch(
+                "collectors.artist_image.requests.get", side_effect=[mb_response, artist_response]
+            ),
+        ):
             image_url, spotify_id = collect_artist_image("mbid-004")
 
         assert image_url is None
@@ -129,9 +143,11 @@ class TestCollectArtistImage:
         )
         mock_get = MagicMock(return_value=artist_response)
 
-        with self._patch_env(), patch("collectors.artist_image.requests.post",
-                                      return_value=_make_token_response()), \
-                patch("collectors.artist_image.requests.get", mock_get):
+        with (
+            self._patch_env(),
+            patch("collectors.artist_image.requests.post", return_value=_make_token_response()),
+            patch("collectors.artist_image.requests.get", mock_get),
+        ):
             image_url, spotify_id = collect_artist_image(
                 "mbid-005",
                 spotify_url="https://open.spotify.com/artist/direct-id",
@@ -153,10 +169,14 @@ class TestCollectArtistImage:
             images=[{"url": "https://i.scdn.co/image/by-name.jpg", "width": 640, "height": 640}]
         )
 
-        with self._patch_env(), patch("collectors.artist_image.requests.post",
-                                      return_value=_make_token_response()), \
-                patch("collectors.artist_image.requests.get",
-                      side_effect=[search_response, artist_response]) as mock_get:
+        with (
+            self._patch_env(),
+            patch("collectors.artist_image.requests.post", return_value=_make_token_response()),
+            patch(
+                "collectors.artist_image.requests.get",
+                side_effect=[search_response, artist_response],
+            ) as mock_get,
+        ):
             image_url, spotify_id = collect_artist_image("mbid-006", name="YOASOBI")
 
         assert image_url == "https://i.scdn.co/image/by-name.jpg"
@@ -168,14 +188,21 @@ class TestCollectArtistImage:
     def test_raises_when_credentials_missing(self):
         """SPOTIFY_CLIENT_ID 또는 SPOTIFY_CLIENT_SECRET 미설정 → ValueError."""
         empty_cache = {"token": None, "expires_at": 0.0}
-        with patch.dict("os.environ", {}, clear=True), \
-                patch("collectors.spotify_client._token_cache", empty_cache):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("collectors.spotify_client._token_cache", empty_cache),
+        ):
             with pytest.raises(ValueError, match="SPOTIFY_CLIENT_ID"):
                 collect_artist_image("mbid-001", name="Test Artist")
 
     def test_raises_on_network_error(self):
         """네트워크 오류 시 RequestException 전파."""
-        with self._patch_env(), patch("collectors.artist_image.requests.post",
-                                      side_effect=requests.ConnectionError("timeout")):
+        with (
+            self._patch_env(),
+            patch(
+                "collectors.artist_image.requests.post",
+                side_effect=requests.ConnectionError("timeout"),
+            ),
+        ):
             with pytest.raises(requests.RequestException):
                 collect_artist_image("mbid-001")

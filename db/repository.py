@@ -224,7 +224,9 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
                     logger.info(
                         "동일 공연명·기간 또는 동일 아티스트·기간 이미 존재 — 저장 대신 "
                         "kopis_id 연동: title=%s, kopis_id=%s, concert_id=%s",
-                        concert["prfnm"], concert["kopis_id"], matched_id,
+                        concert["prfnm"],
+                        concert["kopis_id"],
+                        matched_id,
                     )
                     duplicate_kopis_ids.add(concert["kopis_id"])
                     continue
@@ -299,7 +301,9 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
             logger.error("공연 저장 실패 — 건너뜀: kopis_id=%s, 오류=%s", concert["kopis_id"], e)
     logger.info(
         "공연 저장 완료: %d / %d건 처리 (title·기간 중복 %d건 제외)",
-        saved, len(concerts), len(duplicate_kopis_ids),
+        saved,
+        len(concerts),
+        len(duplicate_kopis_ids),
     )
     return duplicate_kopis_ids
 
@@ -380,7 +384,8 @@ def save_setlists(setlists: list[dict]) -> None:
         except SQLAlchemyError as e:
             logger.error(
                 "셋리스트 저장 실패 — 건너뜀: setlist_fm_id=%s, 오류=%s",
-                item.get("setlist_fm_id"), e,
+                item.get("setlist_fm_id"),
+                e,
             )
 
     logger.info("셋리스트 저장 완료: %d / %d건 처리", saved, len(setlists))
@@ -447,7 +452,9 @@ def save_aliases(aliases: list[dict]) -> None:
             except SQLAlchemyError as e:
                 logger.error(
                     "alias 저장 실패 — 건너뜀: artist_id=%s, name=%s, 오류=%s",
-                    alias["artist_id"], alias["name"], e,
+                    alias["artist_id"],
+                    alias["name"],
+                    e,
                 )
     logger.info("alias 저장 완료: %d / %d건 처리", saved, len(aliases))
 
@@ -548,7 +555,7 @@ def get_artist_names_by_ids(artist_ids: list) -> dict:
         return {}
     with get_session() as session:
         rows = session.execute(
-            text('SELECT id, name FROM artist WHERE id = ANY(:ids)'),
+            text("SELECT id, name FROM artist WHERE id = ANY(:ids)"),
             {"ids": artist_ids},
         ).fetchall()
     return {row[0]: row[1] for row in rows}
@@ -686,7 +693,9 @@ def save_concert_artists(matches: list[dict]) -> None:
         except SQLAlchemyError as e:
             logger.error(
                 "공연-아티스트 매칭 저장 실패 — 건너뜀: concert_id=%s, artist_id=%s, 오류=%s",
-                match["concert_id"], match["artist_id"], e,
+                match["concert_id"],
+                match["artist_id"],
+                e,
             )
     logger.info("공연-아티스트 매칭 저장 완료: %d / %d건 처리", saved, len(matches))
 
@@ -716,10 +725,11 @@ def save_concert_artist_candidates(matches: list[dict]) -> None:
         except SQLAlchemyError as e:
             logger.error(
                 "공연-아티스트 후보 저장 실패 — 건너뜀: concert_id=%s, artist_id=%s, 오류=%s",
-                match["concert_id"], match["artist_id"], e,
+                match["concert_id"],
+                match["artist_id"],
+                e,
             )
     logger.info("공연-아티스트 후보 저장 완료: %d / %d건 처리", saved, len(matches))
-
 
 
 def update_artist_is_coming() -> int:
@@ -784,8 +794,7 @@ def get_active_concerts() -> list[dict]:
             """)
         ).fetchall()
     return [
-        {"kopis_id": row[0], "kopis_update_date": str(row[1]) if row[1] else None}
-        for row in rows
+        {"kopis_id": row[0], "kopis_update_date": str(row[1]) if row[1] else None} for row in rows
     ]
 
 
