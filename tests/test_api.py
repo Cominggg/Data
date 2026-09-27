@@ -1,4 +1,5 @@
 """api.py 단위 테스트."""
+
 from unittest.mock import patch
 
 import pytest
@@ -13,12 +14,14 @@ def set_secret(monkeypatch):
     import importlib
 
     import api
+
     importlib.reload(api)
 
 
 @pytest.fixture()
 def client():
     import api
+
     return TestClient(api.app, raise_server_exceptions=False)
 
 
@@ -85,15 +88,14 @@ class TestCollectConcertEndpoint:
 
     def test_called_with_kopis_id(self, client):
         """collect_and_save_concert가 kopis_id로 직접 호출되어야 한다."""
-        with patch(
-            "api.collect_and_save_concert", return_value={"status": "not_found"}
-        ) as mock_fn:
+        with patch("api.collect_and_save_concert", return_value={"status": "not_found"}) as mock_fn:
             client.post("/collect/concert", json={"kopis_id": "PF123"}, headers=_AUTH)
         mock_fn.assert_called_once_with("PF123")
 
     def test_duplicate_request_returns_409(self, client):
         """동일 kopis_id가 이미 실행 중이면 409를 반환해야 한다."""
         import api as api_module
+
         key = ("concert", "PF_DUP")
         api_module._running_tasks.add(key)
         try:
@@ -120,6 +122,7 @@ class TestCollectReleasesEndpoint:
     def test_duplicate_request_not_accepted(self, client):
         """동일 artist_id가 이미 실행 중이면 accepted:false를 반환해야 한다."""
         import api as api_module
+
         key = ("releases", 99)
         api_module._running_tasks.add(key)
         try:
@@ -165,15 +168,14 @@ class TestCollectSetlistEndpoint:
 
     def test_called_with_concert_id(self, client):
         """collect_and_save_setlist가 concert_id로 직접 호출되어야 한다."""
-        with patch(
-            "api.collect_and_save_setlist", return_value={"status": "not_found"}
-        ) as mock_fn:
+        with patch("api.collect_and_save_setlist", return_value={"status": "not_found"}) as mock_fn:
             client.post("/collect/concert/7/setlist", headers=_AUTH)
         mock_fn.assert_called_once_with(7)
 
     def test_duplicate_request_returns_409(self, client):
         """동일 concert_id가 이미 실행 중이면 409를 반환해야 한다."""
         import api as api_module
+
         key = ("setlist", 7)
         api_module._running_tasks.add(key)
         try:
@@ -216,15 +218,14 @@ class TestRegisterArtistEndpoint:
 
     def test_called_with_mbid(self, client):
         """register_artist_by_mbid가 mbid로 직접 호출되어야 한다."""
-        with patch(
-            "api.register_artist_by_mbid", return_value={"status": "not_found"}
-        ) as mock_fn:
+        with patch("api.register_artist_by_mbid", return_value={"status": "not_found"}) as mock_fn:
             client.post("/collect/artist", json={"mbid": "mbid-xyz"}, headers=_AUTH)
         mock_fn.assert_called_once_with("mbid-xyz")
 
     def test_duplicate_request_returns_409(self, client):
         """동일 mbid가 이미 실행 중이면 409를 반환해야 한다."""
         import api as api_module
+
         key = ("artist", "mbid-dup")
         api_module._running_tasks.add(key)
         try:
@@ -275,10 +276,15 @@ class TestSearchConcertsEndpoint:
 
     def test_returns_concert_list(self, client):
         """검색 결과 리스트를 그대로 반환해야 한다."""
-        concerts = [{
-            "kopis_id": "PF001", "title": "BTS WORLD TOUR",
-            "start_date": "2024-06-01", "end_date": "2024-06-02", "venue": "KSPO DOME",
-        }]
+        concerts = [
+            {
+                "kopis_id": "PF001",
+                "title": "BTS WORLD TOUR",
+                "start_date": "2024-06-01",
+                "end_date": "2024-06-02",
+                "venue": "KSPO DOME",
+            }
+        ]
         with patch("collectors.kopis.search_concerts", return_value=concerts) as mock_fn:
             res = client.get("/search/concerts?title=BTS", headers=_AUTH)
         mock_fn.assert_called_once_with("BTS")

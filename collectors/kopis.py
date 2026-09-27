@@ -73,8 +73,13 @@ def _parse_relates(relates_elem: Optional[ET.Element]) -> list[dict]:
 
 
 _DETAIL_FALLBACK = {
-    "prfcast": None, "poster_url": None, "price": None,
-    "relates": [], "updatedate": None, "visit": None, "still_urls": [],
+    "prfcast": None,
+    "poster_url": None,
+    "price": None,
+    "relates": [],
+    "updatedate": None,
+    "visit": None,
+    "still_urls": [],
 }
 _DETAIL_WORKERS = 8
 
@@ -96,7 +101,8 @@ def _fetch_detail(kopis_id: str) -> dict:
     styurls_elem = db.find("styurls")
     still_urls = (
         [el.text for el in styurls_elem.findall("styurl") if el.text]
-        if styurls_elem is not None else []
+        if styurls_elem is not None
+        else []
     )
     return {
         "prfcast": _text(db, "prfcast"),
@@ -153,8 +159,7 @@ def search_concerts(title: str) -> list[dict]:
             "end_date": _parse_kopis_date(_text(item, "prfpdto")),
             "venue": _text(item, "fcltynm"),
             "url": (
-                "https://kopis.or.kr/por/db/pblprfr/pblprfrView.do"
-                f"?mt20Id={_text(item, 'mt20id')}"
+                f"https://kopis.or.kr/por/db/pblprfr/pblprfrView.do?mt20Id={_text(item, 'mt20id')}"
             ),
         }
         for item in root.findall("db")
@@ -177,7 +182,8 @@ def collect_by_id(kopis_id: str) -> Optional[dict]:
     styurls_elem = db.find("styurls")
     still_urls = (
         [el.text for el in styurls_elem.findall("styurl") if el.text]
-        if styurls_elem is not None else []
+        if styurls_elem is not None
+        else []
     )
     return {
         "kopis_id": _text(db, "mt20id") or kopis_id,
@@ -207,17 +213,25 @@ def _fetch_and_merge(concert: dict) -> Optional[dict]:
             if attempt == 3:
                 logger.warning(
                     "상세 API 3회 실패 — 폴백 적용: kopis_id=%s, %s",
-                    concert["kopis_id"], e,
+                    concert["kopis_id"],
+                    e,
                 )
-                concert.update({
-                    "poster_url": None, "price": None,
-                    "relates": [], "updatedate": None, "visit": None,
-                    "still_urls": [],
-                })
+                concert.update(
+                    {
+                        "poster_url": None,
+                        "price": None,
+                        "relates": [],
+                        "updatedate": None,
+                        "visit": None,
+                        "still_urls": [],
+                    }
+                )
             else:
                 logger.debug(
                     "상세 API 재시도 %d/3: kopis_id=%s, %s",
-                    attempt, concert["kopis_id"], e,
+                    attempt,
+                    concert["kopis_id"],
+                    e,
                 )
                 time.sleep(5 * attempt)
     if concert.get("visit") != "Y":
@@ -251,8 +265,10 @@ def collect(
     while True:
         logger.debug("KOPIS 페이지 조회: cpage=%d", cpage)
         params = {
-            **_DEFAULT_PARAMS, "cpage": cpage,
-            "stdate": resolved_stdate, "eddate": resolved_eddate,
+            **_DEFAULT_PARAMS,
+            "cpage": cpage,
+            "stdate": resolved_stdate,
+            "eddate": resolved_eddate,
         }
         if afterdate:
             params["afterdate"] = afterdate
@@ -273,18 +289,18 @@ def collect(
                     raise
                 logger.warning(
                     "KOPIS 페이지 조회 실패 (attempt %d/3, status=%s): cpage=%d",
-                    attempt, status, cpage,
+                    attempt,
+                    status,
+                    cpage,
                 )
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
 
         batch = root.findall("db")
         if not batch:
             break
 
         concerts_to_fetch = [
-            _parse_concert(item)
-            for item in batch
-            if _text(item, "genrenm") == "대중음악"
+            _parse_concert(item) for item in batch if _text(item, "genrenm") == "대중음악"
         ]
 
         with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as pool:

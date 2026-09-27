@@ -36,10 +36,10 @@ _DOMAIN_TO_TYPE = {
 # youtu.be는 영상 단축 URL이므로 아티스트 채널로 부적합 → 제외
 
 _URL_PATTERNS: dict = {
-    "Spotify":    re.compile(r"open\.spotify\.com/artist/[A-Za-z0-9]+"),
-    "YouTube":    re.compile(r"youtube\.com/(@|channel/|c/|user/)"),
-    "Instagram":  re.compile(r"instagram\.com/[^/?#]+"),
-    "Twitter":    re.compile(r"(?:twitter|x)\.com/[^/?#]+"),
+    "Spotify": re.compile(r"open\.spotify\.com/artist/[A-Za-z0-9]+"),
+    "YouTube": re.compile(r"youtube\.com/(@|channel/|c/|user/)"),
+    "Instagram": re.compile(r"instagram\.com/[^/?#]+"),
+    "Twitter": re.compile(r"(?:twitter|x)\.com/[^/?#]+"),
     "AppleMusic": re.compile(r"music\.apple\.com/"),
 }
 

@@ -148,9 +148,7 @@ def collect_releases(
 
         tracks_data = (album.get("tracks") or {}).get("items") or []
         if (album.get("tracks") or {}).get("next"):
-            logger.warning(
-                "트랙 50개 초과 — 일부 누락 가능: spotify_id=%s", album.get("id")
-            )
+            logger.warning("트랙 50개 초과 — 일부 누락 가능: spotify_id=%s", album.get("id"))
 
         images = album.get("images") or []
         results.append(
@@ -166,7 +164,5 @@ def collect_releases(
             }
         )
 
-    logger.info(
-        "릴리즈 수집 완료: spotify_artist_id=%s, 총 %d건", spotify_artist_id, len(results)
-    )
+    logger.info("릴리즈 수집 완료: spotify_artist_id=%s, 총 %d건", spotify_artist_id, len(results))
     return results, spotify_total

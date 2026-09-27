@@ -28,9 +28,9 @@ def _phrase_match_title(title: str, aliases: list[dict]) -> list[dict]:
         name_norm = _normalize(name)
         name_words = name_norm.split()
         matched = (
-            name_norm in title_tokens                       # 단일 단어: token exact
+            name_norm in title_tokens  # 단일 단어: token exact
             if len(name_words) == 1
-            else f" {name_norm} " in title_padded           # 다중 단어: 단어 경계 구문 포함
+            else f" {name_norm} " in title_padded  # 다중 단어: 단어 경계 구문 포함
         )
         if matched:
             artist_id = alias["artist_id"]
@@ -69,11 +69,12 @@ def match_concert(concert: dict, aliases: list[dict]) -> tuple[list[dict], list[
         for alias in matched_aliases:
             logger.debug(
                 "매칭(title): concert_id=%s, artist_id=%s, title=%s",
-                concert_id, alias["artist_id"], title,
+                concert_id,
+                alias["artist_id"],
+                title,
             )
         matches = [
-            {"concert_id": concert_id, "artist_id": alias["artist_id"]}
-            for alias in matched_aliases
+            {"concert_id": concert_id, "artist_id": alias["artist_id"]} for alias in matched_aliases
         ]
         return matches, []
 

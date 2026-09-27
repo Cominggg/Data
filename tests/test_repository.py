@@ -822,4 +822,3 @@ class TestSaveConcerts:
         self._run([concert], mock_session)
 
         assert mock_session.execute.call_count == 2
-

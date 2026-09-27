@@ -381,7 +381,6 @@ def run_ja_romanize_collect() -> None:
         logger.info("=== 로마자→한글 alias 변환 잡 완료 ===")
 
 
-
 def run_concert_status_update() -> None:
     """활성 공연 상태 갱신 (매일). DB의 진행 중 공연을 개별 API로 최신 상태로 갱신한다."""
     with _job_timer("공연 상태 갱신 잡"):
@@ -394,8 +393,7 @@ def run_concert_status_update() -> None:
             logger.info("활성 공연 %d건 상태 갱신 시작", len(active))
             with ThreadPoolExecutor(max_workers=8) as pool:
                 futures = {
-                    pool.submit(kopis.collect_by_id, c["kopis_id"]): c["kopis_id"]
-                    for c in active
+                    pool.submit(kopis.collect_by_id, c["kopis_id"]): c["kopis_id"] for c in active
                 }
             fetched = []
             for future, kopis_id in futures.items():
@@ -434,8 +432,7 @@ def run_new_concert_collect(stdate: Optional[str] = None, use_prfstate: bool = F
         existing_ids = get_existing_kopis_ids()
         aliases = get_all_aliases()
         new_concerts = [
-            c for c in concerts
-            if c["kopis_id"] not in existing_ids and has_match(c, aliases)
+            c for c in concerts if c["kopis_id"] not in existing_ids and has_match(c, aliases)
         ]
         for c in new_concerts:
             c["_matched_artist_ids"] = matched_artist_ids(c["prfnm"], aliases)
@@ -460,9 +457,9 @@ def run_new_concert_collect(stdate: Optional[str] = None, use_prfstate: bool = F
             matches_by_concert: dict = {}
             for match in all_matches:
                 if match["concert_id"] in title_by_concert_id:
-                    matches_by_concert.setdefault(
-                        match["concert_id"], []
-                    ).append(match["artist_id"])
+                    matches_by_concert.setdefault(match["concert_id"], []).append(
+                        match["artist_id"]
+                    )
 
             if matches_by_concert:
                 all_artist_ids = {aid for ids in matches_by_concert.values() for aid in ids}
@@ -474,7 +471,6 @@ def run_new_concert_collect(stdate: Optional[str] = None, use_prfstate: bool = F
         update_artist_is_coming()
         _save_last_collect_date(datetime.now().strftime("%Y%m%d"))
         logger.info("=== 신규 공연 탐지 잡 완료 ===")
-
 
 
 def run_artist_image_update() -> None:
@@ -520,9 +516,7 @@ def run_artist_image_update() -> None:
             else:
                 failed[a["id"]] = today
             if not a.get("spotify_url") and spotify_id:
-                upsert_artist_url(
-                    a["id"], "Spotify", artist_image.spotify_artist_url(spotify_id)
-                )
+                upsert_artist_url(a["id"], "Spotify", artist_image.spotify_artist_url(spotify_id))
         _save_failed_image_artists(failed)
         logger.info("=== 아티스트 이미지 수집 잡 완료 ===")
 
@@ -725,7 +719,6 @@ def collect_and_save_concert(kopis_id: str) -> dict:
     }
 
 
-
 def collect_and_save_releases_for_artist(artist_id: int) -> bool:
     """단건 아티스트의 릴리즈를 수집해 DB에 저장한다. 성공 시 True 반환.
 
@@ -922,9 +915,7 @@ def main() -> None:
             "setlist": run_setlist_collect,
         }
         _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        _log_path = os.path.join(
-            os.path.dirname(__file__), "logs", f"run_job_{args.job}_{_ts}.log"
-        )
+        _log_path = os.path.join(os.path.dirname(__file__), "logs", f"run_job_{args.job}_{_ts}.log")
         _attach_file_handler(_log_path)
         _job_map[args.job]()
         return

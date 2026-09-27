@@ -103,8 +103,11 @@ def collect_artist_image(
             if not mb_name:
                 logger.info("MusicBrainz 아티스트 정보 없음: mbid=%s", mbid)
                 return None, None
-            logger.info("MB URL relations에 Spotify 없음 — 이름 검색 fallback: mbid=%s name=%s",
-                        mbid, mb_name)
+            logger.info(
+                "MB URL relations에 Spotify 없음 — 이름 검색 fallback: mbid=%s name=%s",
+                mbid,
+                mb_name,
+            )
             spotify_id = _search_spotify_artist(mb_name)
 
     if not spotify_id:
