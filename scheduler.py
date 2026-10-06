@@ -763,7 +763,7 @@ def collect_and_save_setlist(concert_id: int) -> dict:
     if result is None:
         logger.info("셋리스트 없음: concert_id=%d", concert_id)
         return {"status": "skipped", "reason": "no_setlist_found"}
-    save_setlists([result])
+    save_setlists([result], raise_on_error=True)
     logger.info("단건 셋리스트 수집 완료: concert_id=%d", concert_id)
     return {
         "status": "ok",
