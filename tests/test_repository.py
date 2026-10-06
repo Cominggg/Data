@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from db.repository import (
@@ -377,8 +378,8 @@ class TestSaveSetlists:
         _, params = mock_session.execute.call_args_list[0].args
         assert params["attribution_url"] is None
 
-    def test_on_conflict_setlist_fm_id_do_nothing(self):
-        """중복 setlist_fm_id 시 ON CONFLICT DO NOTHING이 포함되어야 한다."""
+    def test_on_conflict_setlist_fm_id_do_update(self):
+        """중복 setlist_fm_id 시 DO UPDATE로 id를 항상 RETURNING해야 한다."""
         mock_session = self._make_session_mock()
         self._run(
             [{"concert_id": 1, "setlist_fm_id": "abc123", "tracks": []}],
@@ -386,7 +387,8 @@ class TestSaveSetlists:
         )
 
         sql = str(mock_session.execute.call_args_list[0].args[0])
-        assert "ON CONFLICT (setlist_fm_id) DO NOTHING" in sql
+        assert "ON CONFLICT (setlist_fm_id) DO UPDATE" in sql
+        assert "RETURNING id" in sql
 
     def test_inserts_tracks_when_present(self):
         """tracks가 있으면 setlist_track 테이블에 INSERT되어야 한다."""
@@ -406,22 +408,22 @@ class TestSaveSetlists:
             mock_session,
         )
 
-        track_calls = [
-            c for c in mock_session.execute.call_args_list if "setlist_track" in str(c.args[0])
+        insert_calls = [
+            c
+            for c in mock_session.execute.call_args_list
+            if "INSERT INTO setlist_track" in str(c.args[0])
         ]
-        assert len(track_calls) == 1
-        assert len(track_calls[0].args[1]) == 2
+        assert len(insert_calls) == 1
+        assert len(insert_calls[0].args[1]) == 2
 
-    def test_skips_tracks_when_conflict_returns_no_row(self):
-        """RETURNING id가 None(중복)이면 setlist_track INSERT를 건너뛰어야 한다."""
-        mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = None
+    def test_refills_tracks_for_existing_setlist_without_tracks(self):
+        """트랙 0개로 저장된 setlist를 재수집하면 기존 id로 트랙을 교체 저장해야 한다."""
+        mock_session = self._make_session_mock(setlist_id=3)
         self._run(
             [
                 {
                     "concert_id": 1,
-                    "setlist_fm_id": "dup",
-                    "attribution_url": "https://www.setlist.fm/setlist/dup.html",
+                    "setlist_fm_id": "4b4f4bb6",
                     "tracks": [{"position": 1, "song_name": "Song A", "info": None}],
                 }
             ],
@@ -429,7 +431,35 @@ class TestSaveSetlists:
         )
 
         sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list]
+        delete_idx = next(i for i, s in enumerate(sqls) if "DELETE FROM setlist_track" in s)
+        insert_idx = next(i for i, s in enumerate(sqls) if "INSERT INTO setlist_track" in s)
+        assert delete_idx < insert_idx
+        assert mock_session.execute.call_args_list[delete_idx].args[1] == {"setlist_id": 3}
+        assert mock_session.execute.call_args_list[insert_idx].args[1][0]["setlist_id"] == 3
+
+    def test_keeps_existing_tracks_when_new_tracks_empty(self):
+        """새 결과의 tracks가 비어 있으면 기존 트랙을 지우지 않아야 한다."""
+        mock_session = self._make_session_mock(setlist_id=3)
+        self._run(
+            [{"concert_id": 1, "setlist_fm_id": "4b4f4bb6", "tracks": []}],
+            mock_session,
+        )
+
+        sqls = [str(c.args[0]) for c in mock_session.execute.call_args_list]
         assert not any("setlist_track" in s for s in sqls)
+
+    def test_raise_on_error_propagates_failure(self):
+        """raise_on_error=True면 SQLAlchemyError를 호출자에게 올려야 한다."""
+        mock_session = MagicMock()
+        mock_session.execute.side_effect = SQLAlchemyError("boom")
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            with pytest.raises(SQLAlchemyError):
+                save_setlists(
+                    [{"concert_id": 1, "setlist_fm_id": "abc1", "tracks": []}],
+                    raise_on_error=True,
+                )
 
     def test_one_failure_does_not_stop_others(self):
         """한 건이 SQLAlchemyError로 실패해도 나머지 건은 계속 저장 시도되어야 한다."""
