@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from scheduler import (
     _build_scheduler,
@@ -873,7 +874,7 @@ class TestCollectAndSaveSetlist:
             patch("scheduler.save_setlists") as mock_save,
         ):
             result = collect_and_save_setlist(10)
-        mock_save.assert_called_once_with([self._SETLIST_RESULT])
+        mock_save.assert_called_once_with([self._SETLIST_RESULT], raise_on_error=True)
         assert result == {
             "status": "ok",
             "concert_id": 10,
@@ -881,6 +882,19 @@ class TestCollectAndSaveSetlist:
             "attribution_url": "https://setlist.fm/abc123",
             "tracks": [{"position": 1, "song_name": "Song A", "info": None}],
         }
+
+    def test_raises_when_save_fails(self):
+        """저장 실패 시 예외를 올려 성공 응답을 반환하지 않아야 한다."""
+        with (
+            patch("scheduler.get_concert_with_artist", return_value=self._CONCERT),
+            patch(
+                "scheduler.setlist.collect_for_concert",
+                return_value=self._SETLIST_RESULT,
+            ),
+            patch("scheduler.save_setlists", side_effect=SQLAlchemyError("boom")),
+            pytest.raises(SQLAlchemyError),
+        ):
+            collect_and_save_setlist(10)
 
 
 # ---------------------------------------------------------------------------

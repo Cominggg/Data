@@ -309,7 +309,10 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
 
 
 def get_completed_concerts() -> list[dict]:
-    """setlist 미수집·미시도(또는 7일 경과) 공연완료 건을 아티스트 MBID와 함께 반환한다."""
+    """setlist 트랙 미수집·미시도(또는 7일 경과) 공연완료 건을 아티스트 MBID와 함께 반환한다.
+
+    setlist 행이 없거나, 있어도 트랙이 0개인 공연을 대상으로 한다.
+    """
     with get_session() as session:
         rows = session.execute(
             text("""
@@ -318,9 +321,12 @@ def get_completed_concerts() -> list[dict]:
                 FROM concert c
                 JOIN concert_artist ca ON ca.concert_id = c.id
                 JOIN artist a ON a.id = ca.artist_id
-                LEFT JOIN setlist s ON s.concert_id = c.id
                 WHERE c.status = 'ENDED'
-                  AND s.id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM setlist s
+                      JOIN setlist_track t ON t.setlist_id = s.id
+                      WHERE s.concert_id = c.id
+                  )
                   AND (
                       c.fetch_attempted_at IS NULL
                       OR c.fetch_attempted_at < NOW() - INTERVAL '7 days'
@@ -339,10 +345,13 @@ def get_completed_concerts() -> list[dict]:
     ]
 
 
-def save_setlists(setlists: list[dict]) -> None:
-    """수집된 셋리스트를 setlist·setlist_track 테이블에 저장한다. 중복 시 무시.
+def save_setlists(setlists: list[dict], raise_on_error: bool = False) -> None:
+    """수집된 셋리스트를 setlist·setlist_track 테이블에 저장한다.
 
+    같은 setlist_fm_id가 이미 있으면 attribution_url·collected_at을 갱신하고,
+    새 결과에 tracks가 있으면 기존 트랙을 지운 뒤 다시 저장한다 (tracks가 비면 기존 트랙 유지).
     셋리스트별 독립 트랜잭션을 사용해 한 건 실패가 전체에 영향을 주지 않는다.
+    raise_on_error=True면 저장 실패 시 예외를 그대로 올린다 (단건 수집 경로용).
     """
     saved = 0
     for item in setlists:
@@ -353,7 +362,9 @@ def save_setlists(setlists: list[dict]) -> None:
                         INSERT INTO setlist
                             (concert_id, setlist_fm_id, attribution_url, collected_at)
                         VALUES (:concert_id, :setlist_fm_id, :attribution_url, NOW())
-                        ON CONFLICT (setlist_fm_id) DO NOTHING
+                        ON CONFLICT (setlist_fm_id) DO UPDATE
+                            SET attribution_url = EXCLUDED.attribution_url,
+                                collected_at = NOW()
                         RETURNING id
                     """),
                     {
@@ -363,8 +374,12 @@ def save_setlists(setlists: list[dict]) -> None:
                     },
                 ).fetchone()
 
-                if row and item.get("tracks"):
+                if item.get("tracks"):
                     setlist_id = row[0]
+                    session.execute(
+                        text("DELETE FROM setlist_track WHERE setlist_id = :setlist_id"),
+                        {"setlist_id": setlist_id},
+                    )
                     session.execute(
                         text("""
                             INSERT INTO setlist_track (setlist_id, position, song_name, info)
@@ -387,6 +402,8 @@ def save_setlists(setlists: list[dict]) -> None:
                 item.get("setlist_fm_id"),
                 e,
             )
+            if raise_on_error:
+                raise
 
     logger.info("셋리스트 저장 완료: %d / %d건 처리", saved, len(setlists))
 

@@ -46,5 +46,6 @@ Data는 `concert_id`, `artist_id`만 INSERT(`ON CONFLICT (concert_id, artist_id)
 
 ## ⑤ setlist.fm 수집 (매일 06:00, 공연완료 상태 대상)
 
-- 대상: `prfstate=공연완료`
+- 대상: `prfstate=공연완료` 중 setlist가 없거나 트랙이 0개인 공연 (조회 후 7일간 재조회 안 함)
 - 데이터 미존재 시 빈 상태 유지
+- 같은 `setlist_fm_id` 재수집 시 새 결과에 트랙이 있으면 기존 트랙을 교체한다
