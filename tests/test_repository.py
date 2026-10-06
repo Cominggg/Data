@@ -1,3 +1,4 @@
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,6 +8,7 @@ from db.repository import (
     end_expired_concerts,
     get_active_concerts,
     get_artist_names_by_ids,
+    get_completed_concerts,
     get_concert_ids_by_kopis_ids,
     save_artists,
     save_concert_artist_candidates,
@@ -334,6 +336,48 @@ class TestUpsertArtistUrl:
 
         sql = str(mock_session.execute.call_args.args[0])
         assert "ON CONFLICT (artist_id, type) DO NOTHING" in sql
+
+
+class TestGetCompletedConcerts:
+    def _run(self, mock_rows):
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = mock_rows
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            return get_completed_concerts(), mock_session
+
+    def test_targets_concerts_without_setlist_tracks(self):
+        """setlist 행이 없거나 트랙이 0개인 공연을 대상으로 하는 조건이 SQL에 포함되어야 한다."""
+        _, mock_session = self._run([])
+
+        sql = " ".join(str(mock_session.execute.call_args.args[0]).split())
+        assert "status = 'ENDED'" in sql
+        assert "NOT EXISTS ( SELECT 1 FROM setlist s JOIN setlist_track t" in sql
+        assert "s.id IS NULL" not in sql
+
+    def test_keeps_fetch_attempted_backoff(self):
+        """fetch_attempted_at 7일 재시도 간격 조건이 유지되어야 한다."""
+        _, mock_session = self._run([])
+
+        sql = str(mock_session.execute.call_args.args[0])
+        assert "fetch_attempted_at IS NULL" in sql
+        assert "INTERVAL '7 days'" in sql
+
+    def test_returns_concert_dicts(self):
+        """조회 결과를 concert dict 목록으로 변환해야 한다."""
+        rows = [(3, "공연", date(2026, 9, 1), None, "mbid-1")]
+        result, _ = self._run(rows)
+
+        assert result == [
+            {
+                "concert_id": 3,
+                "title": "공연",
+                "start_date": "2026-09-01",
+                "end_date": None,
+                "artist_mbid": "mbid-1",
+            }
+        ]
 
 
 class TestSaveSetlists:

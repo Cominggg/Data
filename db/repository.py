@@ -309,7 +309,10 @@ def save_concerts(concerts: list[dict], use_prfstate: bool = False) -> set:
 
 
 def get_completed_concerts() -> list[dict]:
-    """setlist 미수집·미시도(또는 7일 경과) 공연완료 건을 아티스트 MBID와 함께 반환한다."""
+    """setlist 트랙 미수집·미시도(또는 7일 경과) 공연완료 건을 아티스트 MBID와 함께 반환한다.
+
+    setlist 행이 없거나, 있어도 트랙이 0개인 공연을 대상으로 한다.
+    """
     with get_session() as session:
         rows = session.execute(
             text("""
@@ -318,9 +321,12 @@ def get_completed_concerts() -> list[dict]:
                 FROM concert c
                 JOIN concert_artist ca ON ca.concert_id = c.id
                 JOIN artist a ON a.id = ca.artist_id
-                LEFT JOIN setlist s ON s.concert_id = c.id
                 WHERE c.status = 'ENDED'
-                  AND s.id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM setlist s
+                      JOIN setlist_track t ON t.setlist_id = s.id
+                      WHERE s.concert_id = c.id
+                  )
                   AND (
                       c.fetch_attempted_at IS NULL
                       OR c.fetch_attempted_at < NOW() - INTERVAL '7 days'
