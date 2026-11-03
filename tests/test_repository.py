@@ -645,13 +645,14 @@ class TestUpdateArtistIsComing:
         update_sql = str(mock_session.execute.call_args_list[0].args[0])
         assert "UPDATE artist" in update_sql
 
-    def test_uses_current_date_for_comparison(self):
-        """공연 종료일 비교에 CURRENT_DATE가 사용되어야 한다."""
+    def test_uses_kst_date_for_comparison(self):
+        """공연 종료일 비교에 KST 기준 오늘 날짜가 사용되어야 한다."""
         mock_session = self._make_session_mock()
         self._run(mock_session)
 
         update_sql = str(mock_session.execute.call_args_list[0].args[0])
-        assert "CURRENT_DATE" in update_sql
+        assert "(NOW() AT TIME ZONE 'Asia/Seoul')::date" in update_sql
+        assert "CURRENT_DATE" not in update_sql
 
     def test_excludes_excluded_status_concerts(self):
         """status='EXCLUDED'인 공연은 is_coming 판단에서 제외되어야 한다."""

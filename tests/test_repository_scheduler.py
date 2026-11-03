@@ -73,7 +73,7 @@ class TestUpdateArtistIsComing:
         assert result == 3
 
     def test_update_sql_uses_end_date(self):
-        """UPDATE SQL이 end_date >= CURRENT_DATE 조건으로 is_coming을 갱신해야 한다."""
+        """UPDATE SQL이 end_date와 KST 기준 오늘을 비교해 is_coming을 갱신해야 한다."""
         mock_session = MagicMock()
         mock_session.execute.return_value.rowcount = 0
         with patch("db.repository.get_session", return_value=_make_session_ctx(mock_session)):

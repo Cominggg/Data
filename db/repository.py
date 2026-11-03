@@ -769,7 +769,7 @@ def update_artist_is_coming() -> int:
                                JOIN concert c ON c.id = ca.concert_id
                                WHERE ca.artist_id = a.id
                                  AND c.status NOT IN ('EXCLUDED', 'PENDING')
-                                 AND c.end_date >= CURRENT_DATE
+                                 AND c.end_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date
                            ) AS is_coming
                     FROM artist a
                 ) new_val
