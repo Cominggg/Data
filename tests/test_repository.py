@@ -16,6 +16,7 @@ from db.repository import (
     save_concerts,
     save_setlists,
     update_artist_is_coming,
+    update_concert_status_by_date,
     upsert_artist_url,
 )
 
@@ -682,6 +683,80 @@ class TestUpdateArtistIsComing:
         result = self._run(mock_session)
 
         assert result == 3
+
+
+class TestUpdateConcertStatusByDate:
+    def _run(self, mock_session):
+        with patch("db.repository.get_session") as mock_get_session:
+            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
+            return update_concert_status_by_date()
+
+    def _make_session_mock(self, rowcount=0):
+        mock_session = MagicMock()
+        mock_session.execute.return_value.rowcount = rowcount
+        return mock_session
+
+    def _executed_sql(self, mock_session):
+        return str(mock_session.execute.call_args_list[0].args[0])
+
+    def test_uses_kst_date_without_current_date(self):
+        """오늘 날짜는 KST 표현식으로 계산하고 CURRENT_DATE를 쓰지 않아야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(mock_session)
+
+        sql = self._executed_sql(mock_session)
+        assert "(NOW() AT TIME ZONE 'Asia/Seoul')::date" in sql
+        assert "CURRENT_DATE" not in sql
+
+    def test_case_includes_three_status_branches(self):
+        """CASE가 종료일·시작일 비교와 ENDED·ONGOING·UPCOMING 분기를 포함해야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(mock_session)
+
+        sql = self._executed_sql(mock_session)
+        assert "end_date <" in sql
+        assert "start_date <=" in sql
+        assert "'ENDED'" in sql
+        assert "'ONGOING'" in sql
+        assert "'UPCOMING'" in sql
+
+    def test_targets_only_upcoming_and_ongoing(self):
+        """UPDATE 대상이 UPCOMING·ONGOING 상태로 한정되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(mock_session)
+
+        sql = self._executed_sql(mock_session)
+        assert "UPDATE concert" in sql
+        assert "status IN ('UPCOMING', 'ONGOING')" in sql
+
+    def test_updates_only_changed_rows(self):
+        """상태 값이 바뀌는 행만 갱신하는 조건이 포함되어야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(mock_session)
+
+        assert "concert.status <> t.new_status" in self._executed_sql(mock_session)
+
+    def test_executes_once(self):
+        """session.execute를 한 번만 호출해야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(mock_session)
+
+        assert mock_session.execute.call_count == 1
+
+    def test_returns_rowcount(self):
+        """result.rowcount를 그대로 반환해야 한다."""
+        mock_session = self._make_session_mock(rowcount=5)
+        result = self._run(mock_session)
+
+        assert result == 5
+
+    def test_returns_zero_without_error(self):
+        """rowcount=0이어도 예외 없이 0을 반환해야 한다."""
+        mock_session = self._make_session_mock(rowcount=0)
+        result = self._run(mock_session)
+
+        assert result == 0
 
 
 class TestEndExpiredConcerts:

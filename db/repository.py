@@ -782,6 +782,38 @@ def update_artist_is_coming() -> int:
     return updated
 
 
+def update_concert_status_by_date() -> int:
+    """시작일·종료일과 오늘(KST)을 비교해 UPCOMING/ONGOING 공연의 상태를 갱신한다.
+
+    PENDING·EXCLUDED·CANCELLED·ENDED 공연은 변경하지 않는다.
+    반환값: 갱신된 행 수
+    """
+    with get_session() as session:
+        result = session.execute(
+            text("""
+                UPDATE concert
+                SET status = t.new_status
+                FROM (
+                    SELECT id,
+                           CASE
+                               WHEN end_date < (NOW() AT TIME ZONE 'Asia/Seoul')::date
+                                   THEN 'ENDED'
+                               WHEN start_date <= (NOW() AT TIME ZONE 'Asia/Seoul')::date
+                                   THEN 'ONGOING'
+                               ELSE 'UPCOMING'
+                           END AS new_status
+                    FROM concert
+                    WHERE status IN ('UPCOMING', 'ONGOING')
+                ) t
+                WHERE concert.id = t.id
+                  AND concert.status <> t.new_status
+            """)
+        )
+        updated = result.rowcount
+    logger.info("날짜 기준 공연 상태 갱신 완료: %d건 변경", updated)
+    return updated
+
+
 def end_expired_concerts() -> int:
     """KOPIS 연동 여부와 무관하게 종료일이 지난 UPCOMING/ONGOING 공연을 ENDED로 전환한다."""
     with get_session() as session:
