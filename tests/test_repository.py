@@ -674,6 +674,13 @@ class TestUpdateConcertStatusByDate:
         assert "UPDATE concert" in sql
         assert "status IN ('UPCOMING', 'ONGOING')" in sql
 
+    def test_rechecks_status_in_outer_where(self):
+        """실행 중 어드민이 취소한 공연을 덮어쓰지 않도록 바깥 WHERE에서도 상태를 확인해야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(mock_session)
+
+        assert "concert.status IN ('UPCOMING', 'ONGOING')" in self._executed_sql(mock_session)
+
     def test_updates_only_changed_rows(self):
         """상태 값이 바뀌는 행만 갱신하는 조건이 포함되어야 한다."""
         mock_session = self._make_session_mock()

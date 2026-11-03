@@ -806,6 +806,7 @@ def update_concert_status_by_date() -> int:
                     WHERE status IN ('UPCOMING', 'ONGOING')
                 ) t
                 WHERE concert.id = t.id
+                  AND concert.status IN ('UPCOMING', 'ONGOING')
                   AND concert.status <> t.new_status
             """)
         )
