@@ -594,7 +594,7 @@ class TestUpdateArtistIsComing:
         self._run(mock_session)
 
         update_sql = str(mock_session.execute.call_args_list[0].args[0])
-        assert "(NOW() AT TIME ZONE 'Asia/Seoul')::date" in update_sql
+        assert "c.end_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date" in update_sql
         assert "CURRENT_DATE" not in update_sql
 
     def test_excludes_excluded_status_concerts(self):
@@ -664,6 +664,8 @@ class TestUpdateConcertStatusByDate:
         assert "'ENDED'" in sql
         assert "'ONGOING'" in sql
         assert "'UPCOMING'" in sql
+        assert sql.index("THEN 'ENDED'") < sql.index("THEN 'ONGOING'")
+        assert sql.index("THEN 'ONGOING'") < sql.index("ELSE 'UPCOMING'")
 
     def test_targets_only_upcoming_and_ongoing(self):
         """UPDATE 대상이 UPCOMING·ONGOING 상태로 한정되어야 한다."""
