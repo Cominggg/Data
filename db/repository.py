@@ -814,39 +814,6 @@ def update_concert_status_by_date() -> int:
     return updated
 
 
-def end_expired_concerts() -> int:
-    """KOPIS 연동 여부와 무관하게 종료일이 지난 UPCOMING/ONGOING 공연을 ENDED로 전환한다."""
-    with get_session() as session:
-        result = session.execute(
-            text("""
-                UPDATE concert
-                SET status = 'ENDED'
-                WHERE status IN ('UPCOMING', 'ONGOING')
-                  AND end_date < CURRENT_DATE
-            """)
-        )
-        updated = result.rowcount
-    logger.info("종료일 경과 공연 강제 종료 처리: %d건", updated)
-    return updated
-
-
-def get_active_concerts() -> list[dict]:
-    """status가 UPCOMING 또는 ONGOING이고 kopis_id가 있는 공연의 kopis_id·kopis_update_date를
-    반환한다."""
-    with get_session() as session:
-        rows = session.execute(
-            text("""
-                SELECT kopis_id, kopis_update_date
-                FROM concert
-                WHERE status IN ('UPCOMING', 'ONGOING')
-                  AND kopis_id IS NOT NULL
-            """)
-        ).fetchall()
-    return [
-        {"kopis_id": row[0], "kopis_update_date": str(row[1]) if row[1] else None} for row in rows
-    ]
-
-
 def get_existing_kopis_ids() -> set:
     """DB에 저장된 모든 concert.kopis_id를 집합으로 반환한다."""
     with get_session() as session:
@@ -861,42 +828,3 @@ def update_concert_fetch_attempted(concert_id: int) -> None:
             text("UPDATE concert SET fetch_attempted_at = NOW() WHERE id = :id"),
             {"id": concert_id},
         )
-
-
-def update_concert_status(concerts: list[dict]) -> None:
-    """updatedate 변화 감지 시 status와 kopis_update_date를 갱신한다.
-
-    공연별 독립 트랜잭션을 사용해 한 건 실패가 전체에 영향을 주지 않는다.
-    """
-    updated = 0
-    for concert in concerts:
-        try:
-            with get_session() as session:
-                row = session.execute(
-                    text("SELECT kopis_update_date FROM concert WHERE kopis_id = :kopis_id"),
-                    {"kopis_id": concert["kopis_id"]},
-                ).fetchone()
-
-                if row is None:
-                    continue
-
-                if row[0] != concert["updatedate"]:
-                    session.execute(
-                        text("""
-                            UPDATE concert
-                            SET status = :status, kopis_update_date = :kopis_update_date
-                            WHERE kopis_id = :kopis_id
-                        """),
-                        {
-                            "status": _KOPIS_STATUS_MAP.get(concert["prfstate"], "PENDING"),
-                            "kopis_update_date": concert["updatedate"],
-                            "kopis_id": concert["kopis_id"],
-                        },
-                    )
-                    updated += 1
-        except SQLAlchemyError as e:
-            logger.error(
-                "공연 상태 갱신 실패 — 건너뜀: kopis_id=%s, 오류=%s", concert["kopis_id"], e
-            )
-
-    logger.info("공연 상태 갱신 완료: %d건 변경", updated)

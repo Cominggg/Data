@@ -5,8 +5,6 @@ import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from db.repository import (
-    end_expired_concerts,
-    get_active_concerts,
     get_artist_names_by_ids,
     get_completed_concerts,
     get_concert_ids_by_kopis_ids,
@@ -19,61 +17,6 @@ from db.repository import (
     update_concert_status_by_date,
     upsert_artist_url,
 )
-
-
-class TestGetActiveConcerts:
-    def _run(self, mock_rows):
-        mock_session = MagicMock()
-        mock_session.execute.return_value.fetchall.return_value = mock_rows
-        with patch("db.repository.get_session") as mock_get_session:
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            return get_active_concerts()
-
-    def test_filters_by_active_status(self):
-        """공연예정·공연중 상태 필터가 SQL에 포함되어야 한다."""
-        mock_session = MagicMock()
-        mock_session.execute.return_value.fetchall.return_value = []
-        with patch("db.repository.get_session") as mock_get_session:
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            get_active_concerts()
-
-        sql = str(mock_session.execute.call_args_list[0].args[0])
-        assert "UPCOMING" in sql
-        assert "ONGOING" in sql
-
-    def test_filters_by_kopis_id_not_null(self):
-        """kopis_id IS NOT NULL 조건이 SQL에 포함되어야 한다."""
-        mock_session = MagicMock()
-        mock_session.execute.return_value.fetchall.return_value = []
-        with patch("db.repository.get_session") as mock_get_session:
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            get_active_concerts()
-
-        sql = str(mock_session.execute.call_args_list[0].args[0])
-        assert "kopis_id IS NOT NULL" in sql
-
-    def test_returns_kopis_id_and_update_date(self):
-        """반환값에 kopis_id와 kopis_update_date 키가 포함되어야 한다."""
-        result = self._run([("PF123", "2024-01-01"), ("PF456", "2024-02-01")])
-
-        assert len(result) == 2
-        assert result[0]["kopis_id"] == "PF123"
-        assert result[0]["kopis_update_date"] == "2024-01-01"
-
-    def test_handles_null_update_date(self):
-        """kopis_update_date가 NULL이면 None으로 반환되어야 한다."""
-        result = self._run([("PF789", None)])
-
-        assert result[0]["kopis_update_date"] is None
-
-    def test_returns_empty_list_when_no_active_concerts(self):
-        """활성 공연이 없으면 빈 리스트를 반환해야 한다."""
-        result = self._run([])
-
-        assert result == []
 
 
 class TestSaveArtists:
@@ -744,44 +687,6 @@ class TestUpdateConcertStatusByDate:
         self._run(mock_session)
 
         assert mock_session.execute.call_count == 1
-
-    def test_returns_rowcount(self):
-        """result.rowcount를 그대로 반환해야 한다."""
-        mock_session = self._make_session_mock(rowcount=5)
-        result = self._run(mock_session)
-
-        assert result == 5
-
-    def test_returns_zero_without_error(self):
-        """rowcount=0이어도 예외 없이 0을 반환해야 한다."""
-        mock_session = self._make_session_mock(rowcount=0)
-        result = self._run(mock_session)
-
-        assert result == 0
-
-
-class TestEndExpiredConcerts:
-    def _run(self, mock_session):
-        with patch("db.repository.get_session") as mock_get_session:
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            return end_expired_concerts()
-
-    def _make_session_mock(self, rowcount=0):
-        mock_session = MagicMock()
-        mock_session.execute.return_value.rowcount = rowcount
-        return mock_session
-
-    def test_filters_end_date_and_active_status(self):
-        """종료일 경과(end_date < CURRENT_DATE) + UPCOMING/ONGOING 상태 필터가 포함되어야 한다."""
-        mock_session = self._make_session_mock()
-        self._run(mock_session)
-
-        sql = str(mock_session.execute.call_args_list[0].args[0])
-        assert "end_date < CURRENT_DATE" in sql
-        assert "status IN" in sql
-        assert "UPCOMING" in sql
-        assert "ONGOING" in sql
 
     def test_returns_rowcount(self):
         """result.rowcount를 그대로 반환해야 한다."""

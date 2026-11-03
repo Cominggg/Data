@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from sqlalchemy.exc import SQLAlchemyError
 
 from collectors.kopis import (
     _fetch_and_merge,
@@ -16,7 +15,7 @@ from collectors.kopis import (
     _parse_relates,
     collect,
 )
-from db.repository import save_concerts, update_concert_status
+from db.repository import save_concerts
 
 _LIST_URL = "http://kopis.or.kr/openApi/restful/pblprfr"
 
@@ -407,23 +406,6 @@ class TestKopisCollect:
         assert len(result) == 2
         kopis_ids = {r["kopis_id"] for r in result}
         assert kopis_ids == {"PF001", "PF002"}
-
-    def test_detects_status_change_by_updatedate(self):
-        """update_concert_status가 호출되면 updatedate 변화를 감지해 prfstate를 갱신한다."""
-        mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = ("2024-01-10",)
-
-        concerts = [{"kopis_id": "PF123456", "prfstate": "공연완료", "updatedate": "2024-01-20"}]
-
-        with patch("db.repository.get_session") as mock_get_session:
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            update_concert_status(concerts)
-
-        update_calls = [
-            c for c in mock_session.execute.call_args_list if "UPDATE" in str(c.args[0])
-        ]
-        assert len(update_calls) == 1
 
 
 # ─── TestKopisDetailRetry ─────────────────────────────────────────────────────
@@ -886,67 +868,6 @@ class TestSaveConcerts:
             c for c in mock_session.execute.call_args_list if "concert_image" in str(c.args[0])
         ]
         assert len(image_inserts) == 0
-
-
-# ─── TestUpdateConcertStatus ──────────────────────────────────────────────────
-
-
-class TestUpdateConcertStatus:
-    def test_no_update_when_updatedate_unchanged(self):
-        """updatedate가 같으면 UPDATE가 실행되지 않아야 한다."""
-        mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = ("2024-01-15",)
-        concerts = [{"kopis_id": "PF123456", "prfstate": "공연예정", "updatedate": "2024-01-15"}]
-
-        with patch("db.repository.get_session") as mock_get_session:
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            update_concert_status(concerts)
-
-        update_calls = [
-            c for c in mock_session.execute.call_args_list if "UPDATE" in str(c.args[0])
-        ]
-        assert len(update_calls) == 0
-
-    def test_updates_prfstate_and_updatedate_when_changed(self):
-        """updatedate가 다르면 prfstate와 updatedate가 UPDATE되어야 한다."""
-        mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = ("2024-01-10",)
-        concerts = [{"kopis_id": "PF123456", "prfstate": "공연완료", "updatedate": "2024-01-20"}]
-
-        with patch("db.repository.get_session") as mock_get_session:
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            update_concert_status(concerts)
-
-        update_calls = [
-            c for c in mock_session.execute.call_args_list if "UPDATE" in str(c.args[0])
-        ]
-        assert len(update_calls) == 1
-        update_params = update_calls[0].args[1]
-        assert update_params["status"] == "ENDED"
-        assert update_params["kopis_update_date"] == "2024-01-20"
-
-    def test_one_failure_does_not_stop_others(self):
-        """한 건이 SQLAlchemyError로 실패해도 나머지 건은 계속 처리되어야 한다."""
-        mock_session = MagicMock()
-        exec_result_1 = MagicMock()
-        exec_result_1.fetchone.return_value = ("2024-01-01",)
-        exec_result_3 = MagicMock()
-        exec_result_3.fetchone.return_value = ("2024-01-03",)
-        mock_session.execute.side_effect = [exec_result_1, SQLAlchemyError("boom"), exec_result_3]
-        concerts = [
-            {"kopis_id": "PF001", "prfstate": "공연예정", "updatedate": "2024-01-01"},
-            {"kopis_id": "PF002", "prfstate": "공연예정", "updatedate": "2024-01-02"},
-            {"kopis_id": "PF003", "prfstate": "공연예정", "updatedate": "2024-01-03"},
-        ]
-
-        with patch("db.repository.get_session") as mock_get_session:
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-            mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
-            update_concert_status(concerts)
-
-        assert mock_session.execute.call_count == 3
 
 
 # ─── TestKopisHttpErrors ──────────────────────────────────────────────────────
