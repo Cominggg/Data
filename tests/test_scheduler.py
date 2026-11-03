@@ -185,104 +185,34 @@ class TestRunInitialCollect:
 class TestRunConcertStatusUpdate:
     # ── 활성 공연 상태 갱신 잡 ─────────────────────────────────────────────────
 
-    def test_calls_collect_by_id_for_each_active_concert(self):
-        """활성 공연마다 kopis.collect_by_id가 호출되어야 한다."""
-        active = [
-            {"kopis_id": "PF001", "kopis_update_date": "2024-01-01"},
-            {"kopis_id": "PF002", "kopis_update_date": "2024-01-01"},
-        ]
-        fetched = {"kopis_id": "PF001", "prfstate": "공연중", "updatedate": "2024-01-01"}
-        with (
-            patch("scheduler.end_expired_concerts"),
-            patch("scheduler.get_active_concerts", return_value=active),
-            patch("scheduler.kopis.collect_by_id", return_value=fetched) as mock_by_id,
-            patch("scheduler.update_concert_status"),
-        ):
+    def test_updates_status_by_date(self):
+        """날짜 기준 상태 갱신 함수가 인자 없이 한 번 호출되어야 한다."""
+        with patch("scheduler.update_concert_status_by_date") as mock_update:
             run_concert_status_update()
 
-        assert mock_by_id.call_count == 2
-        mock_by_id.assert_any_call("PF001")
-        mock_by_id.assert_any_call("PF002")
+        mock_update.assert_called_once_with()
 
-    def test_update_concert_status_called_with_fetched_results(self):
-        """collect_by_id 결과로 update_concert_status가 호출되어야 한다."""
-        active = [{"kopis_id": "PF001", "kopis_update_date": "2024-01-01"}]
-        fetched = {"kopis_id": "PF001", "prfstate": "공연완료", "updatedate": "2024-02-01"}
+    def test_does_not_call_kopis_api(self):
+        """상태 갱신 잡은 KOPIS API를 호출하지 않아야 한다."""
         with (
-            patch("scheduler.end_expired_concerts"),
-            patch("scheduler.get_active_concerts", return_value=active),
-            patch("scheduler.kopis.collect_by_id", return_value=fetched),
-            patch("scheduler.update_concert_status") as mock_update,
-        ):
-            run_concert_status_update()
-
-        mock_update.assert_called_once_with([fetched])
-
-    def test_skips_status_update_when_no_active_concerts(self):
-        """활성 공연이 없으면 collect_by_id·update_concert_status가 호출되지 않아야 한다."""
-        with (
-            patch("scheduler.end_expired_concerts"),
-            patch("scheduler.get_active_concerts", return_value=[]),
+            patch("scheduler.update_concert_status_by_date"),
             patch("scheduler.kopis.collect_by_id") as mock_by_id,
-            patch("scheduler.update_concert_status") as mock_update,
+            patch("scheduler.kopis.collect") as mock_collect,
         ):
             run_concert_status_update()
 
         mock_by_id.assert_not_called()
-        mock_update.assert_not_called()
-
-    def test_skips_none_results_from_collect_by_id(self):
-        """collect_by_id가 None을 반환하면 update_concert_status 호출 대상에서 제외되어야 한다."""
-        active = [{"kopis_id": "PF001", "kopis_update_date": "2024-01-01"}]
-        with (
-            patch("scheduler.end_expired_concerts"),
-            patch("scheduler.get_active_concerts", return_value=active),
-            patch("scheduler.kopis.collect_by_id", return_value=None),
-            patch("scheduler.update_concert_status") as mock_update,
-        ):
-            run_concert_status_update()
-
-        mock_update.assert_not_called()
+        mock_collect.assert_not_called()
 
     def test_does_not_update_is_coming(self):
         """is_coming 갱신은 run_new_concert_collect로 일원화됐으므로 이 잡에서는 호출 안 된다."""
         with (
-            patch("scheduler.end_expired_concerts"),
-            patch("scheduler.get_active_concerts", return_value=[]),
+            patch("scheduler.update_concert_status_by_date"),
             patch("scheduler.update_artist_is_coming") as mock_update,
         ):
             run_concert_status_update()
 
         mock_update.assert_not_called()
-
-    def test_calls_end_expired_concerts_before_get_active_concerts(self):
-        """end_expired_concerts가 get_active_concerts보다 먼저 호출되어야 한다."""
-        call_order = []
-        with (
-            patch(
-                "scheduler.end_expired_concerts",
-                side_effect=lambda: call_order.append("end_expired"),
-            ),
-            patch(
-                "scheduler.get_active_concerts",
-                side_effect=lambda: call_order.append("get_active") or [],
-            ),
-            patch("scheduler.kopis.collect_by_id"),
-            patch("scheduler.update_concert_status"),
-        ):
-            run_concert_status_update()
-
-        assert call_order == ["end_expired", "get_active"]
-
-    def test_end_expired_concerts_return_value_unused(self):
-        """end_expired_concerts 반환값은 사용되지 않고, 예외 없이 잡이 완료되어야 한다."""
-        with (
-            patch("scheduler.end_expired_concerts", return_value=7) as mock_end_expired,
-            patch("scheduler.get_active_concerts", return_value=[]),
-        ):
-            run_concert_status_update()
-
-        mock_end_expired.assert_called_once_with()
 
 
 class TestRunNewConcertCollect:

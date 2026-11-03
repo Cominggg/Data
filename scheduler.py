@@ -5,7 +5,6 @@ import logging.handlers
 import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Set
@@ -15,8 +14,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from collectors import artist_image, ja_romanize, kopis, musicbrainz, release, setlist
 from collectors.spotify_client import SpotifyRateLimitError
 from db.repository import (
-    end_expired_concerts,
-    get_active_concerts,
     get_all_aliases,
     get_all_artist_mbids,
     get_all_artists_with_spotify,
@@ -42,7 +39,7 @@ from db.repository import (
     save_setlists,
     update_artist_image,
     update_artist_is_coming,
-    update_concert_status,
+    update_concert_status_by_date,
     update_spotify_album_total,
     upsert_artist_url,
 )
@@ -382,29 +379,11 @@ def run_ja_romanize_collect() -> None:
 
 
 def run_concert_status_update() -> None:
-    """활성 공연 상태 갱신 (매일). DB의 진행 중 공연을 개별 API로 최신 상태로 갱신한다."""
+    """활성 공연 상태 갱신 (매일). 시작일·종료일과 오늘(KST)을 비교해 DB에서 직접 갱신한다."""
     with _job_timer("공연 상태 갱신 잡"):
         logger.info("=== 공연 상태 갱신 잡 시작 ===")
 
-        end_expired_concerts()
-
-        active = get_active_concerts()
-        if active:
-            logger.info("활성 공연 %d건 상태 갱신 시작", len(active))
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                futures = {
-                    pool.submit(kopis.collect_by_id, c["kopis_id"]): c["kopis_id"] for c in active
-                }
-            fetched = []
-            for future, kopis_id in futures.items():
-                try:
-                    result = future.result()
-                    if result is not None:
-                        fetched.append(result)
-                except Exception as e:
-                    logger.warning("상태 갱신 API 실패 kopis_id=%s: %s", kopis_id, e)
-            if fetched:
-                update_concert_status(fetched)
+        update_concert_status_by_date()
 
         logger.info("=== 공연 상태 갱신 잡 완료 ===")
 
