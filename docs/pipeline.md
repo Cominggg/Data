@@ -24,7 +24,7 @@
 - 조건: `visit=Y`, `genrenm=대중음악(GGGA)`
 - 저장 전 `has_match()`로 alias 매칭 공연만 필터링하여 저장 (비매칭 공연은 DB에 저장하지 않음)
 - 저장: `prfnm`, `prfcast`, 날짜, 장소, `updatedate`, `relates`(예매처 링크, 없으면 빈 배열)
-- 상태 갱신(`run_concert_status_update`): `updatedate` 변화 감지 시 `prfstate` 갱신
+- 상태 갱신(`run_concert_status_update`): KOPIS 호출 없이 `start_date`·`end_date`와 오늘(KST)을 비교해 `UPCOMING`/`ONGOING` 공연을 `UPCOMING`/`ONGOING`/`ENDED`로 갱신한다. 공연 취소(`CANCELLED`)는 어드민이 수동으로 변경한다
 - 신규 공연 탐지(`run_new_concert_collect`)는 마지막 수집일 이후 등록·수정된 공연만 증분 조회하며, 완료 후 ④ 매칭까지 같은 잡 안에서 수행한다
 
 ## ④ 공연-아티스트 매칭
