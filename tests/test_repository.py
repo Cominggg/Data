@@ -597,13 +597,22 @@ class TestUpdateArtistIsComing:
         assert "c.end_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date" in update_sql
         assert "CURRENT_DATE" not in update_sql
 
-    def test_excludes_excluded_status_concerts(self):
-        """status='EXCLUDED'인 공연은 is_coming 판단에서 제외되어야 한다."""
+    def test_counts_only_upcoming_and_ongoing_concerts(self):
+        """UPCOMING·ONGOING 공연만 is_coming 판단에 포함해야 한다 (Backend 예정 탭과 동일 기준)."""
         mock_session = self._make_session_mock()
         self._run(mock_session)
 
         update_sql = str(mock_session.execute.call_args_list[0].args[0])
-        assert "EXCLUDED" in update_sql
+        assert "c.status IN ('UPCOMING', 'ONGOING')" in update_sql
+
+    def test_excludes_cancelled_concerts(self):
+        """CANCELLED 공연만 있는 아티스트는 is_coming=false여야 한다."""
+        mock_session = self._make_session_mock()
+        self._run(mock_session)
+
+        update_sql = str(mock_session.execute.call_args_list[0].args[0])
+        assert "CANCELLED" not in update_sql
+        assert "NOT IN" not in update_sql
 
     def test_sets_is_coming_field(self):
         """UPDATE 쿼리가 is_coming 필드를 갱신해야 한다."""
