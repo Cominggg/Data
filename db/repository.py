@@ -752,7 +752,7 @@ def save_concert_artist_candidates(matches: list[dict]) -> None:
 def update_artist_is_coming() -> int:
     """오늘 이후 공연 보유 여부에 따라 artist.is_coming을 갱신한다.
 
-    EXCLUDED 상태 공연은 제외한다.
+    UPCOMING·ONGOING 상태 공연만 포함한다 (Backend 예정 탭과 동일 기준).
     값이 실제로 바뀌는 행만 UPDATE해 불필요한 쓰기 I/O를 줄인다.
     반환값: 갱신된 행 수
     """
@@ -768,7 +768,7 @@ def update_artist_is_coming() -> int:
                                FROM concert_artist ca
                                JOIN concert c ON c.id = ca.concert_id
                                WHERE ca.artist_id = a.id
-                                 AND c.status NOT IN ('EXCLUDED', 'PENDING')
+                                 AND c.status IN ('UPCOMING', 'ONGOING')
                                  AND c.end_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date
                            ) AS is_coming
                     FROM artist a
