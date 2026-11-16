@@ -468,7 +468,7 @@ class TestRunReleaseUpdate:
 class TestRunSetlistCollect:
     def test_collects_and_saves_setlists(self):
         """setlist.collect 후 save_setlists가 호출되어야 한다."""
-        setlists = [{"concert_id": 1, "setlist_fm_id": "abc123", "tracks": []}]
+        setlists = [{"concert_id": 1, "setlist_fm_id": "abc123"}]
         with (
             patch("scheduler.setlist.collect", return_value=setlists),
             patch("scheduler.save_setlists") as mock_save,
@@ -775,8 +775,6 @@ class TestCollectAndSaveSetlist:
     _SETLIST_RESULT = {
         "concert_id": 10,
         "setlist_fm_id": "abc123",
-        "attribution_url": "https://setlist.fm/abc123",
-        "tracks": [{"position": 1, "song_name": "Song A", "info": None}],
     }
 
     def test_returns_not_found_when_concert_missing(self):
@@ -793,8 +791,8 @@ class TestCollectAndSaveSetlist:
             result = collect_and_save_setlist(10)
         assert result == {"status": "skipped", "reason": "no_setlist_found"}
 
-    def test_returns_ok_with_tracks_on_success(self):
-        """셋리스트 수집 성공 시 status:ok와 트랙 정보를 반환해야 한다."""
+    def test_returns_ok_with_mapping_on_success(self):
+        """셋리스트 수집 성공 시 status:ok와 concert_id·setlist_fm_id만 반환해야 한다."""
         with (
             patch("scheduler.get_concert_with_artist", return_value=self._CONCERT),
             patch(
@@ -809,8 +807,6 @@ class TestCollectAndSaveSetlist:
             "status": "ok",
             "concert_id": 10,
             "setlist_fm_id": "abc123",
-            "attribution_url": "https://setlist.fm/abc123",
-            "tracks": [{"position": 1, "song_name": "Song A", "info": None}],
         }
 
     def test_raises_when_save_fails(self):

@@ -52,6 +52,16 @@ def _text(elem: ET.Element, tag: str) -> Optional[str]:
     return child.text if child is not None else None
 
 
+_KOPIS_HTTP_RE = re.compile(r"^http://(www\.)?kopis\.or\.kr/")
+
+
+def _to_https_url(url: Optional[str]) -> Optional[str]:
+    """http://(www.)kopis.or.kr/ 주소를 https://kopis.or.kr/로 바꾼다. 그 외 주소는 그대로 둔다."""
+    if not url:
+        return url
+    return _KOPIS_HTTP_RE.sub("https://kopis.or.kr/", url)
+
+
 def _get(params: dict) -> ET.Element:
     response = requests.get(_BASE_URL, params=params, timeout=30)
     response.raise_for_status()
@@ -100,13 +110,13 @@ def _fetch_detail(kopis_id: str) -> dict:
         return _DETAIL_FALLBACK
     styurls_elem = db.find("styurls")
     still_urls = (
-        [el.text for el in styurls_elem.findall("styurl") if el.text]
+        [_to_https_url(el.text) for el in styurls_elem.findall("styurl") if el.text]
         if styurls_elem is not None
         else []
     )
     return {
         "prfcast": _text(db, "prfcast"),
-        "poster_url": _text(db, "poster"),
+        "poster_url": _to_https_url(_text(db, "poster")),
         "relates": _parse_relates(db.find("relates")),
         "price": _text(db, "pcseguidance"),
         "updatedate": _parse_kopis_date(_text(db, "updatedate")),
@@ -181,7 +191,7 @@ def collect_by_id(kopis_id: str) -> Optional[dict]:
         return None
     styurls_elem = db.find("styurls")
     still_urls = (
-        [el.text for el in styurls_elem.findall("styurl") if el.text]
+        [_to_https_url(el.text) for el in styurls_elem.findall("styurl") if el.text]
         if styurls_elem is not None
         else []
     )
@@ -193,7 +203,7 @@ def collect_by_id(kopis_id: str) -> Optional[dict]:
         "prfpdto": _parse_kopis_date(_text(db, "prfpdto")),
         "fcltynm": _text(db, "fcltynm"),
         "prfstate": _text(db, "prfstate"),
-        "poster_url": _text(db, "poster"),
+        "poster_url": _to_https_url(_text(db, "poster")),
         "price": _text(db, "pcseguidance"),
         "relates": _parse_relates(db.find("relates")),
         "updatedate": _parse_kopis_date(_text(db, "updatedate")),

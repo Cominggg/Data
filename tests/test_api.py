@@ -138,8 +138,6 @@ class TestCollectSetlistEndpoint:
         "status": "ok",
         "concert_id": 7,
         "setlist_fm_id": "abc123",
-        "attribution_url": "https://setlist.fm/abc123",
-        "tracks": [{"position": 1, "song_name": "Song A", "info": None}],
     }
 
     def test_returns_200_and_data_on_success(self, client):
@@ -147,8 +145,7 @@ class TestCollectSetlistEndpoint:
         with patch("api.collect_and_save_setlist", return_value=self._OK_RESULT):
             res = client.post("/collect/concert/7/setlist", headers=_AUTH)
         assert res.status_code == 200
-        assert res.json()["success"] is True
-        assert res.json()["tracks"] == [{"position": 1, "song_name": "Song A", "info": None}]
+        assert res.json() == {"success": True, "concert_id": 7, "setlist_fm_id": "abc123"}
 
     def test_returns_404_when_concert_not_found(self, client):
         """공연 조회 실패 시 404를 반환해야 한다."""
