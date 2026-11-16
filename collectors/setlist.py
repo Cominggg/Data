@@ -47,22 +47,6 @@ def _get(path: str, params: dict) -> dict:
             time.sleep(5 * attempt)
 
 
-def _parse_tracks(sets_data: dict) -> list[dict]:
-    tracks = []
-    position = 1
-    for s in sets_data.get("set", []):
-        for song in s.get("song", []):
-            tracks.append(
-                {
-                    "position": position,
-                    "song_name": song.get("name", ""),
-                    "info": song.get("info"),
-                }
-            )
-            position += 1
-    return tracks
-
-
 def _event_date_in_range(
     event_date_str: str, prfpdfrom: Optional[str], prfpdto: Optional[str]
 ) -> bool:
@@ -86,10 +70,10 @@ def _event_date_in_range(
 
 
 def collect_for_concert(concert: dict) -> Optional[dict]:
-    """단건 공연의 셋리스트를 setlist.fm에서 수집한다.
+    """단건 공연에 매칭되는 setlist.fm 셋리스트를 찾는다.
 
     concert: {"concert_id": int, "artist_mbid": str, "start_date": str, "end_date": str}
-    Returns: setlist dict, 또는 없으면 None
+    Returns: {"concert_id": int, "setlist_fm_id": str}, 또는 없으면 None
     """
     concert_id = concert["concert_id"]
     artist_mbid = concert["artist_mbid"]
@@ -115,19 +99,10 @@ def collect_for_concert(concert: dict) -> Optional[dict]:
             event_date = item.get("eventDate", "")
             if not _event_date_in_range(event_date, concert["start_date"], concert["end_date"]):
                 continue
-            tracks = _parse_tracks(item.get("sets", {}))
             logger.info(
-                "셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
-                concert_id,
-                item.get("id"),
-                len(tracks),
+                "셋리스트 매칭: concert_id=%d, setlist_fm_id=%s", concert_id, item.get("id")
             )
-            return {
-                "concert_id": concert_id,
-                "setlist_fm_id": item.get("id"),
-                "attribution_url": item.get("url"),
-                "tracks": tracks,
-            }
+            return {"concert_id": concert_id, "setlist_fm_id": item.get("id")}
 
         total = int(data.get("total", 0))
         items_per_page = int(data.get("itemsPerPage", 20))
@@ -188,21 +163,10 @@ def collect() -> list[dict]:
                 if not _event_date_in_range(event_date, concert["start_date"], concert["end_date"]):
                     continue
 
-                tracks = _parse_tracks(item.get("sets", {}))
-                results.append(
-                    {
-                        "concert_id": concert_id,
-                        "setlist_fm_id": item.get("id"),
-                        "attribution_url": item.get("url"),
-                        "tracks": tracks,
-                    }
-                )
+                results.append({"concert_id": concert_id, "setlist_fm_id": item.get("id")})
                 seen_concert_ids.add(concert_id)
                 logger.info(
-                    "셋리스트 수집: concert_id=%d, setlist_fm_id=%s, 트랙 %d개",
-                    concert_id,
-                    item.get("id"),
-                    len(tracks),
+                    "셋리스트 매칭: concert_id=%d, setlist_fm_id=%s", concert_id, item.get("id")
                 )
                 update_concert_fetch_attempted(concert_id)
                 matched = True
