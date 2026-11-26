@@ -13,7 +13,9 @@ from collectors.kopis import (
     _parse_concert,
     _parse_kopis_date,
     _parse_relates,
+    _to_https_url,
     collect,
+    collect_by_id,
 )
 from db.repository import save_concerts
 
@@ -540,6 +542,61 @@ class TestFetchDetail:
         with patch("collectors.kopis.requests.get", return_value=mock_response):
             with pytest.raises(requests.HTTPError):
                 _fetch_detail("PF123456")
+
+
+class TestToHttpsUrl:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://www.kopis.or.kr/upload/pfmPoster/PF_PF1.gif",
+            "http://kopis.or.kr/upload/pfmPoster/PF_PF1.gif",
+        ],
+    )
+    def test_converts_kopis_http_to_https(self, url):
+        """http://(www.)kopis.or.kr/ 주소는 https://kopis.or.kr/로 바뀌어야 한다."""
+        assert _to_https_url(url) == "https://kopis.or.kr/upload/pfmPoster/PF_PF1.gif"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://kopis.or.kr/upload/pfmPoster/PF_PF1.gif",
+            "http://example.com/kopis.or.kr/a.jpg",
+            None,
+            "",
+        ],
+    )
+    def test_leaves_other_values_unchanged(self, url):
+        """이미 https이거나 KOPIS가 아닌 주소, 빈 값은 그대로 둬야 한다."""
+        assert _to_https_url(url) == url
+
+
+class TestImageUrlHttps:
+    _POSTER = "http://www.kopis.or.kr/upload/pfmPoster/PF_PF1.gif"
+    _STILL = "http://www.kopis.or.kr/upload/pfmIntroImage/PF_PF1_1.jpg"
+
+    def _mock_resp(self) -> MagicMock:
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.content = _make_detail_content(
+            "PF1", poster=self._POSTER, visit="Y", styurls=[self._STILL]
+        )
+        return resp
+
+    def test_fetch_detail_converts_poster_and_still_urls(self):
+        """_fetch_detail은 poster_url·still_urls를 https 주소로 반환해야 한다."""
+        with patch("collectors.kopis.requests.get", return_value=self._mock_resp()):
+            result = _fetch_detail("PF1")
+
+        assert result["poster_url"] == "https://kopis.or.kr/upload/pfmPoster/PF_PF1.gif"
+        assert result["still_urls"] == ["https://kopis.or.kr/upload/pfmIntroImage/PF_PF1_1.jpg"]
+
+    def test_collect_by_id_converts_poster_and_still_urls(self):
+        """collect_by_id도 poster_url·still_urls를 https 주소로 반환해야 한다."""
+        with patch("collectors.kopis.requests.get", return_value=self._mock_resp()):
+            result = collect_by_id("PF1")
+
+        assert result["poster_url"] == "https://kopis.or.kr/upload/pfmPoster/PF_PF1.gif"
+        assert result["still_urls"] == ["https://kopis.or.kr/upload/pfmIntroImage/PF_PF1_1.jpg"]
 
 
 # ─── TestParseKopisDate ───────────────────────────────────────────────────────

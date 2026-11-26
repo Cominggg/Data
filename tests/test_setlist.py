@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from collectors.setlist import _event_date_in_range, _parse_tracks, collect, collect_for_concert
+from collectors.setlist import _event_date_in_range, collect, collect_for_concert
 
 
 def _make_api_response(setlists: list[dict]) -> dict:
@@ -65,23 +65,18 @@ class TestSetlistCollect:
 
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0]["concert_id"] == 1
-        assert result[0]["setlist_fm_id"] == "abc123def"
-        assert result[0]["attribution_url"] == (
-            "https://www.setlist.fm/setlist/artist/2024/venue-abc123def.html"
-        )
 
-    def test_attribution_url_none_when_missing_from_response(self):
-        """API 응답에 url 필드가 없으면 attribution_url은 None이어야 한다."""
+    def test_result_contains_only_mapping_keys(self):
+        """collect() 결과 항목은 concert_id·setlist_fm_id 두 키만 가져야 한다 (트랙·URL 미저장)."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = _make_api_response([_sample_setlist(url=None)])
+        mock_response.json.return_value = _make_api_response([_sample_setlist()])
 
         with patch("collectors.setlist.get_completed_concerts", return_value=[_sample_concert()]):
             with patch("collectors.setlist.requests.get", return_value=mock_response):
                 result = collect()
 
-        assert result[0]["attribution_url"] is None
+        assert result[0] == {"concert_id": 1, "setlist_fm_id": "abc123def"}
 
     def test_targets_completed_concerts_only(self):
         """prfstate=공연완료 건에 대해서만 수집을 시도해야 한다.
@@ -308,44 +303,6 @@ class TestSetlistRetry:
         assert mock_get.call_count == 1
 
 
-class TestParseTracks:
-    def test_parses_songs_in_order(self):
-        """sets 안의 song 목록이 순서대로 파싱되어야 한다."""
-        sets_data = {
-            "set": [
-                {
-                    "song": [
-                        {"name": "Song A"},
-                        {"name": "Song B", "info": "acoustic"},
-                    ]
-                }
-            ]
-        }
-        result = _parse_tracks(sets_data)
-
-        assert len(result) == 2
-        assert result[0] == {"position": 1, "song_name": "Song A", "info": None}
-        assert result[1] == {"position": 2, "song_name": "Song B", "info": "acoustic"}
-
-    def test_returns_empty_for_empty_sets(self):
-        """sets가 비어있으면 빈 리스트를 반환해야 한다."""
-        assert _parse_tracks({}) == []
-        assert _parse_tracks({"set": []}) == []
-
-    def test_increments_position_across_multiple_sets(self):
-        """여러 set에 걸쳐 position이 연속으로 증가해야 한다."""
-        sets_data = {
-            "set": [
-                {"song": [{"name": "Song A"}]},
-                {"song": [{"name": "Song B"}]},
-            ]
-        }
-        result = _parse_tracks(sets_data)
-
-        assert result[0]["position"] == 1
-        assert result[1]["position"] == 2
-
-
 class TestSetlistFetchAttempted:
     """collect()에서 fetch_attempted_at 갱신 호출 검증."""
 
@@ -432,8 +389,8 @@ class TestCollectForConcert:
         with patch("collectors.setlist.time.sleep"):
             yield
 
-    def test_includes_attribution_url(self):
-        """단건 조회 결과에도 attribution_url이 포함되어야 한다."""
+    def test_returns_mapping_only(self):
+        """단건 조회 결과는 concert_id·setlist_fm_id 두 키만 가져야 한다."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = _make_api_response([_sample_setlist()])
@@ -441,9 +398,22 @@ class TestCollectForConcert:
         with patch("collectors.setlist.requests.get", return_value=mock_response):
             result = collect_for_concert(_sample_concert())
 
-        assert result["attribution_url"] == (
-            "https://www.setlist.fm/setlist/artist/2024/venue-abc123def.html"
-        )
+        assert result == {"concert_id": 1, "setlist_fm_id": "abc123def"}
+
+    def test_returns_none_when_no_date_match(self):
+        """공연 기간에 맞는 셋리스트가 없으면 None을 반환해야 한다."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "setlist": [_sample_setlist(eventDate="01-01-2025")],
+            "total": 1,
+            "itemsPerPage": 20,
+        }
+
+        with patch("collectors.setlist.requests.get", return_value=mock_response):
+            result = collect_for_concert(_sample_concert())
+
+        assert result is None
 
 
 class TestEventDateInRange:

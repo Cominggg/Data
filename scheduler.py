@@ -732,7 +732,7 @@ def collect_and_save_setlist(concert_id: int) -> dict:
 
     공연이 없으면 {"status": "not_found"}, 셋리스트가 없으면
     {"status": "skipped", "reason": "no_setlist_found"}, 성공 시
-    {"status": "ok", "concert_id", "setlist_fm_id", "attribution_url", "tracks"}를 반환한다.
+    {"status": "ok", "concert_id", "setlist_fm_id"}를 반환한다 (매핑만 저장, 트랙 미저장).
     """
     concert = get_concert_with_artist(concert_id)
     if concert is None:
@@ -748,8 +748,6 @@ def collect_and_save_setlist(concert_id: int) -> dict:
         "status": "ok",
         "concert_id": result["concert_id"],
         "setlist_fm_id": result["setlist_fm_id"],
-        "attribution_url": result.get("attribution_url"),
-        "tracks": result.get("tracks", []),
     }
 
 
